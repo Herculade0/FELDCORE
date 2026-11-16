@@ -76,12 +76,12 @@ Follow-ups
 
 Long-term, after the Debian package is the normal way to run FELDCORE. An Unraid-style immutable appliance, booting from a dedicated disk partition instead of a USB stick. This is a design note, not something the current daemon does.
 
-The running system is a Debian image (kernel plus a squashfs root), built with debootstrap, mkosi, or live-build. Each boot loads that image into RAM or mounts it read-only. A small persistent config partition, in the role of Unraid's `/boot/config`, holds FELDCORE state, network settings, share definitions, and container templates. Data, appdata, and VM disks stay on the storage disks. Updates write a new image into the inactive A/B slot and boot it; if that boot is not healthy, the machine falls back to the last good image. An installer ISO partitions the target disk. First boot reuses the first-start wizard.
+The running system is a Debian image (kernel plus a squashfs root), built with debootstrap, mkosi, or live-build. Each boot loads that image into RAM or mounts it read-only. A small persistent config partition, in the role of Unraid's `/boot/config`, holds FELDCORE state, network settings, share definitions, and container templates. Data, appdata, and VM disks stay on the storage disks. Updates write a new image into the inactive A/B slot and boot it; boot counting falls back to the last good image if that boot is not healthy. An installer ISO partitions the target disk. First boot reuses the first-start wizard.
 
 ### OS-1 — A bootable image
 - [ ] Build a Debian root with debootstrap, mkosi, or live-build
 - [ ] Kernel plus squashfs, mounted read-only or copied into RAM on boot
-- [ ] Boot from a disk partition, not from USB
+- [ ] Boot from a disk partition with systemd-boot, UEFI only, not from USB
 - [ ] Persistent config partition, mounted at a fixed path, holding FELDCORE state
 
 ### OS-2 — Installer ISO
@@ -91,20 +91,25 @@ The running system is a Debian image (kernel plus a squashfs root), built with d
 
 ### OS-3 — Atomic updates
 - [ ] Write the new image into the inactive slot and boot it
-- [ ] If that boot does not come up healthy, fall back to the previous slot
+- [ ] Use systemd-boot boot counting so a failed boot falls back to the previous slot
 - [ ] Keep the config partition out of the image, so an update does not wipe state
 
 ### OS-4 — Appliance layout
 - [ ] Data, appdata, and VM disks live on the storage disks, not on the OS slots
 - [ ] Share definitions and container templates stay on the config partition
+- [ ] Drivers and extra software ship as systemd-sysext images
+- [ ] apt stays available. Installs land in a persistent overlay or sysext layer that survives an image update, and a "reset to clean image" throws that layer away
 
-Open questions, unset on purpose:
+### Decisions
 
-- Bootloader: systemd-boot or GRUB, and UEFI only or BIOS as well
-- Secure Boot signing of the kernel and the image
-- How someone adds a driver or a package on an immutable root: an overlay, or systemd-sysext
-- How a machine already running FELDCORE on plain Debian moves onto the image
-- Whether the running system stays apt-based, or the image is the only way software changes
+- **Bootloader.** systemd-boot, UEFI only. A/B slots use boot counting.
+- **Secure Boot.** Off for the first image. Signing the kernel and the image comes later.
+- **Drivers and extras.** systemd-sysext images.
+- **Packages.** apt stays available. That fights a read-only root, so apt installs go into a persistent overlay or sysext layer that an image update does not wipe. "Reset to clean image" drops that layer and leaves the shipped image.
+
+### Still open
+
+- **Migration from a plain Debian install.** Not decided. The two options are: export the config, install the image, and import, or convert the running Debian system in place.
 
 ## Cross-cutting
 - [ ] Packaging: .deb, and a one-line curl installer
