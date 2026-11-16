@@ -58,7 +58,11 @@ type Service struct {
 	Engine     Engine
 	DataDir    string
 	ListenPort int
-	Log        *slog.Logger
+	// GatewayPort is feldcored's publish listener. Routes with Gateway set
+	// are reverse-proxied there so protection and Citizen ID run before the
+	// container. Zero keeps the older behaviour: Caddy dials the container.
+	GatewayPort int
+	Log         *slog.Logger
 	// Listen reports host ports already in use. Nil uses the kernel tables.
 	Listen func() []int
 }
@@ -94,6 +98,8 @@ type RouteInput struct {
 	Port      int
 	TLS       string
 	Enabled   bool
+	// Gateway sends the hostname to feldcored's publish listener.
+	Gateway bool
 }
 
 // View returns the current proxy settings.
@@ -191,6 +197,7 @@ func (s *Service) SetRoute(in RouteInput) error {
 		if in.Enabled {
 			next = append(next, store.WebRoute{
 				Container: in.Container, Hostname: host, Port: in.Port, TLS: tls, Enabled: true,
+				Gateway: in.Gateway,
 			})
 		}
 		st.Web.Routes = next
@@ -293,16 +300,41 @@ func (s *Service) Apply(ctx context.Context) error {
 		if !r.Enabled {
 			continue
 		}
-		mode, err := s.Engine.NetworkMode(ctx, r.Container)
-		if err != nil || mode == "host" || mode == "none" {
-			continue
-		}
-		_ = s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, r.Container)
+		_ = s.Attach(ctx, r.Container)
 	}
 	if s.Log != nil {
 		s.Log.Info("web proxy applied", "sites", len(sites), "acme", needsACME)
 	}
 	return nil
+}
+
+// Attach connects one container to the proxy network when a hostname points
+// at it. A private app bridge is a normal Docker network, so the proxy reaches
+// the app by name once the app is also on the proxy network. That is the same
+// path a container on any user-defined network already uses.
+//
+// Host and none have no second network. A container that shares another
+// container's network (a VPN workload, network mode container:<gateway>)
+// cannot join one either; its published port stays on the gateway.
+func (s *Service) Attach(ctx context.Context, name string) error {
+	if s == nil || s.Engine == nil || name == "" || s.Store == nil {
+		return nil
+	}
+	want := false
+	for _, r := range s.Store.Snapshot().Web.Routes {
+		if r.Enabled && r.Container == name {
+			want = true
+			break
+		}
+	}
+	if !want {
+		return nil
+	}
+	mode, err := s.Engine.NetworkMode(ctx, name)
+	if err != nil || mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") {
+		return nil
+	}
+	return s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, name)
 }
 
 // URLFor returns the browser URL for a container, or "" when it has no name.
@@ -358,6 +390,12 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 			if err == nil && mode == "none" {
 				return nil, input(r.Container + " has no network, so a hostname cannot reach it.")
 			}
+		}
+		// Publish routes stop at feldcored. Caddy still obtains the certificate
+		// and terminates TLS; the listener runs protection, Citizen ID, then
+		// the proxy to the container. Nothing new is placed in front of Caddy.
+		if r.Gateway && s.GatewayPort > 0 {
+			up = fmt.Sprintf("host.docker.internal:%d", s.GatewayPort)
 		}
 		tls := r.TLS
 		if tls == "" {

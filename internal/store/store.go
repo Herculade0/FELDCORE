@@ -53,15 +53,22 @@ type APIToken struct {
 	Revoked    bool       `json:"revoked,omitempty"`
 }
 
-// AuditEvent is one call made with an agent token.
+// AuditEvent is one recorded action. Agent-token calls and blocks from the
+// publish proxy share this log so a SIEM such as Wazuh can ingest one JSON
+// array. A publish block sets Action to "publish.block", Result to "denied",
+// and Detail["reason"] to rate, country, geo-unavailable, bot, empty-ua or
+// scanner. IP, Host and Detail are omitted for ordinary token calls.
 type AuditEvent struct {
-	ID        string    `json:"id"`
-	Time      time.Time `json:"time"`
-	TokenID   string    `json:"tokenId,omitempty"`
-	TokenName string    `json:"tokenName"`
-	Action    string    `json:"action"`
-	Target    string    `json:"target,omitempty"`
-	Result    string    `json:"result"`
+	ID        string            `json:"id"`
+	Time      time.Time         `json:"time"`
+	TokenID   string            `json:"tokenId,omitempty"`
+	TokenName string            `json:"tokenName"`
+	Action    string            `json:"action"`
+	Target    string            `json:"target,omitempty"`
+	Result    string            `json:"result"`
+	IP        string            `json:"ip,omitempty"`
+	Host      string            `json:"host,omitempty"`
+	Detail    map[string]string `json:"detail,omitempty"`
 }
 
 // SMB is a share's Windows file sharing configuration.
@@ -129,6 +136,9 @@ type State struct {
 	Remote RemoteConfig `json:"remote,omitempty"`
 	// Web is the built-in name and HTTPS proxy.
 	Web WebConfig `json:"web,omitempty"`
+	// Publish is the one-switch exposure of a container. Access levels are
+	// stored here; Citizen ID enforces them. Empty means nothing is published.
+	Publish Publish `json:"publish,omitempty"`
 	// Snapshots is retention and where container copies are kept.
 	Snapshots SnapshotConfig `json:"snapshots,omitempty"`
 	// VPN, Backup and Notify stay off until an administrator turns them on.
@@ -147,6 +157,9 @@ type PublicRoute struct {
 	Port      int    `json:"port"`
 	Enabled   bool   `json:"enabled"`
 	RecordID  string `json:"recordId,omitempty"`
+	// Gateway means the tunnel dials FELDCORE's publish listener, which
+	// applies protection and Citizen ID before proxying to the container.
+	Gateway bool `json:"gateway,omitempty"`
 }
 
 // RemoteConfig is the tunnel. Mode is "off", "token" or "api".
@@ -171,6 +184,50 @@ type WebRoute struct {
 	Port      int    `json:"port"`
 	TLS       string `json:"tls"`
 	Enabled   bool   `json:"enabled"`
+	// Gateway means Caddy sends the request to FELDCORE's publish listener
+	// instead of straight to the container. Caddy still terminates TLS.
+	Gateway bool `json:"gateway,omitempty"`
+}
+
+// Publish is the one-switch publish feature and the protection policy that
+// sits in front of every published app. Tokens and the GeoLite2 licence key
+// are not stored here.
+type Publish struct {
+	// BaseDomain overrides the web-address domain for new names. Empty means
+	// use Web.Domain, or home.arpa when that is empty too.
+	BaseDomain string         `json:"baseDomain,omitempty"`
+	Apps       []PublishedApp `json:"apps,omitempty"`
+	Protect    ProtectPolicy  `json:"protect,omitempty"`
+}
+
+// PublishedApp is one container exposed as subdomain.<base domain>.
+// Access is "public", "signed-in", "groups" or "admins". Groups is only
+// meaningful when Access is "groups". Citizen ID enforces Access; this
+// record only stores it.
+type PublishedApp struct {
+	Container string   `json:"container"`
+	Subdomain string   `json:"subdomain"`
+	Hostname  string   `json:"hostname"`
+	Port      int      `json:"port"`
+	Access    string   `json:"access"`
+	Groups    []string `json:"groups,omitempty"`
+	Enabled   bool     `json:"enabled"`
+}
+
+// ProtectPolicy is the per-request check in front of every published app.
+// Zero means "not chosen yet": the proxy then uses its built-in defaults
+// (a modest rate limit and bot blocking, no country list).
+type ProtectPolicy struct {
+	Configured bool `json:"configured,omitempty"`
+	// RatePerSec is requests per second for one client IP on one app.
+	RatePerSec float64 `json:"ratePerSec,omitempty"`
+	RateBurst  int     `json:"rateBurst,omitempty"`
+	// CountryMode is "off", "allow" or "block".
+	CountryMode   string   `json:"countryMode,omitempty"`
+	Countries     []string `json:"countries,omitempty"`
+	GeoEnabled    bool     `json:"geoEnabled,omitempty"`
+	BlockBots     bool     `json:"blockBots,omitempty"`
+	BlockScanners bool     `json:"blockScanners,omitempty"`
 }
 
 // WebConfig is the reverse proxy. Disabled, with no routes, is the default.
@@ -338,7 +395,19 @@ func (s State) clone() State {
 			c.APITokens[i] = t
 		}
 	}
-	c.Audit = append([]AuditEvent(nil), s.Audit...)
+	if s.Audit != nil {
+		c.Audit = make([]AuditEvent, len(s.Audit))
+		for i, ev := range s.Audit {
+			if ev.Detail != nil {
+				d := make(map[string]string, len(ev.Detail))
+				for k, v := range ev.Detail {
+					d[k] = v
+				}
+				ev.Detail = d
+			}
+			c.Audit[i] = ev
+		}
+	}
 	c.Shares = make([]Share, len(s.Shares))
 	for i, sh := range s.Shares {
 		sh.SMB.Users = append([]string(nil), sh.SMB.Users...)
@@ -362,6 +431,12 @@ func (s State) clone() State {
 	}
 	c.Remote.Routes = append([]PublicRoute(nil), s.Remote.Routes...)
 	c.Web.Routes = append([]WebRoute(nil), s.Web.Routes...)
+	c.Publish.Apps = make([]PublishedApp, len(s.Publish.Apps))
+	for i, app := range s.Publish.Apps {
+		app.Groups = append([]string(nil), app.Groups...)
+		c.Publish.Apps[i] = app
+	}
+	c.Publish.Protect.Countries = append([]string(nil), s.Publish.Protect.Countries...)
 	c.VPN.Tunnels = make([]VPNTunnel, len(s.VPN.Tunnels))
 	for i, t := range s.VPN.Tunnels {
 		t.Forwards = append([]VPNForward(nil), t.Forwards...)

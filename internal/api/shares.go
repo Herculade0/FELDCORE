@@ -48,6 +48,13 @@ func (s *Server) handleShareDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleServiceInstall(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "service")
+	if name == "smb" {
+		name = "samba"
+	}
+	if s.acceptInstall(w, r, name) {
+		return
+	}
 	if err := s.shares.Install(r.Context(), chi.URLParam(r, "service")); err != nil {
 		s.fail(w, r, err)
 		return

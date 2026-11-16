@@ -21,6 +21,7 @@ import FileBrowser from "./FileBrowser";
 import ShareDialog from "./ShareDialog";
 import UsersCard from "./UsersCard";
 import { ACCESS_LABEL, type Overview, type ProtoStatus, type ServiceStatus, type Share } from "./types";
+import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 
 export default function SharesPage() {
   const [data, setData] = useState<Overview | null>(null);
@@ -198,21 +199,7 @@ function ServiceCard({
   status: ServiceStatus;
   onInstalled: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const install = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api(`/shares/services/${service}/install`, { method: "POST" });
-      onInstalled();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const inst = useInstall(service === "smb" ? "samba" : "nfs", onInstalled);
 
   const pill = !status.installed
     ? { label: "Not installed", cls: "bg-track text-ink-2" }
@@ -235,19 +222,24 @@ function ServiceCard({
             {pill.label}
           </span>
         ) : (
-          <Button size="sm" variant="primary" onClick={install} loading={busy}>
-            {!busy && <Download size={13} strokeWidth={2.75} />}
-            {busy ? "Installing…" : "Install"}
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => void inst.start().catch(() => {})}
+            loading={inst.active || inst.starting}
+          >
+            {!(inst.active || inst.starting) && <Download size={13} strokeWidth={2.75} />}
+            {inst.active ? "Installing…" : "Install"}
           </Button>
         )}
       </div>
-      {busy && (
-        <p className="mt-3 text-xs font-medium text-ink-3">
-          Downloading and installing. This usually takes under a minute.
-        </p>
+      {(inst.error || status.error) && (
+        <p className="mt-3 text-xs font-semibold text-bad">{inst.error || status.error}</p>
       )}
-      {(error || status.error) && (
-        <p className="mt-3 text-xs font-semibold text-bad">{error || status.error}</p>
+      {showInstall(inst.job, !status.installed) && inst.job && (
+        <div className="mt-3">
+          <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
+        </div>
       )}
     </Card>
   );
