@@ -76,7 +76,7 @@ Follow-ups
 
 A private catalogue merged on top of Community Apps: game profiles, VM templates, app bundles, SDR apps, and fixed versions of broken templates. It builds on the App Store (M2b). Design and scope: [FELDCORE-STORE.md](FELDCORE-STORE.md).
 
-- [ ] MVP — extra store sources, a signed feed from a private GitHub repo, merge and override, FELDCORE badge
+- [ ] MVP — one sign-in for the private `Herculade0/feldcore-store` feed, Community Apps and FELDCORE Store toggles, manual and automatic refresh, merge and override, FELDCORE badge
 - [ ] Games, bundles, and SDR device claims
 - [ ] One-click VMs from store templates, after M4
 
