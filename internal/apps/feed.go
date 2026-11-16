@@ -386,7 +386,9 @@ func categoryCounts(counts map[string]int, labels map[string]string) []Category 
 }
 
 func cleanCategories(in []string) []string {
-	var out []string
+	// An empty list must be a JSON array. A nil slice becomes null, and the
+	// store page crashes when it spreads a missing category list during search.
+	out := []string{}
 	seen := map[string]bool{}
 	for _, c := range in {
 		c = strings.TrimSpace(c)
