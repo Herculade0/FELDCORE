@@ -37,6 +37,7 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **Docker** — run, edit and manage containers (state, live stats, logs, lifecycle); Unraid-style paths/ports/variables/labels/devices, a folder picker, GPU sharing and an allocations table; installs Docker for you | ✅ working |
 | **App Store** — browse and search the Unraid Community Applications catalogue; choosing an app opens the container setup prefilled from its template | ✅ working |
 | **Settings** — appearance, host, network, services, firewall, updates, App Store feed | ✅ working |
+| **Terminal** — host shell, and a console in each running container | ✅ working |
 | **VMs** — KVM/libvirt management | 🧭 later |
 
 ## Architecture
@@ -181,6 +182,11 @@ or a disposable VM.
   share (created with the other default shares, above).
 - GPU sharing passes `/dev/dri` into the container and adds the groups that
   own it. Nothing is installed for this.
+- The host terminal and each container console are a shell for the signed-in
+  administrator only. The host shell is closed when the window closes, or
+  after 15 minutes with no input. A container console is `docker exec` into
+  that container (bash, or sh if bash is not there) and is only offered while
+  the container is running.
 
 ## Layout
 
