@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Herculade0/feldcore/internal/store"
+	"github.com/Herculade0/feldcore/internal/vpn"
 )
 
 // Labels FELDCORE sets on containers it manages.
@@ -53,6 +54,15 @@ func normaliseSpec(s *Spec) error {
 	s.Network = strings.TrimSpace(s.Network)
 	if s.Network == "" || s.Network == "default" {
 		s.Network = "bridge"
+	}
+	s.VPN = strings.TrimSpace(s.VPN)
+	if s.VPN != "" {
+		if err := vpn.ValidateID(s.VPN); err != nil {
+			return invalid("Choose a VPN tunnel, or leave routing off.")
+		}
+		if s.Name == "" {
+			return invalid("Name the container before routing it through a VPN.")
+		}
 	}
 	if !networkRe.MatchString(s.Network) {
 		return invalid("%q is not a valid network name.", s.Network)
@@ -230,6 +240,7 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 	bindings := map[string][]portBinding{}
 	binds := []string{}
 	devices := []deviceMapping{}
+	var routePorts []vpn.Port
 
 	for _, c := range s.Configs {
 		switch c.Type {
@@ -243,6 +254,9 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 				hostPort = strconv.Itoa(c.HostPort)
 			}
 			bindings[key] = append(bindings[key], portBinding{HostIP: c.HostIP, HostPort: hostPort})
+			routePorts = append(routePorts, vpn.Port{
+				HostIP: c.HostIP, Host: c.HostPort, Container: c.ContainerPort, Proto: c.Proto,
+			})
 		case TypeVariable:
 			env = append(env, c.Key+"="+c.Value)
 		case TypeLabel:
@@ -284,6 +298,29 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 	}
 	if s.ExtraParams != "" {
 		labels[extraLabel] = strings.TrimSpace(s.ExtraParams)
+	}
+	if s.Gateway {
+		labels[vpn.LabelGateway] = "true"
+	}
+	if s.VPN != "" {
+		// The container shares the gateway's network. Its own published ports
+		// would be rejected by Docker, and would also be a way around the
+		// kill switch, so they move onto the gateway instead.
+		chosen := s.Network
+		plan, err := vpn.Route(vpn.Workload{TunnelID: s.VPN, Network: s.Network, Ports: routePorts})
+		if err != nil {
+			s.Network = "none"
+			bindings = map[string][]portBinding{}
+		} else {
+			s.Network = plan.NetworkMode
+			bindings = map[string][]portBinding{}
+			labels[vpn.LabelTunnel] = s.VPN
+			labels[vpn.LabelKill] = "true"
+			labels[vpn.LabelNetwork] = chosen
+			if plan.PortLabel != "" {
+				labels[vpn.LabelPorts] = plan.PortLabel
+			}
+		}
 	}
 
 	cfg["Image"] = s.Image
@@ -340,6 +377,12 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 	if s.RestartPolicy == "" {
 		s.RestartPolicy = "no"
 	}
+	if id := labels[vpn.LabelTunnel]; id != "" {
+		s.VPN = id
+		if n := labels[vpn.LabelNetwork]; n != "" {
+			s.Network = n
+		}
+	}
 
 	for _, b := range strSliceOf(host["Binds"]) {
 		parts := strings.SplitN(b, ":", 3)
@@ -379,6 +422,19 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 		}
 		return ports[i].Proto < ports[j].Proto
 	})
+	// Ports on a routed container live on the gateway. The label is the copy
+	// the edit form needs, because this container's own bindings are empty.
+	if labels[vpn.LabelTunnel] != "" && labels[vpn.LabelPorts] != "" {
+		if decoded, err := vpn.DecodePorts(labels[vpn.LabelPorts]); err == nil {
+			ports = nil
+			for _, p := range decoded {
+				ports = append(ports, Config{
+					Type: TypePort, HostIP: p.HostIP, HostPort: p.Host,
+					ContainerPort: p.Container, Proto: p.Proto,
+				})
+			}
+		}
+	}
 	s.Configs = append(s.Configs, ports...)
 
 	imageEnv := map[string]bool{}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Herculade0/feldcore/internal/store"
+	"github.com/Herculade0/feldcore/internal/vpn"
 )
 
 // ManagedLabel marks containers FELDCORE created, so the UI can tell them from
@@ -49,6 +50,10 @@ type Manager struct {
 	// editMu makes container replacement one-at-a-time.
 	editMu sync.Mutex
 
+	// routeGuard is the VPN kill switch. It is called with the tunnel id
+	// before a routed container is started, and nil for every other container.
+	routeGuard func(context.Context, string) error
+
 	// statusCache avoids hammering the socket (and apt/dpkg checks) on every
 	// poll; status rarely changes second to second.
 	mu       sync.Mutex
@@ -76,6 +81,7 @@ func (m *Manager) Options(ctx context.Context) Options {
 		Networks:     []string{"bridge", "host", "none"},
 		GPUs:         gpus,
 		GPUAvailable: gpuAvailable(gpus),
+		VPNs:         []VPNChoice{},
 	}
 	var nets []struct {
 		Name string `json:"Name"`
@@ -213,18 +219,20 @@ func configuredPorts(in *inspectContainer) []Port {
 // address, shown for containers that answer on it (bridge and host modes).
 func toContainer(rc apiContainer, hostAddr string) Container {
 	c := Container{
-		ID:      shortID(rc.ID),
-		Name:    cleanName(rc.Names),
-		Image:   rc.Image,
-		State:   rc.State,
-		Status:  rc.Status,
-		Created: rc.Created,
-		Managed: rc.Labels[ManagedLabel] == "true",
-		Compose: rc.Labels[composeLabel] != "",
-		GPU:     rc.Labels[GPULabel] == "true",
-		Role:    rc.Labels[RoleLabel],
-		Icon:    containerIcon(rc.Labels),
-		IPs:     []string{},
+		ID:         shortID(rc.ID),
+		Name:       cleanName(rc.Names),
+		Image:      rc.Image,
+		State:      rc.State,
+		Status:     rc.Status,
+		Created:    rc.Created,
+		Managed:    rc.Labels[ManagedLabel] == "true",
+		Compose:    rc.Labels[composeLabel] != "",
+		GPU:        rc.Labels[GPULabel] == "true",
+		Role:       rc.Labels[RoleLabel],
+		VPN:        rc.Labels[vpn.LabelTunnel],
+		VPNGateway: rc.Labels[vpn.LabelGateway] == "true",
+		Icon:       containerIcon(rc.Labels),
+		IPs:        []string{},
 	}
 
 	// Where the container can be reached. On the default bridge and in host
@@ -285,8 +293,55 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 	return c
 }
 
+// RuntimeInfo is the process id and bridge address of a container.
+func (m *Manager) RuntimeInfo(ctx context.Context, id string) (pid int, ip string, running bool, err error) {
+	raw, err := m.c.getRaw(ctx, "/containers/"+esc(id)+"/json")
+	if err != nil {
+		return 0, "", false, err
+	}
+	var body struct {
+		State struct {
+			Pid     int  `json:"Pid"`
+			Running bool `json:"Running"`
+		} `json:"State"`
+		NetworkSettings struct {
+			IPAddress string `json:"IPAddress"`
+			Networks  map[string]struct {
+				IPAddress string `json:"IPAddress"`
+			} `json:"Networks"`
+		} `json:"NetworkSettings"`
+	}
+	if err := decodeRaw(raw, &body); err != nil {
+		return 0, "", false, err
+	}
+	ip = body.NetworkSettings.IPAddress
+	if ip == "" {
+		for _, n := range body.NetworkSettings.Networks {
+			if n.IPAddress != "" {
+				ip = n.IPAddress
+				break
+			}
+		}
+	}
+	return body.State.Pid, ip, body.State.Running, nil
+}
+
+// SetRouteGuard installs the VPN kill switch. A nil guard allows every start.
+func (m *Manager) SetRouteGuard(fn func(context.Context, string) error) {
+	m.routeGuard = fn
+}
+
 // Start, Stop, Restart and Remove act on a container by id or name.
 func (m *Manager) Start(ctx context.Context, id string) error {
+	if m.routeGuard != nil {
+		if in, err := m.inspect(ctx, id); err == nil {
+			if tunnel := strMapOf(in.Config["Labels"])[vpn.LabelTunnel]; tunnel != "" {
+				if err := m.routeGuard(ctx, tunnel); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	return m.c.postJSON(ctx, "/containers/"+esc(id)+"/start", nil, nil, nil)
 }
 

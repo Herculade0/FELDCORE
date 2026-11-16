@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -57,6 +58,10 @@ func (m *Manager) Create(ctx context.Context, s Spec) (string, error) {
 
 	if s.Autostart {
 		if err := m.Start(ctx, id); err != nil {
+			var ie *InputError
+			if errors.As(err, &ie) {
+				return shortID(id), invalid("%s The container was created and left stopped.", ie.Msg)
+			}
 			return shortID(id), &OpError{fmt.Sprintf("The container was created but would not start: %v", err)}
 		}
 	}

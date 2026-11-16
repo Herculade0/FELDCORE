@@ -21,6 +21,8 @@ export interface Container {
   icon?: string;
   network: string;
   ips: string[];
+  vpn?: string;
+  vpnGateway?: boolean;
   cpuPct: number;
   memUsed: number;
   memLimit: number;
@@ -81,6 +83,8 @@ export interface Spec {
   icon: string;
   extraParams: string;
   privileged: boolean;
+  /** Tunnel id, or empty to stay on the selected network. */
+  vpn: string;
 }
 
 export interface SpecInfo {
@@ -97,10 +101,20 @@ export interface Gpu {
   note?: string;
 }
 
+export interface VpnChoice {
+  id: string;
+  name: string;
+  provider: string;
+  server?: string;
+  country?: string;
+  enabled: boolean;
+}
+
 export interface Options {
   networks: string[];
   gpus: Gpu[];
   gpuAvailable: boolean;
+  vpns?: VpnChoice[];
 }
 
 export const CONFIG_TYPES: { key: ConfigType; label: string }[] = [

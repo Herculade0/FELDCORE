@@ -20,25 +20,29 @@ import (
 	"github.com/Herculade0/feldcore/internal/api"
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/remote"
+	"github.com/Herculade0/feldcore/internal/runtime"
 	"github.com/Herculade0/feldcore/internal/secrets"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
+	"github.com/Herculade0/feldcore/internal/version"
 	"github.com/Herculade0/feldcore/internal/vm"
+	"github.com/Herculade0/feldcore/internal/vpn"
 	"github.com/Herculade0/feldcore/web"
 )
 
 func main() {
+	cfg := config.Load()
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
-
-	cfg := config.Load()
 
 	webRoot, err := web.Dist()
 	if err != nil {
@@ -113,6 +117,14 @@ func main() {
 	}
 
 	dockerMgr := docker.NewManager(cfg.DockerSocket, st, log)
+	rt := &runtime.Docker{M: dockerMgr}
+	vpnSvc := &vpn.Service{Store: st, Secrets: box, RT: rt, Log: log}
+	dockerMgr.SetRouteGuard(vpnSvc.AllowStart)
+	backups := &backup.Service{Store: st, Secrets: box, DataDir: cfg.DataDir, SharesRoot: cfg.SharesRoot, Log: log}
+	mail := &notify.Service{
+		Store: st, Secrets: box, Bridge: runtime.Bridge{D: rt},
+		DataDir: cfg.DataDir, Version: version.Current, Log: log,
+	}
 	remoteSvc := &remote.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
 		Binary:     &remote.HostCloudflared{Dir: filepath.Join(cfg.DataDir, "bin")},
@@ -128,6 +140,29 @@ func main() {
 		return filepath.Join(cfg.SharesRoot, "system", "snapshots")
 	})
 	snapSvc.Log = log
+	go vpnSvc.Restore(ctx)
+	go vpnSvc.KeepForwarded(ctx)
+	go backups.Loop(ctx)
+	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
+		cs, err := dockerMgr.Containers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]notify.Container, 0, len(cs))
+		for _, c := range cs {
+			out = append(out, notify.Container{Name: c.Name, Running: c.State == "running"})
+		}
+		return out, nil
+	}, wiz.LatestRelease, func() bool {
+		snap := st.Snapshot()
+		if snap.Prefs.Touched {
+			return snap.Prefs.UpdateCheck
+		}
+		if snap.Wizard != nil {
+			return snap.Wizard.UpdateCheck
+		}
+		return false
+	})
 	go func() {
 		if err := remoteSvc.Sync(ctx); err != nil {
 			log.Warn("remote access was not applied", "err", err)
@@ -173,6 +208,9 @@ func main() {
 		SkipWizard: cfg.SkipWizard,
 		WebRoot:    webRoot,
 		Log:        log,
+		VPN:        vpnSvc,
+		Backups:    backups,
+		Mail:       mail,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
