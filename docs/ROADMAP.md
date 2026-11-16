@@ -78,6 +78,14 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 - [ ] The queue records who asked, which token, the exact action, and the decision in the audit log
 - [ ] A token still cannot open a shell on its own. If a shell is ever offered to an agent, that request waits for approval like the other destructive actions
 
+## M2e — Internal Affairs
+A locked cabinet of Markdown case files. Agents file a report when they change something, hit an error, or write up what they found. Design only: [INTERNAL-AFFAIRS.md](INTERNAL-AFFAIRS.md).
+- [ ] Locked share of Obsidian-compatible Markdown under the shares root. Agents append; they cannot rewrite or delete
+- [ ] Token scopes `ia:file` and `ia:read`, not included in `admin`
+- [ ] MCP and REST: file a report, append, search, get, list recent. Scrub secrets before saving
+- [ ] Internal Affairs page: timeline, filters, report viewer
+- Later: SMB reading room, withdrawing a report, git history, Proton Drive backup
+
 ## M3 — Settings
 - [ ] Users & authentication management
 - [ ] Network overview / hostname
