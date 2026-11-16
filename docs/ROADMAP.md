@@ -106,7 +106,15 @@ The running system is a Debian image (kernel plus a squashfs root), built with d
 - **Secure Boot.** Off for the first image. Signing the kernel and the image comes later.
 - **Drivers and extras.** systemd-sysext images. Apps are Docker containers.
 - **Packages.** Image only. The running system has no apt. The OS changes only when an image is swapped.
-- **Migration from a plain Debian install.** Export the config, install the image fresh, and import the config. The installer writes only the chosen OS disk, so data disks stay as they are. The importer points shares and containers back at those existing paths. In-place conversion of the running Debian system is rejected: it is too risky and too fiddly.
+
+### In use
+
+The machine you run is the booted image plus the config partition.
+
+- **Updates.** A new OS image is written into the inactive slot and used on the next boot. Nothing is upgraded in place.
+- **Rollback.** Boot counting returns to the previous image if the new one does not come up healthy. The boot menu can select that previous slot by hand.
+- **Config backup and recovery.** State, network, shares, and container templates live on the config partition. Restoring a copy of that partition puts the settings back. Disks that hold data, appdata, and VMs are not part of that copy.
+- **Drivers.** A driver or other extra is a systemd-sysext image on the config partition. It is merged at boot and is not built into the OS image.
 
 ## Cross-cutting
 - [ ] Packaging: .deb, and a one-line curl installer
