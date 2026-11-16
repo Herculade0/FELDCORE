@@ -19,20 +19,31 @@ import (
 	"github.com/Herculade0/feldcore/internal/api"
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/notify"
+	"github.com/Herculade0/feldcore/internal/runtime"
+	"github.com/Herculade0/feldcore/internal/secrets"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
+	"github.com/Herculade0/feldcore/internal/version"
+	"github.com/Herculade0/feldcore/internal/vpn"
 	"github.com/Herculade0/feldcore/web"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	slog.SetDefault(log)
-
 	cfg := config.Load()
+
+	box, err := secrets.Open(cfg.DataDir)
+	if err != nil {
+		slog.Error("cannot open the secrets store", "err", err)
+		os.Exit(1)
+	}
+	log := slog.New(secrets.NewRedactingHandler(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}), box))
+	slog.SetDefault(log)
 
 	webRoot, err := web.Dist()
 	if err != nil {
@@ -98,12 +109,45 @@ func main() {
 		log.Warn("not running as root: shares cannot be applied to the system")
 	}
 
+	dock := docker.NewManager(cfg.DockerSocket, st, log)
+	rt := &runtime.Docker{M: dock}
+	vpnSvc := &vpn.Service{Store: st, Secrets: box, RT: rt, Log: log}
+	dock.SetRouteGuard(vpnSvc.AllowStart)
+	backups := &backup.Service{Store: st, Secrets: box, DataDir: cfg.DataDir, SharesRoot: cfg.SharesRoot, Log: log}
+	mail := &notify.Service{
+		Store: st, Secrets: box, Bridge: runtime.Bridge{D: rt},
+		DataDir: cfg.DataDir, Version: version.Current, Log: log,
+	}
+	go vpnSvc.Restore(ctx)
+	go vpnSvc.KeepForwarded(ctx)
+	go backups.Loop(ctx)
+	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
+		cs, err := dock.Containers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]notify.Container, 0, len(cs))
+		for _, c := range cs {
+			out = append(out, notify.Container{Name: c.Name, Running: c.State == "running"})
+		}
+		return out, nil
+	}, wiz.LatestRelease, func() bool {
+		snap := st.Snapshot()
+		if snap.Prefs.Touched {
+			return snap.Prefs.UpdateCheck
+		}
+		if snap.Wizard != nil {
+			return snap.Wizard.UpdateCheck
+		}
+		return false
+	})
+
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
 		Auth:    auth.New(st),
 		Shares:  shareMgr,
-		Docker:  docker.NewManager(cfg.DockerSocket, st, log),
+		Docker:  dock,
 		Apps: apps.New(apps.Deps{
 			DataDir:    cfg.DataDir,
 			SharesRoot: cfg.SharesRoot,
@@ -121,6 +165,9 @@ func main() {
 		SkipWizard: cfg.SkipWizard,
 		WebRoot:    webRoot,
 		Log:        log,
+		VPN:        vpnSvc,
+		Backups:    backups,
+		Mail:       mail,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

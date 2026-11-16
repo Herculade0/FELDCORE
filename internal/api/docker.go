@@ -36,6 +36,10 @@ func (s *Server) handleDockerCreate(w http.ResponseWriter, r *http.Request) {
 	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
+	if err := s.syncVPN(r, spec); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	id, err := s.docker.Create(r.Context(), spec)
 	if err != nil {
 		s.fail(w, r, err)
@@ -60,6 +64,14 @@ func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
+	s.quietName(r, chi.URLParam(r, "id"))
+	if spec.Name != "" {
+		s.quietName(r, spec.Name)
+	}
+	if err := s.syncVPN(r, spec); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	id, err := s.docker.Update(r.Context(), chi.URLParam(r, "id"), spec)
 	if err != nil {
 		s.fail(w, r, err)
@@ -69,7 +81,16 @@ func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerOptions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.docker.Options(r.Context()))
+	opts := s.docker.Options(r.Context())
+	if s.vpn != nil {
+		for _, c := range s.vpn.Choices() {
+			opts.VPNs = append(opts.VPNs, docker.VPNChoice{
+				ID: c.ID, Name: c.Name, Provider: c.Provider,
+				Server: c.Server, Country: c.Country, Enabled: c.Enabled,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, opts)
 }
 
 func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +102,7 @@ func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerStop(w http.ResponseWriter, r *http.Request) {
+	s.quietName(r, chi.URLParam(r, "id"))
 	if err := s.docker.Stop(r.Context(), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, r, err)
 		return
@@ -89,6 +111,7 @@ func (s *Server) handleDockerStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerRestart(w http.ResponseWriter, r *http.Request) {
+	s.quietName(r, chi.URLParam(r, "id"))
 	if err := s.docker.Restart(r.Context(), chi.URLParam(r, "id")); err != nil {
 		s.fail(w, r, err)
 		return
@@ -99,7 +122,21 @@ func (s *Server) handleDockerRestart(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDockerRemove(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("force") == "1"
 	removeImage := r.URL.Query().Get("image") == "1"
+	name := ""
+	if cs, err := s.docker.Containers(r.Context()); err == nil {
+		id := chi.URLParam(r, "id")
+		for _, c := range cs {
+			if c.ID == id || c.Name == id {
+				name = c.Name
+				break
+			}
+		}
+	}
+	s.quietName(r, chi.URLParam(r, "id"))
 	out, err := s.docker.Remove(r.Context(), chi.URLParam(r, "id"), force, removeImage)
+	if err == nil {
+		s.detachVPN(r, name)
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return

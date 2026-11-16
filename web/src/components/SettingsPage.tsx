@@ -19,6 +19,9 @@ import { shortCpu } from "../lib/format";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, SelectField, TextField, Toggle } from "./form";
 import AgentAccessCard from "./AgentAccess";
+import VPNSettings from "./settings/VPNSettings";
+import DriveBackup from "./settings/DriveBackup";
+import MailNotifications from "./settings/MailSettings";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -141,6 +144,9 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
         <>
           <SystemCard settings={settings} onSaved={reload} />
           <NetworkCard settings={settings} onSaved={reload} />
+          <VPNSettings />
+          <DriveBackup />
+          <MailNotifications />
           <ServicesCard services={settings.services} onSaved={reload} />
           <SecurityCard settings={settings} onSaved={reload} />
           <AgentAccessCard onOpenAudit={onOpenAudit} />

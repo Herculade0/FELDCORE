@@ -41,6 +41,7 @@ const NEW_SPEC: Spec = {
   icon: "",
   extraParams: "",
   privileged: false,
+  vpn: "",
 };
 
 /** Fill fields the server omits when they are empty. */
@@ -48,6 +49,7 @@ function hydrate(s: Spec): Spec {
   return {
     ...NEW_SPEC,
     ...s,
+    vpn: s.vpn ?? "",
     configs: (s.configs ?? []).map((c) => ({ ...blankConfig(c.type), ...c })),
   };
 }
@@ -108,7 +110,7 @@ export default function ContainerDialog({
   useEffect(() => {
     api<Options>("/docker/options")
       .then(setOptions)
-      .catch(() => setOptions({ networks: ["bridge", "host", "none"], gpus: [], gpuAvailable: false }));
+      .catch(() => setOptions({ networks: ["bridge", "host", "none"], gpus: [], gpuAvailable: false, vpns: [] }));
     api<{ images: Image[] }>("/docker/images")
       .then((r) => setImages(r.images ?? []))
       .catch(() => {});
@@ -266,6 +268,28 @@ export default function ContainerDialog({
                 ))}
               </SelectField>
               <SelectField
+                className="sm:col-span-2"
+                label="Route through VPN"
+                value={spec.vpn}
+                onChange={(e) => set({ vpn: e.target.value })}
+                hint={
+                  spec.vpn
+                    ? "Uses the tunnel's gateway network. If the tunnel drops, this container has no traffic."
+                    : "Leave this off to use the network type above. Add tunnels in Settings → VPN."
+                }
+              >
+                <option value="">Do not use a VPN</option>
+                {(options?.vpns ?? []).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.provider === "proton" ? "Proton" : "WireGuard"}
+                    {v.name ? ` · ${v.name}` : ""}
+                    {v.country ? ` · ${v.country}` : ""}
+                    {v.server ? ` · ${v.server}` : ""}
+                    {!v.enabled ? " (off)" : ""}
+                  </option>
+                ))}
+              </SelectField>
+              <SelectField
                 label="Restart policy"
                 value={spec.restartPolicy}
                 onChange={(e) => set({ restartPolicy: e.target.value })}
@@ -277,6 +301,21 @@ export default function ContainerDialog({
                 ))}
               </SelectField>
             </div>
+
+            {spec.vpn && (
+              <Alert tone="info">
+                This container runs through the VPN gateway
+                {(options?.vpns ?? []).some((v) => v.id === spec.vpn && v.provider === "proton")
+                  ? " (Proton)"
+                  : ""}
+                . The kill switch leaves it with no network if the tunnel drops. Published ports move onto the gateway.
+                {(options?.vpns ?? [])
+                  .filter((v) => v.id === spec.vpn)
+                  .map((v) =>
+                    v.server || v.country ? ` ${[v.country, v.server].filter(Boolean).join(" · ")}.` : "",
+                  )}
+              </Alert>
+            )}
 
             <div className="flex min-w-0 items-start gap-3">
               <TextField
