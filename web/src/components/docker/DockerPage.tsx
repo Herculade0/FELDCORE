@@ -28,6 +28,7 @@ import { TerminalButton, useTerminal } from "../Terminal";
 import { stateStyle, type Container, type DockerStatus } from "./types";
 import AddressDialog from "./AddressDialog";
 import SnapshotsDialog from "./SnapshotsDialog";
+import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 
 export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
@@ -369,21 +370,7 @@ function DockerUnavailable({
   status: DockerStatus;
   onInstalled: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const install = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api("/docker/install", { method: "POST" });
-      onInstalled();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const inst = useInstall("docker", onInstalled);
 
   return (
     <Card className="flex flex-col items-center px-6 py-12 text-center">
@@ -396,9 +383,14 @@ function DockerUnavailable({
           "Install Docker to run containers from this page. FELDCORE installs your distribution's Docker package and starts it."}
       </p>
       {status.canInstall ? (
-        <Button variant="primary" className="mt-6" onClick={install} loading={busy}>
-          {!busy && <Download size={15} strokeWidth={2.75} />}
-          {busy ? "Installing Docker…" : "Install Docker"}
+        <Button
+          variant="primary"
+          className="mt-6"
+          onClick={() => void inst.start().catch(() => {})}
+          loading={inst.active || inst.starting}
+        >
+          {!(inst.active || inst.starting) && <Download size={15} strokeWidth={2.75} />}
+          {inst.active ? "Installing Docker…" : "Install Docker"}
         </Button>
       ) : (
         !status.installed && (
@@ -407,14 +399,14 @@ function DockerUnavailable({
           </p>
         )
       )}
-      {busy && (
-        <p className="mt-3 text-xs font-medium text-ink-3">
-          This downloads a few hundred MB and can take a couple of minutes.
-        </p>
-      )}
-      {error && (
+      {inst.error && (
         <div className="mt-4 w-full max-w-md">
-          <Alert>{error}</Alert>
+          <Alert>{inst.error}</Alert>
+        </div>
+      )}
+      {showInstall(inst.job, !status.installed) && inst.job && (
+        <div className="mt-4 w-full max-w-xl text-left">
+          <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
         </div>
       )}
     </Card>

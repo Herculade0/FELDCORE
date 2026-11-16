@@ -93,7 +93,7 @@ All of them are read-only. There is no shell, exec, or terminal tool.
 
 ## Audit
 
-**Audit** in the sidebar lists every call authenticated with a token: token name, action, target, time and result (`ok`, `denied` or `error`). Browser sign-in is not listed. The log keeps the newest 1,000 entries, and drops anything older than 90 days.
+**Audit** in the sidebar lists every call authenticated with a token, and every package install started from the UI: token name (or `admin` for an install), action, target, time and result (`ok`, `denied` or `error`). An install writes `install started`, then `install finished` or `install failed`. Browser sign-in is not listed. The log keeps the newest 1,000 entries, and drops anything older than 90 days.
 
 ## If a token leaks
 
