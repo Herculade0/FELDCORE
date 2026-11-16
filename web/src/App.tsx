@@ -33,12 +33,12 @@ export default function App() {
 
 /** Nothing behind this renders until the visitor is signed in. */
 function Gate() {
-  const { phase, wizardPending, refresh } = useAuth();
+  const { phase, wizardPending, skipWizard, refresh } = useAuth();
   switch (phase) {
     case "ready":
       return wizardPending ? <Wizard onDone={() => void refresh()} /> : <Shell />;
     case "setup":
-      return <SetupScreen />;
+      return skipWizard ? <SetupScreen /> : <Wizard onDone={() => void refresh()} />;
     case "login":
       return <LoginScreen />;
     case "unreachable":

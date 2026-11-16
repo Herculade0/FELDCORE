@@ -82,7 +82,7 @@ func (s *Service) Settings(ctx context.Context) SettingsView {
 
 // SaveSystem sets the host name, time zone and NTP servers.
 func (s *Service) SaveSystem(ctx context.Context, host, tz, ntp string) error {
-	if _, err := HostPlan(host, tz, "systemd-timesyncd"); err != nil {
+	if _, err := HostPlan(host, tz, "systemd-timesyncd", ""); err != nil {
 		return &InputError{err.Error()}
 	}
 	servers, err := parseNTP(ntp)

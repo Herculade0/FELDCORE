@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -71,6 +72,28 @@ func (s *Server) handleCitizenLogin(w http.ResponseWriter, r *http.Request) {
 	id, err := s.citizen.Login(w, r, body.Username, body.Password, body.TOTP)
 	if errors.Is(err, citizenid.ErrSecondFactor) {
 		writeJSON(w, http.StatusOK, map[string]any{"totpRequired": true})
+		return
+	}
+	// Recovery codes are issued by the setup wizard. Citizen ID does not know
+	// them, so a wrong authenticator code is checked against that list once
+	// the password has already matched.
+	if errors.Is(err, citizenid.ErrInvalidCode) && s.auth != nil && s.auth.RedeemRecovery(strings.TrimSpace(body.Username), body.TOTP) {
+		id, ok := s.citizen.IdentityForUsername(strings.TrimSpace(body.Username))
+		if !ok || !id.Admin {
+			s.fail(w, r, err)
+			return
+		}
+		if err := s.issueDesk(w, r, id); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		_ = s.auth.Record("", store.AuditEvent{
+			TokenName: id.Username,
+			Action:    "sign-in",
+			Target:    "recovery",
+			Result:    "ok",
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"username": id.Username, "admin": id.Admin})
 		return
 	}
 	if err != nil {

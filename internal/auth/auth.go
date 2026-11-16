@@ -11,12 +11,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Herculade0/feldcore/internal/store"
+)
+
+var (
+	ErrTOTPRequired = errors.New("authenticator code required")
+	ErrTOTPInvalid  = errors.New("incorrect authenticator code")
 )
 
 const (
@@ -35,9 +41,10 @@ var (
 	ErrRateLimited        = errors.New("too many failed attempts; wait a few minutes and try again")
 )
 
-// SecondFactor runs after the administrator password matches. The wizard
-// enrols the authenticator; this hook enforces it. A nil hook keeps
-// password-only login for an account that has not enrolled.
+// SecondFactor runs after the administrator password matches. Citizen ID
+// installs this so the authenticator it shares with the setup wizard is
+// checked here. A nil hook falls back to that same authenticator when the
+// wizard turned it on, and stays password-only until then.
 type SecondFactor func(username, code string) error
 
 // InputError is a validation failure whose message is safe to show the user.
@@ -47,10 +54,11 @@ func (e *InputError) Error() string { return e.Msg }
 
 // Service owns accounts and sessions.
 type Service struct {
-	st   *store.Store
-	cost int
-	lim  *limiter
-	now  func() time.Time
+	st      *store.Store
+	cost    int
+	lim     *limiter
+	now     func() time.Time
+	secrets SecretBox
 
 	dummyOnce sync.Once
 	factor    SecondFactor
@@ -110,6 +118,11 @@ func (a *Service) Login(clientKey, username, password string) (token string, exp
 	return a.LoginCode(clientKey, username, password, "")
 }
 
+// LoginWithCode is the setup wizard's name for LoginCode.
+func (a *Service) LoginWithCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
+	return a.LoginCode(clientKey, username, password, code)
+}
+
 // LoginCode is Login with the authenticator code. An empty code is rejected
 // once an authenticator is enrolled.
 func (a *Service) LoginCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
@@ -123,9 +136,11 @@ func (a *Service) LoginCode(clientKey, username, password, code string) (token s
 	// a wrong password.
 	hash := a.dummyHash()
 	userOK := false
+	totpOn := false
 	if admin != nil && subtle.ConstantTimeCompare([]byte(admin.Username), []byte(username)) == 1 {
 		hash = []byte(admin.PasswordHash)
 		userOK = true
+		totpOn = admin.TOTP
 	}
 	passOK := bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 	if !userOK || !passOK {
@@ -134,10 +149,22 @@ func (a *Service) LoginCode(clientKey, username, password, code string) (token s
 	}
 	if a.factor != nil {
 		if ferr := a.factor(username, code); ferr != nil {
+			if a.RedeemRecovery(username, code) {
+				a.lim.reset(clientKey)
+				return a.issue(username)
+			}
 			if !factorPending(ferr) {
 				a.lim.fail(clientKey, now)
 			}
 			return "", time.Time{}, ferr
+		}
+	} else if totpOn {
+		if strings.TrimSpace(code) == "" {
+			return "", time.Time{}, ErrTOTPRequired
+		}
+		if !a.codeMatches(code) {
+			a.lim.fail(clientKey, now)
+			return "", time.Time{}, ErrTOTPInvalid
 		}
 	}
 	a.lim.reset(clientKey)
@@ -257,6 +284,18 @@ func (a *Service) SetSessionHours(h int) error {
 		s.Prefs.SessionHours = h
 		return nil
 	})
+}
+
+// CheckPassword reports whether password is the administrator's current one.
+func (a *Service) CheckPassword(password string) error {
+	admin := a.st.Snapshot().Admin
+	if admin == nil {
+		return ErrSetupDone
+	}
+	if bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)) != nil {
+		return ErrInvalidCredentials
+	}
+	return nil
 }
 
 // ChangePassword replaces the administrator password after checking the current one.

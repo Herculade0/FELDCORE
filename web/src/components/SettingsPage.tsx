@@ -29,6 +29,7 @@ import SnapshotSettings from "./settings/SnapshotSettings";
 import CitizenID from "./settings/CitizenID";
 import { InstallPanel, useInstall } from "./install/InstallPanel";
 import PublishingSettings from "./publish/ProtectionSettings";
+import { GuidedSetup } from "./setup/Wizard";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -190,6 +191,8 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
           </fieldset>
         </div>
       </Card>
+
+      <GuidedSetup />
 
       {settings && tab === "general" && (
         <>
