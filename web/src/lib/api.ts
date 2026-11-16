@@ -4,6 +4,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public totpRequired = false,
   ) {
     super(message);
   }
@@ -47,7 +48,9 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
       data && typeof data === "object" && "error" in data && typeof data.error === "string"
         ? data.error
         : `The request failed (${res.status}).`;
-    throw new ApiError(res.status, msg);
+    const totpRequired =
+      data !== null && typeof data === "object" && "totpRequired" in data && data.totpRequired === true;
+    throw new ApiError(res.status, msg, totpRequired);
   }
   return data as T;
 }

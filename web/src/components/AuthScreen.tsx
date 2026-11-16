@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "../lib/auth";
-import { errorMessage } from "../lib/api";
+import { ApiError, errorMessage } from "../lib/api";
 import { LogoMark, Wordmark } from "./Logo";
 import { Alert, Button, TextField } from "./form";
 
@@ -122,6 +122,8 @@ export function LoginScreen() {
   const { signIn } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [needCode, setNeedCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -130,10 +132,11 @@ export function LoginScreen() {
     setBusy(true);
     setError(null);
     try {
-      await signIn(username.trim(), password);
+      await signIn(username.trim(), password, needCode ? code.trim() : undefined);
     } catch (err) {
+      if (err instanceof ApiError && err.totpRequired) setNeedCode(true);
+      else setPassword("");
       setError(errorMessage(err));
-      setPassword("");
       setBusy(false);
     }
   };
@@ -164,6 +167,19 @@ export function LoginScreen() {
             autoComplete="current-password"
             required
           />
+          {needCode && (
+            <TextField
+              label="Authenticator code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              spellCheck={false}
+              hint="From the authenticator app, or a recovery code."
+              autoFocus
+              required
+            />
+          )}
           {error && <Alert>{error}</Alert>}
         </div>
         <Button type="submit" variant="primary" loading={busy} className="mt-6 w-full">

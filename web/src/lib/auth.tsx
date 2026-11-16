@@ -22,6 +22,8 @@ interface StatusResponse {
   setupRequired: boolean;
   authenticated: boolean;
   wizardPending?: boolean;
+  skipWizard?: boolean;
+  totpEnabled?: boolean;
   username?: string;
 }
 
@@ -29,7 +31,8 @@ interface AuthValue {
   phase: AuthPhase;
   username: string | null;
   wizardPending: boolean;
-  signIn: (username: string, password: string) => Promise<void>;
+  skipWizard: boolean;
+  signIn: (username: string, password: string, code?: string) => Promise<void>;
   setup: (username: string, password: string, code: string) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -41,12 +44,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<AuthPhase>("loading");
   const [username, setUsername] = useState<string | null>(null);
   const [wizardPending, setWizardPending] = useState(false);
+  const [skipWizard, setSkipWizard] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const s = await api<StatusResponse>("/auth/status");
       setUsername(s.authenticated ? (s.username ?? null) : null);
       setWizardPending(Boolean(s.wizardPending));
+      setSkipWizard(Boolean(s.skipWizard));
       setPhase(s.authenticated ? "ready" : s.setupRequired ? "setup" : "login");
     } catch {
       setPhase("unreachable");
@@ -76,11 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phase,
       username,
       wizardPending,
+      skipWizard,
       refresh,
-      signIn: async (u, p) => {
+      signIn: async (u, p, code) => {
         await api("/auth/login", {
           method: "POST",
-          body: { username: u, password: p },
+          body: { username: u, password: p, code },
           quiet401: true,
         });
         await refresh();
@@ -97,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [phase, username, wizardPending, refresh],
+    [phase, username, wizardPending, skipWizard, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
