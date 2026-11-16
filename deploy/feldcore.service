@@ -1,0 +1,18 @@
+[Unit]
+Description=FELDCORE server management daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/feldcored
+Restart=on-failure
+RestartSec=3
+# FELCORE manages system services (samba, nfs, docker); root is required for
+# those write features. Tighten with capabilities once the model is settled.
+User=root
+StateDirectory=feldcore
+Environment=FELDCORE_DATA_DIR=/var/lib/feldcore
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+# Normalise line endings; keep shell scripts LF so they run on Linux targets.
+* text=auto eol=lf
+*.sh text eol=lf
+*.go text eol=lf
