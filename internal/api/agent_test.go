@@ -75,6 +75,12 @@ func TestScopeFor(t *testing.T) {
 		{http.MethodPut, "/api/v1/publish", auth.ScopeAdmin},
 		{http.MethodGet, "/api/v1/docker/containers/abc/publish", auth.ScopeAdmin},
 		{http.MethodPut, "/api/v1/docker/containers/abc/publish", auth.ScopeAdmin},
+		{http.MethodGet, "/api/v1/storage", auth.ScopeRead},
+		{http.MethodGet, "/api/v1/storage/disks", auth.ScopeRead},
+		{http.MethodPost, "/api/v1/storage/pools", auth.ScopeStorage},
+		{http.MethodPost, "/api/v1/storage/pools/data/destroy", auth.ScopeStorage},
+		{http.MethodPut, "/api/v1/storage/shares/media", auth.ScopeStorage},
+		{http.MethodPut, "/api/v1/storage/spindown", auth.ScopeStorage},
 	}
 	for _, c := range cases {
 		if got := scopeFor(c.method, c.path); got != c.want {

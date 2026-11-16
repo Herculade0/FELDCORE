@@ -1,6 +1,7 @@
 import {
   Container,
   FolderTree,
+  HardDrive,
   HeartPulse,
   LayoutDashboard,
   LayoutGrid,
@@ -11,7 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "launcher" | "shares" | "docker" | "apps" | "vms" | "health" | "audit" | "settings";
+export type NavKey = "dashboard" | "launcher" | "storage" | "shares" | "docker" | "apps" | "vms" | "health" | "audit" | "settings";
 
 export interface NavItem {
   key: NavKey;
@@ -35,6 +36,13 @@ export const NAV: NavItem[] = [
     label: "Launcher",
     desc: "Apps you can open",
     icon: LayoutGrid,
+    ready: true,
+  },
+  {
+    key: "storage",
+    label: "Storage",
+    desc: "Disks and pools",
+    icon: HardDrive,
     ready: true,
   },
   {

@@ -134,7 +134,6 @@ func main() {
 	wiz.UseAccounts(authSvc)
 	wiz.UseAudit(authSvc)
 	wiz.UseSecrets(box)
-	wiz.UseVolume(storage.New("/", nil))
 	wiz.UseMail(mail)
 	wiz.UseDrive(backups)
 	pubPort := publishListenPort()
@@ -195,6 +194,26 @@ func main() {
 		}
 	}()
 
+	diskSvc, err := storage.Open(storage.Deps{
+		DataDir: cfg.DataDir, SharesRoot: shareMgr.Root,
+		PermitHostDisks: true, ApplySystem: os.Geteuid() == 0, Log: log,
+		SetAppdata: st.SetAppdata,
+		ShareNames: func() []string {
+			folders := shareMgr.Folders()
+			names := make([]string, 0, len(folders))
+			for _, f := range folders {
+				names = append(names, f.Name)
+			}
+			return names
+		},
+	})
+	if err != nil {
+		log.Error("cannot open storage", "err", err)
+		os.Exit(1)
+	}
+	// The wizard's storage step and the Storage page share this controller.
+	wiz.UseVolume(diskSvc)
+
 	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: authSvc, Log: log, Trust: dockerMgr.TrustedPeer})
 	authSvc.SetSecondFactor(cid.AdminFactor)
 	pubSvc.SetAuth(publish.CitizenAuth(cid))
@@ -239,9 +258,16 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		Storage:    diskSvc,
 		Health:     healthSvc,
 		Alerts:     alerts,
 	})
+	go func() {
+		if err := diskSvc.Restore(ctx); err != nil {
+			log.Warn("a storage pool was not mounted", "err", err)
+		}
+		diskSvc.Loop(ctx)
+	}()
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Router(),

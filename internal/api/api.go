@@ -32,6 +32,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
+	"github.com/Herculade0/feldcore/internal/storage"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/vm"
 	"github.com/Herculade0/feldcore/internal/vpn"
@@ -58,6 +59,7 @@ type Deps struct {
 	Backups    *backup.Service
 	Mail       *notify.Service
 	Publish    *publish.Service
+	Storage    *storage.Service
 	Health     *health.Service
 	Alerts     *notify.Dispatcher
 }
@@ -90,6 +92,7 @@ type Server struct {
 	fetcher    *files.Fetcher
 	installs   *install.Runner
 	publish    *publish.Service
+	storage    *storage.Service
 }
 
 // New returns a Server.
@@ -100,7 +103,8 @@ func New(d Deps) *Server {
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
-		health: d.Health, alerts: d.Alerts,
+		storage: d.Storage,
+		health:  d.Health, alerts: d.Alerts,
 	}
 	s.uploads = files.NewUploads()
 	s.fetcher = files.NewFetcher(func() bool {
@@ -111,6 +115,10 @@ func New(d Deps) *Server {
 	})
 	s.fetcher.OnSettle = s.settleFetch
 	s.wireInstalls()
+	if s.storage != nil {
+		s.storage.SetAudit(s.auditStorage)
+		s.storage.AttachJobs(s.installs)
+	}
 	s.initMCP()
 	return s
 }
@@ -208,6 +216,23 @@ func (s *Server) Router() http.Handler {
 			r.Post("/docker/containers/{id}/snapshots", s.handleSnapshotCreate)
 			r.Post("/docker/containers/{id}/snapshots/{snap}/restore", s.handleSnapshotRestore)
 			r.Put("/snapshots", s.handleSnapshotSettings)
+			// Disk inventory runs smartctl, and creating a pool formats disks.
+			// Both can outlive the short request timeout.
+			r.Get("/storage", s.handleStorage)
+			r.Get("/storage/disks", s.handleStorageDisks)
+			r.Post("/storage/pools", s.handlePoolCreate)
+			r.Post("/storage/pools/{name}/mount", s.handlePoolMount)
+			r.Post("/storage/pools/{name}/unmount", s.handlePoolUnmount)
+			r.Post("/storage/pools/{name}/destroy", s.handlePoolDestroy)
+			r.Post("/storage/pools/{name}/disks", s.handlePoolAddDisk)
+			r.Post("/storage/pools/{name}/replace", s.handlePoolReplace)
+			r.Post("/storage/pools/{name}/jobs", s.handlePoolJob)
+			r.Put("/storage/pools/{name}/schedule", s.handlePoolSchedule)
+			r.Put("/storage/spindown", s.handleSpinDown)
+			r.Post("/storage/spindown", s.handleSpinDownNow)
+			r.Post("/storage/cache", s.handleStorageCache)
+			r.Put("/storage/shares/{share}", s.handleStorageShare)
+
 			// File downloads, archives and upload chunks can outlive the short timeout.
 			r.Get("/shares/{name}/files/content", s.handleFileContent)
 			r.Head("/shares/{name}/files/content", s.handleFileContent)
@@ -466,6 +491,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		snapOp       *snapshots.OpError
 		fileInput    *files.InputError
 		fileOp       *files.OpError
+		diskInput    *storage.InputError
+		diskOp       *storage.OpError
 		fileConflict *files.ConflictError
 		fileForbid   *files.ForbiddenURL
 	)
@@ -502,6 +529,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, snapInput.Msg)
 	case errors.As(err, &fileInput):
 		writeError(w, http.StatusBadRequest, fileInput.Msg)
+	case errors.As(err, &diskInput):
+		writeError(w, http.StatusBadRequest, diskInput.Msg)
 	case errors.As(err, &fileForbid):
 		writeError(w, http.StatusBadRequest, fileForbid.Error())
 	case errors.As(err, &fileConflict):
@@ -545,6 +574,11 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &snapOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, snapOp.Msg)
+	case errors.As(err, &diskOp):
+		if s.log != nil {
+			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, diskOp.Msg)
 	case errors.As(err, &fileOp):
 		if s.log != nil {
 			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)

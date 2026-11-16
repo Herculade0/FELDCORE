@@ -9,8 +9,8 @@ import (
 )
 
 func TestDescribeKeepAndRefuseOSFormat(t *testing.T) {
-	disks := []Disk{
-		{Name: "sda", Path: "/dev/sda", OS: true, Mount: "/", Size: 64 << 30, Children: []Part{{Name: "sda1", Path: "/dev/sda1", Mount: "/", OS: true}}},
+	disks := []SetupDisk{
+		{Name: "sda", Path: "/dev/sda", OS: true, Mount: "/", Size: 64 << 30, Children: []SetupPart{{Name: "sda1", Path: "/dev/sda1", Mount: "/", OS: true}}},
 		{Name: "sdb", Path: "/dev/sdb", Size: 1 << 40},
 	}
 	p, err := Describe(disks, Choice{Mode: "keep", Mount: "/srv/feldcore"})
@@ -50,7 +50,7 @@ func TestLinuxApplyFormatsOnlyAfterPhrase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var data Disk
+	var data SetupDisk
 	foundOS, foundData := false, false
 	for _, d := range disks {
 		if d.Name == "sda" && d.OS {

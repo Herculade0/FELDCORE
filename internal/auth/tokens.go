@@ -22,6 +22,7 @@ const (
 	ScopeVMs        = "vms"
 	ScopeFilesRead  = "files:read"
 	ScopeFilesWrite = "files:write"
+	ScopeStorage    = "storage"
 	ScopeAdmin      = "admin"
 )
 
@@ -43,14 +44,14 @@ var maxAudit = MaxAuditEvents
 // ErrTokenNotFound means the id does not match a stored token.
 var ErrTokenNotFound = errors.New("token not found")
 
-var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeAdmin}
+var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStorage, ScopeAdmin}
 
 // Allows reports whether a token's scopes include need. Admin includes every
 // real scope, and files:write includes files:read. An unknown need is never
 // allowed, so a shell cannot be smuggled in as a scope name.
 func Allows(have []string, need string) bool {
 	switch need {
-	case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeAdmin:
+	case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStorage, ScopeAdmin:
 	default:
 		return false
 	}
@@ -293,10 +294,10 @@ func normalizeScopes(in []string) ([]string, error) {
 	have := map[string]bool{}
 	for _, s := range in {
 		switch s {
-		case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeAdmin:
+		case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStorage, ScopeAdmin:
 			have[s] = true
 		default:
-			return nil, &InputError{"Scopes are read, containers, vms, files:read, files:write and admin."}
+			return nil, &InputError{"Scopes are read, containers, vms, files:read, files:write, storage and admin."}
 		}
 	}
 	out := make([]string, 0, len(have))

@@ -13,6 +13,7 @@ import AuditPage from "./components/AuditPage";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
+import StoragePage from "./components/storage/StoragePage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
@@ -122,6 +123,8 @@ function Shell() {
             <Dashboard onNavigate={setActive} />
           ) : page === "launcher" ? (
             <Launcher />
+          ) : page === "storage" ? (
+            <StoragePage />
           ) : page === "shares" ? (
             <SharesPage />
           ) : page === "docker" ? (

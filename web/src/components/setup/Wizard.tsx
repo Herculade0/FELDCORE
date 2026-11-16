@@ -31,6 +31,9 @@ interface Disk {
   fs?: string;
   mount?: string;
   os?: boolean;
+  serial?: string;
+  byId?: string;
+  usedFor?: string;
   children?: DiskPart[];
 }
 
@@ -511,7 +514,7 @@ export default function Wizard({
               )}
               {view.step === "storage" && storageMode === "pool" && (
                 <Alert tone="info">
-                  A pool name and folder are recorded. Assembling several disks into one pool is not done in this step.
+                  An existing pool with this name is mounted and used for shares. A new name is only recorded. Assembling several disks still happens on the Storage page, after each disk serial is typed.
                 </Alert>
               )}
               {reviewed && view.preview && view.preview.length > 0 && (
@@ -736,7 +739,7 @@ function StorageFields(props: {
       </SelectField>
       <TextField label="Folder" value={props.root} onChange={(e) => props.onRoot(e.target.value)} spellCheck={false} />
       {props.mode === "pool" && (
-        <TextField label="Pool name" value={props.pool} onChange={(e) => props.onPool(e.target.value)} spellCheck={false} hint="Recorded only. Disks are not assembled into a pool here." />
+        <TextField label="Pool name" value={props.pool} onChange={(e) => props.onPool(e.target.value)} spellCheck={false} hint="An existing pool with this name is mounted and used. A new name is only recorded; disks are not assembled here." />
       )}
       {props.mode === "disk" && (
         <>
@@ -749,7 +752,7 @@ function StorageFields(props: {
                   <span>
                     <span className="block text-sm font-bold text-ink">{d.path}{d.model ? ` · ${d.model}` : ""}</span>
                     <span className="block text-xs font-medium text-ink-3">
-                      {bytes(d.size)}{d.mount ? ` · mounted at ${d.mount}` : " · not mounted"}{d.os ? " · operating system" : ""}
+                      {bytes(d.size)}{d.mount ? ` · mounted at ${d.mount}` : " · not mounted"}{d.os ? " · operating system" : ""}{d.usedFor ? ` · ${d.usedFor}` : ""}
                     </span>
                   </span>
                 </label>

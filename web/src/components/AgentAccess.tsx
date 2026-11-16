@@ -4,7 +4,7 @@ import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, Modal, SelectField, TextField, Toggle } from "./form";
 
-type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "admin";
+type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "storage" | "admin";
 
 interface Token {
   id: string;
@@ -46,6 +46,11 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
     key: "files:write",
     label: "Files, write",
     hint: "Upload, rename, move, copy and delete files in a share. Includes reading them.",
+  },
+  {
+    key: "storage",
+    label: "Storage",
+    hint: "Create and change pools, mount them, and run scrub, balance and trim. Looking at disks is included in Read.",
   },
   {
     key: "admin",
@@ -92,6 +97,7 @@ export default function AgentAccessCard({ onOpenAudit }: { onOpenAudit?: () => v
     vms: false,
     "files:read": false,
     "files:write": false,
+    storage: false,
     admin: false,
   });
   const [busy, setBusy] = useState(false);
