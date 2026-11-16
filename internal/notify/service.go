@@ -200,7 +200,10 @@ func (s *Service) Test(ctx context.Context) error {
 	}, true)
 }
 
-// Emit sends an event when notifications are on.
+// Emit sends an event when notifications are on. Container stops and update
+// notices honour their own switches. Any other kind, including backup.failed,
+// backup.check_failed and backup.restore_failed, is sent while the master
+// switch is on.
 func (s *Service) Emit(ctx context.Context, ev Event) {
 	n := s.Store.Snapshot().Notify
 	if !n.Enabled {

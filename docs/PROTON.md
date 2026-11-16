@@ -69,6 +69,10 @@ on. Retention deletes older files in that folder whose names match
 If `rclone` is not installed, FELDCORE runs `rclone/rclone` through Docker
 instead. One of those two has to be available.
 
+Versioned backups, including a Proton Drive destination that reuses this
+account, are on the Backups page. See [BACKUPS.md](BACKUPS.md). This card
+still uploads one `tar.gz`.
+
 ## Proton Mail
 
 **Settings → Network**, Notifications. Mail is sent when:
