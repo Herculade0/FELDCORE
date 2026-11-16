@@ -71,6 +71,7 @@ const sampleFeed = `{
       "Privileged": ["false", "false"],
       "Beta": "true",
       "Overview": "A file manager.",
+      "Requires": "Needs [b]MariaDB[/b] or <a href=\"https://example.com\">MySQL</a>. See [url=https://example.com/docs]the docs[/url].",
       "TemplateURL": "https://example.com/kod.xml",
       "Repo": "Author Repository",
       "downloads": 50,
@@ -147,8 +148,13 @@ func TestParseFeedFiltersAndMaps(t *testing.T) {
 		t.Fatalf("deprecated app not last: %s", parsed.apps[len(parsed.apps)-1].app.Name)
 	}
 	for _, rec := range parsed.apps {
-		if rec.app.Name == "Kodbox" && (!rec.app.Beta || rec.tmpl.Privileged) {
-			t.Fatalf("kodbox %+v privileged %v", rec.app, rec.tmpl.Privileged)
+		if rec.app.Name == "Kodbox" {
+			if !rec.app.Beta || rec.tmpl.Privileged {
+				t.Fatalf("kodbox %+v privileged %v", rec.app, rec.tmpl.Privileged)
+			}
+			if rec.app.Requires != "Needs MariaDB or MySQL. See the docs." {
+				t.Fatalf("requires %q", rec.app.Requires)
+			}
 		}
 	}
 }
