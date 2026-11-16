@@ -97,7 +97,7 @@ A locked cabinet of Markdown case files. Agents file a report when they change s
 - Later: SMB reading room, withdrawing a report, git history, Proton Drive backup (the cabinet is in the first backup set)
 
 ## M3 — Settings
-- [ ] Users & authentication management
+- [x] Users & authentication management (Citizen ID: users, groups, sign-in, and per-app access — see [CITIZEN-ID.md](CITIZEN-ID.md))
 - [ ] Network overview / hostname
 - [ ] Service toggles (which daemons FELDCORE manages)
 - [ ] Appearance (theme)
