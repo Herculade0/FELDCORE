@@ -6,7 +6,7 @@ and are not written to the log or to `state.json`.
 
 ## Proton VPN
 
-**Settings → VPN**, preset **Proton VPN** (or leave it on automatic). Paste a
+**Settings → Network**, in the VPN card, preset **Proton VPN** (or leave it on automatic). Paste a
 WireGuard configuration from
 [account.proton.me](https://account.proton.me/u/0/vpn/WireGuard).
 
@@ -38,7 +38,7 @@ described in [VPN.md](VPN.md).
 
 ## Proton Drive backups
 
-**Settings → Proton Drive backups.** This uses rclone's `protondrive` backend.
+**Settings → Network**, Proton Drive backups. This uses rclone's `protondrive` backend.
 That backend is unofficial. Proton does not support it, and it can break when
 Proton changes their API. The page says so.
 
@@ -71,7 +71,7 @@ instead. One of those two has to be available.
 
 ## Proton Mail
 
-**Settings → Notifications.** Mail is sent when:
+**Settings → Network**, Notifications. Mail is sent when:
 
 - a container that was running stops, and FELDCORE did not stop, restart or
   edit it
