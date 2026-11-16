@@ -25,22 +25,3 @@ func (s *Server) handleAppSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"app": app, "spec": spec, "notes": notes})
 }
-
-func (s *Server) handleAppsSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.apps.Settings())
-}
-
-func (s *Server) handleAppsSettingsPut(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Appdata string `json:"appdata"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	st, err := s.apps.SetAppdata(body.Appdata)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, st)
-}

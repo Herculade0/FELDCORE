@@ -381,6 +381,11 @@ function RemoveDialog({
 }) {
   const [busy, setBusy] = useState(false);
   const [removeImage, setRemoveImage] = useState(false);
+  useEffect(() => {
+    api<{ defaults?: { removeImage?: boolean } }>("/settings")
+      .then((s) => setRemoveImage(Boolean(s.defaults?.removeImage)))
+      .catch(() => {});
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const running = container.state === "running";
 

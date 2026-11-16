@@ -36,7 +36,7 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **Shares** — create a folder, expose it over SMB (public, read-only or private with users) and NFS; installs Samba/NFS for you | ✅ working |
 | **Docker** — run, edit and manage containers (state, live stats, logs, lifecycle); Unraid-style paths/ports/variables/labels/devices, a folder picker, GPU sharing and an allocations table; installs Docker for you | ✅ working |
 | **App Store** — browse and search the Unraid Community Applications catalogue; choosing an app opens the container setup prefilled from its template | ✅ working |
-| **Settings** — users/auth, network, services, appearance | 🔜 planned |
+| **Settings** — appearance, host, network, services, firewall, updates, App Store feed | ✅ working |
 | **VMs** — KVM/libvirt management | 🧭 later |
 
 ## Architecture
@@ -178,8 +178,7 @@ or a disposable VM.
   or the first time, if nothing is saved. Picking an app fills in the
   container form; it does not install it.
 - Template paths under `/mnt/user/appdata` are rewritten to the `appdata`
-  share (created with the other default shares, above), or to whatever
-  folder you set under Settings.
+  share (created with the other default shares, above).
 - GPU sharing passes `/dev/dri` into the container and adds the groups that
   own it. Nothing is installed for this.
 

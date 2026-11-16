@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,41 +191,40 @@ func (s *Service) Spec(id string) (App, docker.Spec, []string, error) {
 	return rec.app, spec, notes, nil
 }
 
-// Settings returns the folder app-data paths are written to.
+// Settings returns the appdata share templates are rewritten into.
 func (s *Service) Settings() Settings {
-	custom := strings.TrimSpace(s.appdata())
-	return Settings{
-		Appdata:        s.effectiveAppdata(),
-		AppdataDefault: s.defaultAppdata(),
-		AppdataCustom:  custom != "",
-	}
+	path := s.defaultAppdata()
+	return Settings{Appdata: path, AppdataDefault: path}
 }
 
-// SetAppdata stores an absolute folder, or clears the setting when path is empty.
-func (s *Service) SetAppdata(path string) (Settings, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		if err := s.setAppdata(""); err != nil {
-			return Settings{}, &OpError{Msg: "Could not save the app data folder."}
-		}
-		return s.Settings(), nil
+// FeedURL is the catalogue address currently in use.
+func (s *Service) FeedURL() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.feedURL == "" {
+		return FeedURL
 	}
-	if !filepath.IsAbs(path) {
-		return Settings{}, &InputError{Msg: "The app data folder must be an absolute path (it has to start with /)."}
+	return s.feedURL
+}
+
+// SetFeedURL points the next refresh at raw. An empty raw restores the public feed.
+func (s *Service) SetFeedURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = FeedURL
 	}
-	path = filepath.Clean(path)
-	if path == "/" || strings.ContainsRune(path, 0) {
-		return Settings{}, &InputError{Msg: "Choose a folder other than /."}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+		return &InputError{Msg: "The catalogue address must be an http or https URL."}
 	}
-	if err := s.setAppdata(path); err != nil {
-		return Settings{}, &OpError{Msg: "Could not save the app data folder."}
-	}
-	return s.Settings(), nil
+	s.mu.Lock()
+	s.feedURL = raw
+	s.mu.Unlock()
+	return nil
 }
 
 // defaultAppdata is the appdata share when that share exists, so Unraid
-// template paths under /mnt/user/appdata land in the share FELDCORE created
-// (or adopted). A custom folder, when set, still wins over this.
+// template paths under /mnt/user/appdata always land in that share.
 func (s *Service) defaultAppdata() string {
 	if p := s.sharePaths()["appdata"]; p != "" {
 		return p
@@ -236,9 +236,7 @@ func (s *Service) defaultAppdata() string {
 }
 
 func (s *Service) effectiveAppdata() string {
-	if p := strings.TrimSpace(s.appdata()); p != "" {
-		return p
-	}
+	// Templates always land in the appdata share. A custom folder is not offered.
 	return s.defaultAppdata()
 }
 
@@ -320,7 +318,7 @@ func (s *Service) ensureLoaded() {
 func (s *Service) download(ctx context.Context) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.feedURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.FeedURL(), nil)
 	if err != nil {
 		return nil, err
 	}

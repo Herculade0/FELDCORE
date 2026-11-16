@@ -107,9 +107,8 @@ func main() {
 		Apps: apps.New(apps.Deps{
 			DataDir:    cfg.DataDir,
 			SharesRoot: cfg.SharesRoot,
+			FeedURL:    st.Snapshot().Prefs.FeedURL,
 			Log:        log,
-			Appdata:    st.Appdata,
-			SetAppdata: st.SetAppdata,
 			SharePaths: func() map[string]string {
 				out := map[string]string{}
 				for _, f := range shareMgr.Folders() {

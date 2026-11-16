@@ -5,7 +5,6 @@ import { Card } from "../ui";
 import { Alert, Button, inputClass } from "../form";
 import ContainerDialog from "../docker/ContainerDialog";
 import type { Spec } from "../docker/types";
-import AppdataSetting from "./AppdataSetting";
 import type { AppSpec, AppSummary, Catalogue } from "./types";
 
 const PAGE = 48;
@@ -117,8 +116,6 @@ export default function AppsPage() {
       {error && <Alert>{error}</Alert>}
       {cat?.message && <Alert tone={cat.offline ? "warn" : "info"}>{cat.message}</Alert>}
       {notice && <Alert tone="info">{notice}</Alert>}
-
-      <AppdataSetting />
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative min-w-0 flex-1">

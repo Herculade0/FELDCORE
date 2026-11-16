@@ -92,6 +92,22 @@ type State struct {
 	// Wizard is the first-start setup. Nil means this install predates the
 	// wizard (or it has not been claimed yet) and should not be forced through it.
 	Wizard *Wizard `json:"wizard,omitempty"`
+	// Prefs are choices made on the Settings page.
+	Prefs Prefs `json:"prefs,omitempty"`
+}
+
+// Prefs holds Settings choices that are not part of a share or a container.
+type Prefs struct {
+	SessionHours int    `json:"sessionHours,omitempty"`
+	RemoveImage  bool   `json:"removeImage,omitempty"`
+	FeedURL      string `json:"feedURL,omitempty"`
+	NTPServers   string `json:"ntpServers,omitempty"`
+	Unattended   bool   `json:"unattended,omitempty"`
+	UpdateCheck  bool   `json:"updateCheck,omitempty"`
+	Firewall     bool   `json:"firewall,omitempty"`
+	// Touched is set once Settings has saved update or firewall choices, so
+	// those win over the values the wizard stored.
+	Touched bool `json:"touched,omitempty"`
 }
 
 // Wizard is how far first-start setup has got, and the choices made so far.

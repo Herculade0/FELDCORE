@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -381,28 +380,7 @@ func (s *Service) applyNet(ctx context.Context, req Request) error {
 		return &OpError{"This server is not using systemd-networkd or ifupdown, so FELDCORE will not change the address. Stay on DHCP."}
 	}
 	path, body := s.netFile(req)
-	prev, readErr := os.ReadFile(path)
-	missing := os.IsNotExist(readErr)
-	if readErr != nil && !missing {
-		return &OpError{"Could not read the current network settings: " + readErr.Error()}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return &OpError{"Could not write the network settings: " + err.Error()}
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return &OpError{"Could not write the network settings: " + err.Error()}
-	}
-	if err := s.reloadNet(ctx, req.Iface); err != nil {
-		// The reload itself failed, so put the file back. A reload that
-		// succeeds and then strands the browser is left as it is.
-		if missing {
-			_ = os.Remove(path)
-		} else {
-			_ = os.WriteFile(path, prev, 0o644)
-		}
-		return &OpError{"The address was not applied: " + err.Error()}
-	}
-	return nil
+	return s.commitNetFile(ctx, path, body, req.Iface)
 }
 
 func (s *Service) netFile(req Request) (string, string) {
