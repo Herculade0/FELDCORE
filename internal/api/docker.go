@@ -181,6 +181,9 @@ func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerInstall(w http.ResponseWriter, r *http.Request) {
+	if s.acceptInstall(w, r, "docker") {
+		return
+	}
 	if err := s.docker.Install(r.Context()); err != nil {
 		s.fail(w, r, err)
 		return
