@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/events"
 	"github.com/Herculade0/feldcore/internal/secrets"
 	"github.com/Herculade0/feldcore/internal/store"
 )
@@ -50,8 +51,28 @@ type Service struct {
 	RunExec    Exec
 	Exists     func(string) bool
 
+	// Events receives backup failures so another agent can alert. Nil is fine.
+	Events *events.Bus
+	// Audit records state-changing actions. The HTTP layer sets it.
+	Audit func(actor, tokenID, action, target, result string)
+	// Root cancels a running job when the daemon stops.
+	Root context.Context
+	// Engine runs restic. Nil uses the restic binary on this machine.
+	Engine Engine
+	// Cmd runs virsh, qemu-img and docker. Nil uses the host PATH.
+	Cmd Commander
+	// Mounts attaches an SMB or NFS destination. Nil uses mount(8).
+	Mounts Mounter
+	// Compose lists extra stack directories. Nil asks Docker, then the usual folders.
+	Compose func(context.Context) []string
+
 	mu   sync.Mutex
 	busy bool
+
+	jobMu sync.Mutex
+	jobM  map[string]*bjob
+	jobQ  []string
+	catMu sync.Mutex
 }
 
 // Settings is what the page edits. Passwords are write-only.

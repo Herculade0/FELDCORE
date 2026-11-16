@@ -30,6 +30,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
+	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/vm"
 	"github.com/Herculade0/feldcore/internal/vpn"
@@ -93,6 +94,16 @@ func New(d Deps) *Server {
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
 	}
+	if d.Backups != nil && d.Auth != nil {
+		b, a := d.Backups, d.Auth
+		b.Audit = func(actor, tokenID, action, target, result string) {
+			if err := a.Record(tokenID, store.AuditEvent{
+				TokenName: actor, Action: action, Target: clip(target, 200), Result: result,
+			}); err != nil && d.Log != nil {
+				d.Log.Warn("audit log write failed", "err", err)
+			}
+		}
+	}
 	s.uploads = files.NewUploads()
 	s.fetcher = files.NewFetcher(func() bool {
 		if s.auth == nil {
@@ -155,6 +166,19 @@ func (s *Server) Router() http.Handler {
 			r.Post("/vpn/tunnels/{id}/enabled", s.handleVPNTunnelEnabled)
 			r.Post("/backups/test", s.handleBackupsTest)
 			r.Post("/backups/run", s.handleBackupsRun)
+			r.Get("/backup", s.handleBackupOverview)
+			r.Get("/backup/jobs", s.handleBackupJobs)
+			r.Get("/backup/jobs/{id}", s.handleBackupJob)
+			r.Post("/backup/destinations", s.handleBackupCreate)
+			r.Put("/backup/destinations/{id}", s.handleBackupUpdate)
+			r.Delete("/backup/destinations/{id}", s.handleBackupDelete)
+			r.Post("/backup/destinations/{id}/test", s.handleBackupTest)
+			r.Post("/backup/destinations/{id}/run", s.handleBackupRun)
+			r.Post("/backup/destinations/{id}/check", s.handleBackupCheck)
+			r.Post("/backup/destinations/{id}/password", s.handleBackupPassword)
+			r.Get("/backup/destinations/{id}/snapshots", s.handleBackupSnapshots)
+			r.Get("/backup/destinations/{id}/snapshots/{snap}/files", s.handleBackupFiles)
+			r.Post("/backup/restore", s.handleBackupRestore)
 			r.Post("/notifications/test", s.handleNotificationsTest)
 			// Defining a domain and the VNC console are not short requests.
 			r.Post("/vms", s.handleVMCreate)

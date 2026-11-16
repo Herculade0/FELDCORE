@@ -23,6 +23,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/events"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/publish"
@@ -153,7 +154,12 @@ func main() {
 	snapSvc.Log = log
 	go vpnSvc.Restore(ctx)
 	go vpnSvc.KeepForwarded(ctx)
+	bus := events.New()
+	backups.Events = bus
+	backups.Root = ctx
+	notify.SubscribeBackups(bus, mail)
 	go backups.Loop(ctx)
+	go backups.ArchiveLoop(ctx)
 	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
 		cs, err := dockerMgr.Containers(ctx)
 		if err != nil {

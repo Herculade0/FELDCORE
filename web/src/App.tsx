@@ -15,6 +15,7 @@ import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
+import BackupsPage from "./components/backups/BackupsPage";
 import Wizard from "./components/setup/Wizard";
 import { TerminalProvider } from "./components/Terminal";
 
@@ -121,6 +122,8 @@ function Shell() {
             <AppsPage />
           ) : active === "vms" ? (
             <VMsPage />
+          ) : active === "backups" ? (
+            <BackupsPage />
           ) : active === "audit" ? (
             <AuditPage />
           ) : active === "settings" ? (
