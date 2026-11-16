@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Boxes,
+  Camera,
   Container as ContainerIcon,
   Download,
   ExternalLink,
   FileText,
+  Globe,
   Pencil,
   Play,
   Plus,
   RotateCw,
   Square,
+  Store,
   Trash2,
   X,
 } from "lucide-react";
@@ -21,9 +24,12 @@ import { Alert, Button, IconButton, Modal } from "../form";
 import Allocations from "./Allocations";
 import ContainerDialog from "./ContainerDialog";
 import LogsDialog from "./LogsDialog";
+import { TerminalButton, useTerminal } from "../Terminal";
 import { stateStyle, type Container, type DockerStatus } from "./types";
+import AddressDialog from "./AddressDialog";
+import SnapshotsDialog from "./SnapshotsDialog";
 
-export default function DockerPage() {
+export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
   const [containers, setContainers] = useState<Container[]>([]);
   const [host, setHost] = useState("localhost");
@@ -34,6 +40,9 @@ export default function DockerPage() {
   const setCreating = (on: boolean) => setEditing(on ? "new" : null);
   const [logsFor, setLogsFor] = useState<Container | null>(null);
   const [removing, setRemoving] = useState<Container | null>(null);
+  const [addressFor, setAddressFor] = useState<Container | null>(null);
+  const [snapsFor, setSnapsFor] = useState<Container | null>(null);
+  const { openContainer } = useTerminal();
 
   const load = useCallback(async () => {
     try {
@@ -76,10 +85,18 @@ export default function DockerPage() {
           </p>
         </div>
         {status?.running && (
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus size={16} strokeWidth={2.75} />
-            Run container
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {onOpenApps && (
+              <Button onClick={onOpenApps}>
+                <Store size={16} strokeWidth={2.4} />
+                App Store
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <Plus size={16} strokeWidth={2.75} />
+              Run container
+            </Button>
+          </div>
         )}
       </header>
 
@@ -120,7 +137,10 @@ export default function DockerPage() {
                   onAction={changed}
                   onError={setError}
                   onLogs={() => setLogsFor(c)}
+                  onConsole={() => openContainer({ id: c.id, name: c.name, icon: c.icon })}
                   onEdit={() => setEditing(c)}
+                  onAddress={() => setAddressFor(c)}
+                  onSnapshots={() => setSnapsFor(c)}
                   onRemove={() => setRemoving(c)}
                 />
               ))}
@@ -159,13 +179,14 @@ export default function DockerPage() {
         <RemoveDialog
           container={removing}
           onClose={() => setRemoving(null)}
-          onRemoved={() => {
-            const n = removing.name;
+          onRemoved={(message) => {
             setRemoving(null);
-            changed(`${n} was removed.`);
+            changed(message);
           }}
         />
       )}
+      {addressFor && <AddressDialog container={addressFor} onClose={() => { setAddressFor(null); void load(); }} />}
+      {snapsFor && <SnapshotsDialog container={snapsFor} onClose={() => setSnapsFor(null)} />}
     </div>
   );
 }
@@ -176,7 +197,10 @@ function ContainerRow({
   onAction,
   onError,
   onLogs,
+  onConsole,
   onEdit,
+  onAddress,
+  onSnapshots,
   onRemove,
 }: {
   c: Container;
@@ -184,7 +208,10 @@ function ContainerRow({
   onAction: (msg: string) => void;
   onError: (msg: string) => void;
   onLogs: () => void;
+  onConsole: () => void;
   onEdit: () => void;
+  onAddress: () => void;
+  onSnapshots: () => void;
   onRemove: () => void;
 }) {
   const [busy, setBusy] = useState("");
@@ -209,13 +236,18 @@ function ContainerRow({
   return (
     <Card className="flex flex-col gap-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3.5">
-        <IconBadge icon={ContainerIcon} muted={!running} />
+        <ContainerMark src={c.icon} muted={!running} />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-base font-extrabold text-ink">{c.name}</h2>
             {c.managed && (
               <span className="rounded-full bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
                 FELDCORE
+              </span>
+            )}
+            {c.role && (
+              <span className="rounded-full bg-track px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ink-3">
+                System
               </span>
             )}
             {c.gpu && (
@@ -225,6 +257,12 @@ function ContainerRow({
             )}
           </div>
           <p className="truncate text-xs font-medium text-ink-3">{c.image}</p>
+          {(c.hostname || c.publicHost) && (
+            <p className="truncate text-xs font-semibold text-accent">
+              {c.hostname?.replace(/^https?:\/\//, "")}
+              {c.publicHost ? ` · public ${c.publicHost}` : ""}
+            </p>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold">
             <span className={`inline-flex items-center gap-1.5 ${st.cls}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
@@ -259,9 +297,20 @@ function ContainerRow({
             <ExternalLink size={16} />
           </IconButton>
         )}
+        <TerminalButton label="Console" disabled={!running} onClick={onConsole} />
         <IconButton label="View logs" onClick={onLogs}>
           <FileText size={16} />
         </IconButton>
+        {!c.role && (
+          <>
+            <IconButton label="Web address" onClick={onAddress}>
+              <Globe size={16} />
+            </IconButton>
+            <IconButton label="Snapshots" onClick={onSnapshots}>
+              <Camera size={16} />
+            </IconButton>
+          </>
+        )}
         <IconButton label="Edit" onClick={onEdit} disabled={!!busy}>
           <Pencil size={16} />
         </IconButton>
@@ -285,6 +334,22 @@ function ContainerRow({
       </div>
     </Card>
   );
+}
+
+function ContainerMark({ src, muted }: { src?: string; muted?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className={`h-12 w-12 shrink-0 rounded-2xl bg-surface-2 object-contain ${muted ? "opacity-60" : ""}`}
+      />
+    );
+  }
+  return <IconBadge icon={ContainerIcon} muted={muted} />;
 }
 
 function DockerUnavailable({
@@ -353,9 +418,15 @@ function RemoveDialog({
 }: {
   container: Container;
   onClose: () => void;
-  onRemoved: () => void;
+  onRemoved: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [removeImage, setRemoveImage] = useState(false);
+  useEffect(() => {
+    api<{ defaults?: { removeImage?: boolean } }>("/settings")
+      .then((s) => setRemoveImage(Boolean(s.defaults?.removeImage)))
+      .catch(() => {});
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const running = container.state === "running";
 
@@ -363,10 +434,13 @@ function RemoveDialog({
     setBusy(true);
     setError(null);
     try {
-      await api(`/docker/containers/${encodeURIComponent(container.id)}?force=${running ? 1 : 0}`, {
-        method: "DELETE",
-      });
-      onRemoved();
+      const q = new URLSearchParams({ force: running ? "1" : "0" });
+      if (removeImage) q.set("image", "1");
+      const res = await api<{ message?: string }>(
+        `/docker/containers/${encodeURIComponent(container.id)}?${q}`,
+        { method: "DELETE" },
+      );
+      onRemoved(res.message || `${container.name} was removed.`);
     } catch (e) {
       setError(errorMessage(e));
       setBusy(false);
@@ -391,8 +465,24 @@ function RemoveDialog({
       <div className="space-y-4">
         <p className="text-sm font-medium leading-relaxed text-ink-2">
           {running && "This container is running and will be stopped first. "}
-          The container is deleted. Images and any folders you mapped in stay on the server; data
-          kept only inside the container is lost.
+          The container is deleted. Folders you mapped in stay on the server. Anything saved only
+          inside the container is lost.
+        </p>
+        <label className="flex items-center gap-2.5 text-sm font-semibold text-ink">
+          <input
+            type="checkbox"
+            checked={removeImage}
+            onChange={(e) => setRemoveImage(e.target.checked)}
+            disabled={busy}
+            className="h-4 w-4 accent-accent"
+          />
+          Also remove image
+        </label>
+        <p className="text-xs font-medium leading-relaxed text-ink-3">
+          Removing the image frees the disk space it uses. The app&apos;s settings and any mapped
+          folders — app data, saves and media — are not touched. Installing it again downloads the
+          image once more, which takes longer. If another container is still using that image, it
+          is left in place.
         </p>
         {error && <Alert>{error}</Alert>}
       </div>

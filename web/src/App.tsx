@@ -10,9 +10,13 @@ import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
+import AuditPage from "./components/AuditPage";
 import ComingSoon from "./components/ComingSoon";
 import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
+import AppsPage from "./components/apps/AppsPage";
+import Wizard from "./components/setup/Wizard";
+import { TerminalProvider } from "./components/Terminal";
 
 export default function App() {
   return (
@@ -26,10 +30,10 @@ export default function App() {
 
 /** Nothing behind this renders until the visitor is signed in. */
 function Gate() {
-  const { phase } = useAuth();
+  const { phase, wizardPending, refresh } = useAuth();
   switch (phase) {
     case "ready":
-      return <Shell />;
+      return wizardPending ? <Wizard onDone={() => void refresh()} /> : <Shell />;
     case "setup":
       return <SetupScreen />;
     case "login":
@@ -46,6 +50,7 @@ function Shell() {
   const { username } = useAuth();
 
   return (
+    <TerminalProvider>
     <div className="min-h-screen md:pl-[17.5rem]">
       {/* Desktop: floating glass rail */}
       <aside className="glass fixed inset-y-4 left-4 z-20 hidden w-60 flex-col rounded-3xl p-4 md:flex">
@@ -111,9 +116,13 @@ function Shell() {
           ) : active === "shares" ? (
             <SharesPage />
           ) : active === "docker" ? (
-            <DockerPage />
+            <DockerPage onOpenApps={() => setActive("apps")} />
+          ) : active === "apps" ? (
+            <AppsPage />
+          ) : active === "audit" ? (
+            <AuditPage />
           ) : active === "settings" ? (
-            <SettingsPage />
+            <SettingsPage onOpenAudit={() => setActive("audit")} />
           ) : (
             <ComingSoon nav={active} />
           )}
@@ -143,6 +152,7 @@ function Shell() {
         })}
       </nav>
     </div>
+    </TerminalProvider>
   );
 }
 

@@ -155,9 +155,12 @@ export default function ConfigDialog({
             />
             <TextField
               label="Value"
+              type={item.mask ? "password" : "text"}
               value={item.value}
               onChange={(e) => set({ value: e.target.value })}
               placeholder={item.type === "variable" ? "Australia/Brisbane" : ""}
+              hint={item.mask ? "This value is masked." : undefined}
+              autoComplete={item.mask ? "off" : undefined}
               autoCapitalize="none"
               spellCheck={false}
               className="[&_input]:font-mono [&_input]:!text-xs"

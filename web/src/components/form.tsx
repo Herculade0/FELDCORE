@@ -83,7 +83,7 @@ export function TextField({
 } & InputHTMLAttributes<HTMLInputElement>) {
   const id = useId();
   return (
-    <div className={className}>
+    <div className={`min-w-0 ${className}`}>
       <label htmlFor={id} className="mb-1.5 block text-xs font-bold text-ink-2">
         {label}
       </label>
@@ -91,7 +91,7 @@ export function TextField({
         id={id}
         aria-invalid={error ? true : undefined}
         aria-describedby={hint || error ? `${id}-help` : undefined}
-        className={`w-full rounded-xl border bg-surface-2 px-3.5 py-2.5 text-sm font-medium text-ink placeholder:text-ink-3 disabled:opacity-60 ${
+        className={`w-full min-w-0 max-w-full rounded-xl border bg-surface-2 px-3.5 py-2.5 text-sm font-medium text-ink placeholder:text-ink-3 disabled:opacity-60 ${
           error ? "border-bad" : "border-line"
         }`}
         {...rest}
@@ -99,7 +99,7 @@ export function TextField({
       {(error || hint) && (
         <p
           id={`${id}-help`}
-          className={`mt-1.5 text-xs font-medium ${error ? "text-bad" : "text-ink-3"}`}
+          className={`mt-1.5 text-xs font-medium [overflow-wrap:anywhere] ${error ? "text-bad" : "text-ink-3"}`}
         >
           {error || hint}
         </p>
@@ -110,7 +110,7 @@ export function TextField({
 
 /** Shared look for text-like inputs that aren't a TextField. */
 export const inputClass =
-  "w-full rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-sm font-medium text-ink placeholder:text-ink-3 disabled:opacity-60";
+  "w-full min-w-0 max-w-full rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-sm font-medium text-ink placeholder:text-ink-3 disabled:opacity-60";
 
 export function SelectField({
   label,
@@ -124,14 +124,14 @@ export function SelectField({
 } & SelectHTMLAttributes<HTMLSelectElement>) {
   const id = useId();
   return (
-    <div className={className}>
+    <div className={`min-w-0 ${className}`}>
       <label htmlFor={id} className="mb-1.5 block text-xs font-bold text-ink-2">
         {label}
       </label>
       <select id={id} className={inputClass} {...rest}>
         {children}
       </select>
-      {hint && <p className="mt-1.5 text-xs font-medium text-ink-3">{hint}</p>}
+      {hint && <p className="mt-1.5 text-xs font-medium text-ink-3 [overflow-wrap:anywhere]">{hint}</p>}
     </div>
   );
 }
@@ -191,7 +191,7 @@ export function Alert({
       className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm font-medium text-ink ${a.cls}`}
     >
       <Icon size={17} className={`mt-0.5 shrink-0 ${a.tone}`} />
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">{children}</div>
       {action}
     </div>
   );
@@ -243,15 +243,17 @@ export function Modal({
 
   const body = (
     <>
-      <header className="flex items-center justify-between gap-4 px-6 pt-5">
-        <h2 id={id} className="text-lg font-extrabold tracking-tight text-ink">
+      <header className="flex min-w-0 items-center justify-between gap-4 px-6 pt-5">
+        <h2 id={id} className="min-w-0 text-lg font-extrabold tracking-tight text-ink [overflow-wrap:anywhere]">
           {title}
         </h2>
         <IconButton label="Close" onClick={onClose}>
           <X size={18} />
         </IconButton>
       </header>
-      <div className="overflow-y-auto px-6 py-5">{children}</div>
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-6 py-5">
+        {children}
+      </div>
       {footer && (
         <footer className="flex flex-wrap justify-end gap-3 border-t border-line px-6 py-4">
           {footer}
@@ -260,13 +262,15 @@ export function Modal({
     </>
   );
 
-  const panel = `panel relative flex max-h-[92vh] w-full flex-col rounded-t-3xl sm:rounded-3xl ${
-    size === "lg" ? "max-w-2xl" : "max-w-lg"
+  // min-w-0 lets the panel shrink inside the viewport. overflow-hidden keeps a
+  // long unbreakable string from opening a horizontal scrollbar; children wrap.
+  const panel = `panel relative flex max-h-[92vh] w-full min-w-0 max-w-full flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl ${
+    size === "lg" ? "sm:max-w-2xl" : "sm:max-w-lg"
   }`;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-hidden sm:items-center sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby={id}

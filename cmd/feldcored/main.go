@@ -5,18 +5,29 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Herculade0/feldcore/internal/api"
+	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/proxy"
+	"github.com/Herculade0/feldcore/internal/remote"
+	"github.com/Herculade0/feldcore/internal/secrets"
+	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
+	"github.com/Herculade0/feldcore/internal/snapshots"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/web"
@@ -40,6 +51,19 @@ func main() {
 			"dir", cfg.DataDir, "err", err)
 		os.Exit(1)
 	}
+	if !config.SharesRootForced() {
+		if root := strings.TrimSpace(st.Snapshot().SharesRoot); root != "" {
+			cfg.SharesRoot = root
+		}
+	}
+	box, err := secrets.Open(cfg.DataDir)
+	if err != nil {
+		log.Error("cannot open the secrets directory", "dir", cfg.DataDir, "err", err)
+		os.Exit(1)
+	}
+	// Every log line from here on is scrubbed of stored credentials.
+	log = slog.New(secrets.NewRedactingHandler(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}), box))
+	slog.SetDefault(log)
 
 	// Graceful shutdown on SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -56,21 +80,88 @@ func main() {
 		SambaInclude: cfg.SambaInclude,
 		ExportsFile:  cfg.ExportsFile,
 	}, log)
-	// Bring the system in line with stored state (e.g. after a restore).
-	go shareMgr.Apply(ctx)
+	// The wizard asks which default shares to create. A headless install
+	// (-skip-wizard, or an install that already finished setup) still uses
+	// -default-shares.
+	snap := st.Snapshot()
+	wizardOwnsShares := !cfg.SkipWizard && (snap.Admin == nil || (snap.Wizard != nil && !snap.Wizard.Done))
+	go func() {
+		if cfg.DefaultShares && !wizardOwnsShares {
+			shareMgr.EnsureDefaults(ctx)
+		} else if wizardOwnsShares {
+			log.Info("default shares will be chosen in the setup wizard")
+		} else {
+			log.Info("default shares disabled")
+		}
+		shareMgr.Apply(ctx)
+	}()
+
+	wiz := setup.New(setup.Deps{
+		Store: st, Shares: shareMgr, DataDir: cfg.DataDir,
+		ListenPort: listenPort(cfg.ListenAddr), Log: log,
+	})
+	if code, err := wiz.EnsureCode(); err != nil {
+		log.Error("could not prepare the setup code", "err", err)
+	} else if code != "" {
+		fmt.Fprintf(os.Stdout, "FELDCORE setup code: %s\n", setup.FormatCode(code))
+		log.Info("enter the setup code above on the first-start screen; it works once")
+	}
 
 	if os.Geteuid() != 0 {
 		log.Warn("not running as root: shares cannot be applied to the system")
 	}
+
+	dockerMgr := docker.NewManager(cfg.DockerSocket, st, log)
+	remoteSvc := &remote.Service{
+		Store: st, Secrets: box, Engine: dockerMgr,
+		Binary:     &remote.HostCloudflared{Dir: filepath.Join(cfg.DataDir, "bin")},
+		DataDir:    cfg.DataDir,
+		ListenPort: listenPort(cfg.ListenAddr),
+		Log:        log,
+	}
+	proxySvc := &proxy.Service{
+		Store: st, Secrets: box, Engine: dockerMgr,
+		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), Log: log,
+	}
+	snapSvc := snapshots.Open(st, dockerMgr, cfg.DataDir, func() string {
+		return filepath.Join(cfg.SharesRoot, "system", "snapshots")
+	})
+	snapSvc.Log = log
+	go func() {
+		if err := remoteSvc.Sync(ctx); err != nil {
+			log.Warn("remote access was not applied", "err", err)
+		}
+		if err := proxySvc.Apply(ctx); err != nil {
+			log.Warn("web proxy was not applied", "err", err)
+		}
+	}()
 
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
 		Auth:    auth.New(st),
 		Shares:  shareMgr,
-		Docker:  docker.NewManager(cfg.DockerSocket, st, log),
-		WebRoot: webRoot,
-		Log:     log,
+		Docker:  dockerMgr,
+		Apps: apps.New(apps.Deps{
+			DataDir:    cfg.DataDir,
+			SharesRoot: cfg.SharesRoot,
+			FeedURL:    st.Snapshot().Prefs.FeedURL,
+			Log:        log,
+			SharePaths: func() map[string]string {
+				out := map[string]string{}
+				for _, f := range shareMgr.Folders() {
+					out[strings.ToLower(f.Name)] = f.Path
+				}
+				return out
+			},
+		}),
+		Setup:      wiz,
+		Remote:     remoteSvc,
+		Proxy:      proxySvc,
+		Snaps:      snapSvc,
+		SkipWizard: cfg.SkipWizard,
+		WebRoot:    webRoot,
+		Log:        log,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -93,4 +184,16 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
 	}
+}
+
+func listenPort(addr string) int {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 8787
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n == 0 {
+		return 8787
+	}
+	return n
 }

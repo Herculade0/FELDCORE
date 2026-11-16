@@ -89,7 +89,7 @@ func (m *Manager) applySMB(ctx context.Context, shares []store.Share) error {
 	}
 
 	previous, readErr := os.ReadFile(m.p.SambaInclude)
-	content := []byte(RenderSMB(shares, m.p.SharesRoot, m.id))
+	content := []byte(RenderSMB(shares, m.Root(), m.id))
 	if err := writeAtomic(m.p.SambaInclude, content, 0o644); err != nil {
 		return fmt.Errorf("could not write %s: %v", m.p.SambaInclude, err)
 	}
