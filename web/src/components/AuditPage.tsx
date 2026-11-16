@@ -64,7 +64,7 @@ export default function AuditPage() {
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Audit</h1>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
-            Every API and MCP call made with an agent token.
+            Agent calls, plus Citizen ID sign-ins, failures, and access denials.
             {log
               ? ` The newest ${log.maxEvents.toLocaleString()} are kept, for ${log.retentionDays} days.`
               : ""}
@@ -84,7 +84,7 @@ export default function AuditPage() {
           <p className="mt-5 text-sm font-medium text-ink-3">Loading…</p>
         ) : events.length === 0 ? (
           <p className="mt-5 text-sm font-medium leading-relaxed text-ink-3">
-            No agent has called FELDCORE yet. Calls made with a token show up here. Signing in from the browser does not.
+            Nothing has been recorded yet. Agent calls and Citizen ID sign-ins show up here.
           </p>
         ) : (
           <ul className="mt-4 divide-y divide-line">

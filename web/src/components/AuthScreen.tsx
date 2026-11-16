@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { errorMessage } from "../lib/api";
+import { loginWithPasskey, passkeysAvailable } from "../lib/webauthn";
 import { LogoMark, Wordmark } from "./Logo";
 import { Alert, Button, TextField } from "./form";
 
@@ -119,9 +120,11 @@ export function SetupScreen() {
 }
 
 export function LoginScreen() {
-  const { signIn } = useAuth();
+  const { signIn, refresh } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [needsCode, setNeedsCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -130,10 +133,27 @@ export function LoginScreen() {
     setBusy(true);
     setError(null);
     try {
-      await signIn(username.trim(), password);
+      const result = await signIn(username.trim(), password, needsCode ? code.trim() : undefined);
+      if (result === "totp") {
+        setNeedsCode(true);
+        setBusy(false);
+      }
     } catch (err) {
       setError(errorMessage(err));
-      setPassword("");
+      if (!needsCode) setPassword("");
+      setCode("");
+      setBusy(false);
+    }
+  };
+
+  const passkey = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await loginWithPasskey();
+      await refresh();
+    } catch (err) {
+      setError(errorMessage(err));
       setBusy(false);
     }
   };
@@ -141,34 +161,73 @@ export function LoginScreen() {
   return (
     <Frame>
       <form onSubmit={submit} className="glass w-full max-w-sm rounded-[2rem] p-7">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink">Sign in</h1>
-        <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.2em] text-ink-3">
-          Authorised personnel only
+        <h1 className="text-xl font-extrabold tracking-tight text-ink">Citizen ID</h1>
+        <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.2em] text-ink-3">FELDCORE</p>
+        <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
+          {needsCode
+            ? `Enter the 6-digit code from the authenticator for ${username.trim()}.`
+            : "One sign-in for this server and the apps published on it."}
         </p>
         <div className="mt-6 space-y-4">
-          <TextField
-            label="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            autoCapitalize="none"
-            spellCheck={false}
-            required
-            autoFocus
-          />
-          <TextField
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
+          {!needsCode && (
+            <>
+              <TextField
+                label="Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                required
+                autoFocus
+              />
+              <TextField
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </>
+          )}
+          {needsCode && (
+            <TextField
+              label="Authenticator code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              required
+              autoFocus
+            />
+          )}
           {error && <Alert>{error}</Alert>}
         </div>
         <Button type="submit" variant="primary" loading={busy} className="mt-6 w-full">
-          Sign in
+          {needsCode ? "Verify" : "Sign in"}
         </Button>
+        {needsCode ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="mt-2 w-full"
+            disabled={busy}
+            onClick={() => {
+              setNeedsCode(false);
+              setCode("");
+              setError(null);
+            }}
+          >
+            Use a different account
+          </Button>
+        ) : (
+          passkeysAvailable() && (
+            <Button type="button" variant="secondary" className="mt-3 w-full" disabled={busy} onClick={() => void passkey()}>
+              Sign in with a passkey
+            </Button>
+          )
+        )}
       </form>
     </Frame>
   );

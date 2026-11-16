@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/names"
 	"github.com/Herculade0/feldcore/internal/secrets"
@@ -363,7 +364,10 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 		if tls == "" {
 			tls = "internal"
 		}
-		sites = append(sites, Site{Hostname: r.Hostname, Upstream: up, TLS: tls, Container: r.Container})
+		sites = append(sites, Site{
+			Hostname: r.Hostname, Upstream: up, TLS: tls, Container: r.Container,
+			Gate: s.gate(r.Container),
+		})
 	}
 	return sites, nil
 }
@@ -420,6 +424,19 @@ func (s *Service) caddyDir() string { return filepath.Join(s.DataDir, "caddy") }
 func (s *Service) dataPath() string { return filepath.Join(s.caddyDir(), "data") }
 func (s *Service) caddyfile() string {
 	return filepath.Join(s.caddyDir(), "Caddyfile")
+}
+
+// gate is the Citizen ID forward_auth upstream when this container is not public.
+func (s *Service) gate(container string) string {
+	if s.Store == nil {
+		return ""
+	}
+	for _, g := range s.Store.Snapshot().AppGrants {
+		if g.Container == container && citizenid.Gated(g.Level) {
+			return fmt.Sprintf("host.docker.internal:%d", s.listen())
+		}
+	}
+	return ""
 }
 
 func enabledRoutes(cfg store.WebConfig) []store.WebRoute {

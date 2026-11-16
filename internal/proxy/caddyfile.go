@@ -12,6 +12,9 @@ type Site struct {
 	Upstream  string // host:port, no scheme
 	TLS       string // off, internal, acme
 	Container string
+	// Gate, when set, is the Citizen ID forward_auth upstream (host:port).
+	// Empty leaves the site public, which is the default.
+	Gate string
 }
 
 // Build renders a Caddyfile. The Cloudflare token is never written here;
@@ -35,16 +38,43 @@ func Build(email string, sites []Site) (string, error) {
 		if strings.ContainsAny(site.Hostname, "\n {}") || strings.ContainsAny(site.Upstream, "\n {}") {
 			return "", fmt.Errorf("refusing to write a hostname that could change the proxy config")
 		}
+		if site.Gate != "" && strings.ContainsAny(site.Gate, "\n {}") {
+			return "", fmt.Errorf("refusing to write a gate address that could change the proxy config")
+		}
 		switch site.TLS {
 		case "off":
-			fmt.Fprintf(&b, "\nhttp://%s {\n\treverse_proxy %s\n}\n", site.Hostname, site.Upstream)
+			fmt.Fprintf(&b, "\nhttp://%s {\n", site.Hostname)
 		case "acme":
-			fmt.Fprintf(&b, "\n%s {\n\ttls {\n\t\tdns cloudflare {env.CF_API_TOKEN}\n\t}\n\treverse_proxy %s\n}\n", site.Hostname, site.Upstream)
+			fmt.Fprintf(&b, "\n%s {\n\ttls {\n\t\tdns cloudflare {env.CF_API_TOKEN}\n\t}\n", site.Hostname)
 		default:
-			fmt.Fprintf(&b, "\n%s {\n\ttls internal\n\treverse_proxy %s\n}\n", site.Hostname, site.Upstream)
+			fmt.Fprintf(&b, "\n%s {\n\ttls internal\n", site.Hostname)
 		}
+		writeProxy(&b, site)
+		b.WriteString("}\n")
 	}
 	return b.String(), nil
+}
+
+// writeProxy emits the upstream. A gated site asks Citizen ID first, and
+// still serves the sign-in page itself so the browser can authenticate on
+// this hostname. route keeps that order; Caddy would otherwise reorder
+// the directives.
+func writeProxy(b *strings.Builder, site Site) {
+	if site.Gate == "" {
+		fmt.Fprintf(b, "\treverse_proxy %s\n", site.Upstream)
+		return
+	}
+	fmt.Fprintf(b, "\troute {\n")
+	fmt.Fprintf(b, "\t\treverse_proxy /citizen/* %s\n", site.Gate)
+	fmt.Fprintf(b, "\t\tforward_auth %s {\n", site.Gate)
+	fmt.Fprintf(b, "\t\t\turi /citizen/check\n")
+	fmt.Fprintf(b, "\t\t\tcopy_headers Cookie\n")
+	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Host {http.request.host}\n")
+	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Uri {http.request.uri}\n")
+	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Proto {http.request.scheme}\n")
+	fmt.Fprintf(b, "\t\t}\n")
+	fmt.Fprintf(b, "\t\treverse_proxy %s\n", site.Upstream)
+	fmt.Fprintf(b, "\t}\n")
 }
 
 // dockerfile builds Caddy with the Cloudflare DNS challenge module.

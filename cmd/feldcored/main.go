@@ -21,6 +21,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/notify"
@@ -172,10 +173,13 @@ func main() {
 		}
 	}()
 
+	accounts := auth.New(st)
+	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: accounts, Log: log})
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
-		Auth:    auth.New(st),
+		Auth:    accounts,
+		Citizen: cid,
 		Shares:  shareMgr,
 		Docker:  dockerMgr,
 		Apps: apps.New(apps.Deps{
