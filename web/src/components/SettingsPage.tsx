@@ -25,6 +25,7 @@ import MailNotifications from "./settings/MailSettings";
 import RemoteAccess from "./settings/RemoteAccess";
 import WebAddresses from "./settings/WebAddresses";
 import SnapshotSettings from "./settings/SnapshotSettings";
+import PublishingSettings from "./publish/ProtectionSettings";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -63,7 +64,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"general" | "network" | "remote">("general");
+  const [tab, setTab] = useState<"general" | "network" | "remote" | "publishing">("general");
 
   const reload = () =>
     api<Settings>("/settings")
@@ -85,7 +86,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
       <header>
         <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Settings</h1>
         <p className="mt-2 text-sm font-semibold text-ink-2">
-          Appearance, this server, names on the network, remote access, and agent access.
+          Appearance, this server, names on the network, publishing, remote access, and agent access.
         </p>
       </header>
 
@@ -94,6 +95,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
           [
             ["general", "General"],
             ["network", "Network"],
+            ["publishing", "Publishing"],
             ["remote", "Remote access"],
           ] as const
         ).map(([id, label]) => (
@@ -114,6 +116,8 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
       {loadError && <Alert>{loadError}</Alert>}
 
       {tab === "remote" && <RemoteAccess />}
+
+      {tab === "publishing" && <PublishingSettings />}
 
       {tab === "network" && settings && (
         <>
