@@ -22,6 +22,7 @@ import AgentAccessCard from "./AgentAccess";
 import VPNSettings from "./settings/VPNSettings";
 import DriveBackup from "./settings/DriveBackup";
 import MailNotifications from "./settings/MailSettings";
+import ChannelsCard from "./notify/ChannelsCard";
 import RemoteAccess from "./settings/RemoteAccess";
 import WebAddresses from "./settings/WebAddresses";
 import SnapshotSettings from "./settings/SnapshotSettings";
@@ -127,6 +128,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
           <VPNSettings />
           <DriveBackup />
           <MailNotifications />
+          <ChannelsCard />
         </>
       )}
 

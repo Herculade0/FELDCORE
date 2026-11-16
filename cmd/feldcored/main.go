@@ -154,6 +154,7 @@ func main() {
 	go vpnSvc.Restore(ctx)
 	go vpnSvc.KeepForwarded(ctx)
 	go backups.Loop(ctx)
+	healthSvc, alerts := wireMonitor(ctx, cfg, st, box, log, mail, dockerMgr, remoteSvc, vpnSvc)
 	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
 		cs, err := dockerMgr.Containers(ctx)
 		if err != nil {
@@ -223,6 +224,8 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		Health:     healthSvc,
+		Alerts:     alerts,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
