@@ -19,6 +19,9 @@ import { shortCpu } from "../lib/format";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, SelectField, TextField, Toggle } from "./form";
 import AgentAccessCard from "./AgentAccess";
+import RemoteAccess from "./settings/RemoteAccess";
+import WebAddresses from "./settings/WebAddresses";
+import SnapshotSettings from "./settings/SnapshotSettings";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -57,6 +60,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"general" | "network" | "remote">("general");
 
   const reload = () =>
     api<Settings>("/settings")
@@ -78,12 +82,45 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
       <header>
         <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Settings</h1>
         <p className="mt-2 text-sm font-semibold text-ink-2">
-          Appearance, this server, the services FELDCORE runs, and agent access.
+          Appearance, this server, names on the network, remote access, and agent access.
         </p>
       </header>
 
+      <div className="inline-flex flex-wrap rounded-2xl bg-track p-1" role="tablist" aria-label="Settings sections">
+        {(
+          [
+            ["general", "General"],
+            ["network", "Network"],
+            ["remote", "Remote access"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`rounded-xl px-4 py-2 text-sm font-bold transition-colors ${
+              tab === id ? "accent-gradient text-white shadow-md shadow-accent/30" : "text-ink-2 hover:text-ink"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {loadError && <Alert>{loadError}</Alert>}
 
+      {tab === "remote" && <RemoteAccess />}
+
+      {tab === "network" && settings && (
+        <>
+          <NetworkCard settings={settings} onSaved={reload} />
+          <WebAddresses />
+        </>
+      )}
+
+      {tab === "general" && (
+        <>
       <Card>
         <CardTitle icon={Palette} title="Appearance" hint="Saved in this browser" />
         <div className="mt-6 grid gap-8 lg:grid-cols-2">
@@ -137,16 +174,16 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
         </div>
       </Card>
 
-      {settings && (
+      {settings && tab === "general" && (
         <>
           <SystemCard settings={settings} onSaved={reload} />
-          <NetworkCard settings={settings} onSaved={reload} />
           <ServicesCard services={settings.services} onSaved={reload} />
           <SecurityCard settings={settings} onSaved={reload} />
           <AgentAccessCard onOpenAudit={onOpenAudit} />
           <UpdatesCard settings={settings} onSaved={reload} />
           <AppsCard settings={settings} onSaved={reload} />
           <DefaultsCard settings={settings} onSaved={reload} />
+          <SnapshotSettings />
         </>
       )}
 
@@ -164,6 +201,8 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
           <Item k="Architecture" v={info?.arch ?? "–"} />
         </dl>
       </Card>
+        </>
+      )}
     </div>
   );
 }

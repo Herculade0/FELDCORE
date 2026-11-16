@@ -221,7 +221,8 @@ export default function ContainerDialog({
             {editing && !locked && (
               <Alert tone="info">
                 Applying replaces this container with a new one using these settings
-                {info?.running ? ", then starts it again" : ""}. Files in mapped folders are kept.
+                {info?.running ? ", then starts it again" : ""}. FELDCORE takes a snapshot first,
+                so you can roll back from the Snapshots panel. Files in mapped folders are kept.
                 Anything saved only inside the container is lost.
               </Alert>
             )}

@@ -184,7 +184,7 @@ func (s *Server) handleVMAutostart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"autostart": body.Enabled})
 }
 
-func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleVMSnapshots(w http.ResponseWriter, r *http.Request) {
 	if !s.readyVMs(w) {
 		return
 	}
@@ -196,7 +196,7 @@ func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"snapshots": snaps})
 }
 
-func (s *Server) handleSnapshotCreate(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleVMSnapshotCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.readyVMs(w) {
 		return
 	}
@@ -214,7 +214,7 @@ func (s *Server) handleSnapshotCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "created"})
 }
 
-func (s *Server) handleSnapshotRevert(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleVMSnapshotRevert(w http.ResponseWriter, r *http.Request) {
 	if !s.readyVMs(w) {
 		return
 	}
@@ -225,7 +225,7 @@ func (s *Server) handleSnapshotRevert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reverted"})
 }
 
-func (s *Server) handleSnapshotDelete(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleVMSnapshotDelete(w http.ResponseWriter, r *http.Request) {
 	if !s.readyVMs(w) {
 		return
 	}

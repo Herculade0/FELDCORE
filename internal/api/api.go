@@ -20,8 +20,11 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/proxy"
+	"github.com/Herculade0/feldcore/internal/remote"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
+	"github.com/Herculade0/feldcore/internal/snapshots"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/vm"
 )
@@ -36,6 +39,9 @@ type Deps struct {
 	Apps       *apps.Service
 	VMs        *vm.Manager
 	Setup      *setup.Service
+	Remote     *remote.Service
+	Proxy      *proxy.Service
+	Snaps      *snapshots.Service
 	SkipWizard bool
 	WebRoot    fs.FS
 	Log        *slog.Logger
@@ -51,6 +57,9 @@ type Server struct {
 	apps       *apps.Service
 	vms        *vm.Manager
 	wiz        *setup.Service
+	remote     *remote.Service
+	proxy      *proxy.Service
+	snaps      *snapshots.Service
 	skipWizard bool
 	webRoot    fs.FS
 	log        *slog.Logger
@@ -62,8 +71,9 @@ type Server struct {
 func New(d Deps) *Server {
 	s := &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
-		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup, skipWizard: d.SkipWizard,
-		webRoot: d.WebRoot, log: d.Log,
+		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup,
+		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
+		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 	}
 	s.initMCP()
 	return s
@@ -115,8 +125,15 @@ func (s *Server) Router() http.Handler {
 			r.Post("/vms", s.handleVMCreate)
 			r.Put("/vms/{name}", s.handleVMUpdate)
 			r.Put("/vms/{name}/xml", s.handleVMXMLPut)
-			r.Post("/vms/{name}/snapshots/{snap}/revert", s.handleSnapshotRevert)
+			r.Post("/vms/{name}/snapshots/{snap}/revert", s.handleVMSnapshotRevert)
 			r.Get("/vms/{name}/console", s.handleVMConsole)
+			r.Put("/remote", s.handleRemoteSave)
+			r.Post("/remote/install", s.handleRemoteInstall)
+			r.Put("/proxy", s.handleProxySave)
+			r.Put("/docker/containers/{id}/address", s.handleAddressSave)
+			r.Post("/docker/containers/{id}/snapshots", s.handleSnapshotCreate)
+			r.Post("/docker/containers/{id}/snapshots/{snap}/restore", s.handleSnapshotRestore)
+			r.Put("/snapshots", s.handleSnapshotSettings)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -167,14 +184,22 @@ func (s *Server) Router() http.Handler {
 				r.Post("/vms/{name}/pause", s.handleVMPause)
 				r.Post("/vms/{name}/resume", s.handleVMResume)
 				r.Post("/vms/{name}/autostart", s.handleVMAutostart)
-				r.Get("/vms/{name}/snapshots", s.handleSnapshots)
-				r.Post("/vms/{name}/snapshots", s.handleSnapshotCreate)
-				r.Delete("/vms/{name}/snapshots/{snap}", s.handleSnapshotDelete)
+				r.Get("/vms/{name}/snapshots", s.handleVMSnapshots)
+				r.Post("/vms/{name}/snapshots", s.handleVMSnapshotCreate)
+				r.Delete("/vms/{name}/snapshots/{snap}", s.handleVMSnapshotDelete)
+
+				r.Get("/remote", s.handleRemote)
+				r.Get("/proxy", s.handleProxy)
+				r.Get("/proxy/ca", s.handleProxyCA)
+				r.Get("/snapshots", s.handleSnapshotUsage)
 
 				r.Get("/docker/status", s.handleDockerStatus)
 				r.Get("/docker/options", s.handleDockerOptions)
 				r.Get("/docker/containers", s.handleDockerContainers)
 				r.Get("/docker/containers/{id}/spec", s.handleDockerSpec)
+				r.Get("/docker/containers/{id}/address", s.handleAddress)
+				r.Get("/docker/containers/{id}/snapshots", s.handleSnapshots)
+				r.Delete("/docker/containers/{id}/snapshots/{snap}", s.handleSnapshotDelete)
 				r.Get("/docker/images", s.handleDockerImages)
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
 
@@ -287,6 +312,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		vmOp        *vm.OpError
 		setupInput  *setup.InputError
 		setupOp     *setup.OpError
+		remoteInput *remote.InputError
+		remoteOp    *remote.OpError
+		proxyInput  *proxy.InputError
+		proxyOp     *proxy.OpError
+		snapInput   *snapshots.InputError
+		snapOp      *snapshots.OpError
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -301,6 +332,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, vmInput.Msg)
 	case errors.As(err, &setupInput):
 		writeError(w, http.StatusBadRequest, setupInput.Msg)
+	case errors.As(err, &remoteInput):
+		writeError(w, http.StatusBadRequest, remoteInput.Msg)
+	case errors.As(err, &proxyInput):
+		writeError(w, http.StatusBadRequest, proxyInput.Msg)
+	case errors.As(err, &snapInput):
+		writeError(w, http.StatusBadRequest, snapInput.Msg)
 	case errors.As(err, &shareOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, shareOp.Msg)
@@ -316,6 +353,15 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &setupOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, setupOp.Msg)
+	case errors.As(err, &remoteOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, remoteOp.Msg)
+	case errors.As(err, &proxyOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, proxyOp.Msg)
+	case errors.As(err, &snapOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, snapOp.Msg)
 	case errors.Is(err, apps.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):

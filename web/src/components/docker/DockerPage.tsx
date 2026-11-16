@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Boxes,
+  Camera,
   Container as ContainerIcon,
   Download,
   ExternalLink,
   FileText,
+  Globe,
   Pencil,
   Play,
   Plus,
@@ -24,6 +26,8 @@ import ContainerDialog from "./ContainerDialog";
 import LogsDialog from "./LogsDialog";
 import { TerminalButton, useTerminal } from "../Terminal";
 import { stateStyle, type Container, type DockerStatus } from "./types";
+import AddressDialog from "./AddressDialog";
+import SnapshotsDialog from "./SnapshotsDialog";
 
 export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
@@ -36,6 +40,8 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
   const setCreating = (on: boolean) => setEditing(on ? "new" : null);
   const [logsFor, setLogsFor] = useState<Container | null>(null);
   const [removing, setRemoving] = useState<Container | null>(null);
+  const [addressFor, setAddressFor] = useState<Container | null>(null);
+  const [snapsFor, setSnapsFor] = useState<Container | null>(null);
   const { openContainer } = useTerminal();
 
   const load = useCallback(async () => {
@@ -133,6 +139,8 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
                   onLogs={() => setLogsFor(c)}
                   onConsole={() => openContainer({ id: c.id, name: c.name, icon: c.icon })}
                   onEdit={() => setEditing(c)}
+                  onAddress={() => setAddressFor(c)}
+                  onSnapshots={() => setSnapsFor(c)}
                   onRemove={() => setRemoving(c)}
                 />
               ))}
@@ -177,6 +185,8 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
           }}
         />
       )}
+      {addressFor && <AddressDialog container={addressFor} onClose={() => { setAddressFor(null); void load(); }} />}
+      {snapsFor && <SnapshotsDialog container={snapsFor} onClose={() => setSnapsFor(null)} />}
     </div>
   );
 }
@@ -189,6 +199,8 @@ function ContainerRow({
   onLogs,
   onConsole,
   onEdit,
+  onAddress,
+  onSnapshots,
   onRemove,
 }: {
   c: Container;
@@ -198,6 +210,8 @@ function ContainerRow({
   onLogs: () => void;
   onConsole: () => void;
   onEdit: () => void;
+  onAddress: () => void;
+  onSnapshots: () => void;
   onRemove: () => void;
 }) {
   const [busy, setBusy] = useState("");
@@ -231,6 +245,11 @@ function ContainerRow({
                 FELDCORE
               </span>
             )}
+            {c.role && (
+              <span className="rounded-full bg-track px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ink-3">
+                System
+              </span>
+            )}
             {c.gpu && (
               <span className="rounded-full bg-ok/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ok">
                 GPU
@@ -238,6 +257,12 @@ function ContainerRow({
             )}
           </div>
           <p className="truncate text-xs font-medium text-ink-3">{c.image}</p>
+          {(c.hostname || c.publicHost) && (
+            <p className="truncate text-xs font-semibold text-accent">
+              {c.hostname?.replace(/^https?:\/\//, "")}
+              {c.publicHost ? ` · public ${c.publicHost}` : ""}
+            </p>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold">
             <span className={`inline-flex items-center gap-1.5 ${st.cls}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
@@ -276,6 +301,16 @@ function ContainerRow({
         <IconButton label="View logs" onClick={onLogs}>
           <FileText size={16} />
         </IconButton>
+        {!c.role && (
+          <>
+            <IconButton label="Web address" onClick={onAddress}>
+              <Globe size={16} />
+            </IconButton>
+            <IconButton label="Snapshots" onClick={onSnapshots}>
+              <Camera size={16} />
+            </IconButton>
+          </>
+        )}
         <IconButton label="Edit" onClick={onEdit} disabled={!!busy}>
           <Pencil size={16} />
         </IconButton>
