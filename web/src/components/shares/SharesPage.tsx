@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   Folder,
+  FolderOpen,
   FolderPlus,
   Pencil,
   Plus,
@@ -16,6 +17,7 @@ import type { Info } from "../../types";
 import { api, errorMessage } from "../../lib/api";
 import { Card, IconBadge } from "../ui";
 import { Alert, Button, IconButton, Modal } from "../form";
+import FileBrowser from "./FileBrowser";
 import ShareDialog from "./ShareDialog";
 import UsersCard from "./UsersCard";
 import { ACCESS_LABEL, type Overview, type ProtoStatus, type ServiceStatus, type Share } from "./types";
@@ -27,6 +29,7 @@ export default function SharesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<Share | "new" | null>(null);
   const [deleting, setDeleting] = useState<Share | null>(null);
+  const [browsing, setBrowsing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +57,10 @@ export default function SharesPage() {
     setNotice(msg);
     void load();
   };
+
+  if (browsing) {
+    return <FileBrowser name={browsing} onBack={() => setBrowsing(null)} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -124,6 +131,7 @@ export default function SharesPage() {
                   host={host}
                   onEdit={() => setEditing(s)}
                   onDelete={() => setDeleting(s)}
+                  onBrowse={() => setBrowsing(s.name)}
                 />
               ))}
             </section>
@@ -250,11 +258,13 @@ function ShareCard({
   host,
   onEdit,
   onDelete,
+  onBrowse,
 }: {
   share: Share;
   host: string;
   onEdit: () => void;
   onDelete: () => void;
+  onBrowse: () => void;
 }) {
   return (
     <Card>
@@ -289,6 +299,12 @@ function ShareCard({
           detail={share.nfs.readOnly ? "Read-only" : "Read and write"}
           address={`${host}:${share.path}`}
         />
+      </div>
+      <div className="mt-4 flex justify-end">
+        <Button size="sm" variant="primary" onClick={onBrowse}>
+          <FolderOpen size={14} />
+          Browse
+        </Button>
       </div>
     </Card>
   );

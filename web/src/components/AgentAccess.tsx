@@ -4,7 +4,7 @@ import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, Modal, SelectField, TextField, Toggle } from "./form";
 
-type Scope = "read" | "containers" | "vms" | "admin";
+type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "admin";
 
 interface Token {
   id: string;
@@ -38,9 +38,19 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
     hint: "Change virtual machines over the API, once that layer exists.",
   },
   {
+    key: "files:read",
+    label: "Files, read",
+    hint: "List, preview and download files in a share.",
+  },
+  {
+    key: "files:write",
+    label: "Files, write",
+    hint: "Upload, rename, move, copy and delete files in a share. Includes reading them.",
+  },
+  {
     key: "admin",
     label: "Admin",
-    hint: "Settings, shares, tokens and every other API call. Includes the scopes above.",
+    hint: "Settings, shares, tokens and every other API call. Includes the scopes above, including share files.",
   },
 ];
 
@@ -80,6 +90,8 @@ export default function AgentAccessCard({ onOpenAudit }: { onOpenAudit?: () => v
     read: true,
     containers: false,
     vms: false,
+    "files:read": false,
+    "files:write": false,
     admin: false,
   });
   const [busy, setBusy] = useState(false);
