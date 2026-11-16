@@ -89,6 +89,8 @@ func (s *Server) Router() http.Handler {
 
 			// Long-lived or slow endpoints sit outside the short timeout.
 			r.Get("/system/stream", s.handleSystemStream)
+			r.Get("/terminal", s.handleHostTerminal)
+			r.Get("/docker/containers/{id}/terminal", s.handleContainerTerminal)
 			r.Post("/shares/services/{service}/install", s.handleServiceInstall)
 			// Installing Docker and pulling images can take minutes.
 			r.Post("/docker/install", s.handleDockerInstall)
