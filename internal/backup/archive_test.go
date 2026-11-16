@@ -228,7 +228,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	eng := &memEng{}
 	bus := events.New()
 	var got []events.Event
-	bus.Subscribe(events.KindBackupFailed, func(_ context.Context, ev events.Event) { got = append(got, ev) })
+	bus.Subscribe(func(ev events.Event) { got = append(got, ev) })
 	var audited []string
 	s := &Service{
 		Secrets: box, DataDir: dir, SharesRoot: shares, Engine: eng, Events: bus,
@@ -292,7 +292,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if got := waitJob(t, s, failed.ID); got.State != jobFailed {
 		t.Fatalf("expected failure, got %+v", got)
 	}
-	if len(got) != 1 || got[0].Kind != events.KindBackupFailed || got[0].Fields["job"] != failed.ID {
+	if len(got) != 1 || got[0].Name != "backup.failed" || got[0].Severity != events.Critical || got[0].Key != "backup.failed:"+dest.ID || got[0].Fields["job"] != failed.ID {
 		t.Fatalf("event %+v", got)
 	}
 	again := s.Overview(context.Background())

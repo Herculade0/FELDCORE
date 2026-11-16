@@ -117,7 +117,9 @@ Saving a destination, deleting one, starting a job, finishing a job, failing
 a job, testing a destination, and revealing the repository password are
 written to the audit log.
 
-Failure events are described in [EVENTS.md](EVENTS.md).
+A failed backup, check, or restore is published on the event bus as
+`backup.failed`, `backup.check_failed`, or `backup.restore_failed`. See
+[EVENTS.md](EVENTS.md).
 
 ## What needs a machine this environment does not have
 

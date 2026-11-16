@@ -46,6 +46,19 @@ func bearerToken(h http.Header) (string, bool) {
 	return tok, true
 }
 
+// wizardAccess serves the guided setup before an administrator exists.
+// Afterwards it requires a session or an admin-scoped agent token.
+func (s *Server) wizardAccess(next http.Handler) http.Handler {
+	authed := s.requireAuth(s.enforceScope(next))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.auth != nil && s.auth.SetupRequired() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		authed.ServeHTTP(w, r)
+	})
+}
+
 // requireAuth accepts a browser session or a bearer agent token.
 // A valid session wins when both are present, so the signed-in UI is never
 // narrowed by a token header.
@@ -55,6 +68,8 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: user})))
 			return
 		}
+		// The parent-domain Citizen ID cookie is not a management session.
+		// A published app must not be able to replay it against /api/v1.
 		if raw, ok := bearerToken(r.Header); ok {
 			if s.auth == nil {
 				writeError(w, http.StatusUnauthorized, "Sign in to continue.")
@@ -146,8 +161,9 @@ func actorOf(r *http.Request) (string, string) {
 	return "admin", ""
 }
 
-// auditFile records a share change made by a signed-in administrator or by an
-// agent token. Reads are not recorded here; enforceScope already logs token calls.
+// auditFile records a change made by a signed-in administrator or by an agent
+// token: share files, health marks, and notification settings. Reads are not
+// recorded here; enforceScope already logs token calls.
 func (s *Server) auditFile(r *http.Request, action, target, result string) {
 	if s.auth == nil {
 		return
@@ -218,6 +234,12 @@ func scopeFor(method, path string) string {
 	if scope, ok := backupScope(method, p); ok {
 		return scope
 	}
+	if strings.HasPrefix(p, "/storage") {
+		if method == http.MethodGet || method == http.MethodHead {
+			return auth.ScopeRead
+		}
+		return auth.ScopeStorage
+	}
 	if method == http.MethodGet || method == http.MethodHead {
 		if isReadPath(p) {
 			return auth.ScopeRead
@@ -276,7 +298,9 @@ func isReadPath(p string) bool {
 		"/shares", "/fs/suggest", "/apps",
 		"/docker/status", "/docker/options", "/docker/containers", "/docker/images",
 		"/vms",
-		"/remote", "/proxy", "/proxy/ca", "/snapshots":
+		"/remote", "/proxy", "/proxy/ca", "/snapshots",
+		"/health/status", "/health/history", "/health/thresholds",
+		"/notifications/inbox":
 		return true
 	}
 	if strings.HasPrefix(p, "/vms/") {
@@ -355,6 +379,11 @@ func targetFrom(path string) string {
 	case strings.HasPrefix(p, "/vms/"):
 		id, _, _ := strings.Cut(strings.TrimPrefix(p, "/vms/"), "/")
 		return id
+	case strings.HasPrefix(p, "/storage/pools/"):
+		name, _, _ := strings.Cut(strings.TrimPrefix(p, "/storage/pools/"), "/")
+		return name
+	case strings.HasPrefix(p, "/storage/shares/"):
+		return strings.Trim(strings.TrimPrefix(p, "/storage/shares/"), "/")
 	default:
 		return ""
 	}

@@ -428,25 +428,38 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-func (s *Service) emitFailed(ctx context.Context, j *bjob, err error) {
-	if s.Events == nil || err == nil {
+func (s *Service) emitFailed(_ context.Context, j *bjob, err error) {
+	if j == nil || err == nil {
 		return
 	}
-	kind := events.KindBackupFailed
+	name := "backup.failed"
 	title := "Backup failed"
 	switch j.Kind {
 	case "check":
-		kind = events.KindBackupCheckFailed
+		name = "backup.check_failed"
 		title = "Backup check failed"
 	case "restore":
-		kind = events.KindBackupRestoreFailed
+		name = "backup.restore_failed"
 		title = "Restore failed"
 	}
-	title = title + ": " + j.Destination
-	s.Events.Emit(ctx, events.Event{
-		Kind: kind, Title: title, Body: j.Destination + " failed. " + err.Error(),
+	if j.Destination != "" {
+		title += ": " + j.Destination
+	}
+	key := name
+	if j.DestinationID != "" {
+		key = name + ":" + j.DestinationID
+	}
+	ev := events.Event{
+		Name: name, Severity: events.Critical, Title: title,
+		Body:   strings.TrimSpace(j.Destination + " failed. " + clipErr(err.Error())),
+		Source: "backup", Key: key,
 		Fields: map[string]string{"destination": j.DestinationID, "job": j.ID, "kind": j.Kind},
-	})
+	}
+	if s.Events != nil {
+		s.Events.Publish(ev)
+		return
+	}
+	events.Publish(ev)
 }
 
 func (s *Service) findDest(id string) (Destination, bool) {

@@ -49,9 +49,17 @@ func TestWizardResumesAndPreviewsWithoutChanges(t *testing.T) {
 	if err := s.Begin(false); err != nil {
 		t.Fatal(err)
 	}
+	code, err := s.EnsureCode()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
-	view, err := s.Apply(ctx, Request{
-		Step: "host", Hostname: "feldbox", Timezone: "UTC", NTP: "systemd-timesyncd",
+	if _, _, err := s.Apply(ctx, Request{Step: "welcome", Confirm: true, Code: code}); err != nil {
+		t.Fatal(err)
+	}
+	var view View
+	view, _, err = s.Apply(ctx, Request{
+		Step: "host", Code: code, Hostname: "feldbox", Timezone: "UTC", Locale: "en_US.UTF-8", NTP: "systemd-timesyncd",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -65,8 +73,8 @@ func TestWizardResumesAndPreviewsWithoutChanges(t *testing.T) {
 		}
 	}
 
-	view, err = s.Apply(ctx, Request{
-		Step: "host", Confirm: true, Hostname: "feldbox", Timezone: "UTC", NTP: "systemd-timesyncd",
+	view, _, err = s.Apply(ctx, Request{
+		Step: "host", Confirm: true, Code: code, Hostname: "feldbox", Timezone: "UTC", Locale: "en_US.UTF-8", NTP: "systemd-timesyncd",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,8 +102,15 @@ func TestApplyRefusesWithoutRoot(t *testing.T) {
 	st, _ := store.Open(dir)
 	s := New(Deps{Store: st, DataDir: dir, Root: func() bool { return false }})
 	_ = s.Begin(false)
-	_, err := s.Apply(context.Background(), Request{
-		Step: "host", Confirm: true, Hostname: "feldbox", Timezone: "UTC", NTP: "systemd-timesyncd",
+	code, err := s.EnsureCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Apply(context.Background(), Request{Step: "welcome", Confirm: true, Code: code}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = s.Apply(context.Background(), Request{
+		Step: "host", Confirm: true, Code: code, Hostname: "feldbox", Timezone: "UTC", NTP: "systemd-timesyncd",
 	})
 	if err == nil {
 		t.Fatal("expected a root error")
@@ -166,14 +181,20 @@ func TestVirtAndOSDisk(t *testing.T) {
 }
 
 func TestHostPlanRejectsBadNames(t *testing.T) {
-	if _, err := HostPlan("ok", "UTC", "systemd-timesyncd"); err != nil {
+	if _, err := HostPlan("ok", "UTC", "systemd-timesyncd", "en_US.UTF-8"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := HostPlan("-bad", "UTC", "systemd-timesyncd"); err == nil {
+	if _, err := HostPlan("ok", "UTC", "systemd-timesyncd", "C.UTF-8"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := HostPlan("-bad", "UTC", "systemd-timesyncd", ""); err == nil {
 		t.Fatal("accepted a bad host name")
 	}
-	if _, err := HostPlan("ok", "../etc", "systemd-timesyncd"); err == nil {
+	if _, err := HostPlan("ok", "../etc", "systemd-timesyncd", ""); err == nil {
 		t.Fatal("accepted a bad time zone")
+	}
+	if _, err := HostPlan("ok", "UTC", "systemd-timesyncd", "../locale"); err == nil {
+		t.Fatal("accepted a bad locale")
 	}
 }
 

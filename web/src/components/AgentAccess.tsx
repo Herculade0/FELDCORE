@@ -4,7 +4,7 @@ import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, Modal, SelectField, TextField, Toggle } from "./form";
 
-type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "backups:read" | "backups:write" | "admin";
+type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "storage" | "backups:read" | "backups:write" | "admin";
 
 interface Token {
   id: string;
@@ -25,7 +25,7 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
   {
     key: "read",
     label: "Read",
-    hint: "System, shares, the App Store, containers and VMs. The MCP server needs this.",
+    hint: "System, shares, the App Store, containers, VMs, health, and the notification inbox. The MCP server needs this.",
   },
   {
     key: "containers",
@@ -46,6 +46,11 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
     key: "files:write",
     label: "Files, write",
     hint: "Upload, rename, move, copy and delete files in a share. Includes reading them.",
+  },
+  {
+    key: "storage",
+    label: "Storage",
+    hint: "Create and change pools, mount them, and run scrub, balance and trim. Looking at disks is included in Read.",
   },
   {
     key: "backups:read",
@@ -102,6 +107,7 @@ export default function AgentAccessCard({ onOpenAudit }: { onOpenAudit?: () => v
     vms: false,
     "files:read": false,
     "files:write": false,
+    storage: false,
     "backups:read": false,
     "backups:write": false,
     admin: false,

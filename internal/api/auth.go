@@ -3,6 +3,7 @@ package api
 import (
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -16,35 +17,59 @@ type credentials struct {
 
 // currentUser resolves the request's session cookie to a username.
 func (s *Server) currentUser(r *http.Request) (string, bool) {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
+	if s.auth == nil {
 		return "", false
 	}
-	return s.auth.Authenticate(c.Value)
+	for _, name := range []string{"__Host-" + sessionCookie, sessionCookie} {
+		c, err := r.Cookie(name)
+		if err != nil || c.Value == "" {
+			continue
+		}
+		if user, ok := s.auth.Authenticate(c.Value); ok {
+			return user, true
+		}
+	}
+	return "", false
+}
+
+func cookieSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func sessionCookieName(r *http.Request) string {
+	if cookieSecure(r) {
+		return "__Host-" + sessionCookie
+	}
+	return sessionCookie
 }
 
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
+		Name:     sessionCookieName(r),
 		Value:    token,
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,                    // not readable by page scripts
 		SameSite: http.SameSiteStrictMode, // never sent on cross-site requests
-		Secure:   r.TLS != nil,
+		Secure:   cookieSecure(r),
 	})
 }
 
 func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   r.TLS != nil,
-	})
+	for _, name := range []string{sessionCookie, "__Host-" + sessionCookie} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+			Secure:   cookieSecure(r) || strings.HasPrefix(name, "__Host-"),
+		})
+	}
 }
 
 // clientKey identifies a caller for login rate limiting. It deliberately
@@ -61,12 +86,25 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"setupRequired": s.auth.SetupRequired(),
 		"authenticated": false,
+		"totpEnabled":   s.auth.TOTPEnabled(),
+		"skipWizard":    s.skipWizard,
 	}
+	admin := false
 	if user, ok := s.currentUser(r); ok {
 		resp["authenticated"] = true
 		resp["username"] = user
+		admin = true
+	} else if s.citizen != nil {
+		if id, ok := s.citizen.DeskIdentity(r); ok {
+			resp["authenticated"] = true
+			resp["username"] = id.Username
+			admin = false
+		}
 	}
-	if s.wiz != nil {
+	resp["admin"] = admin
+	if s.wiz != nil && admin {
+		resp["wizardPending"] = s.wiz.Pending()
+	} else if s.wiz != nil && resp["authenticated"] != true {
 		resp["wizardPending"] = s.wiz.Pending()
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -105,9 +143,11 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	token, expires, err := s.auth.Login(clientKey(r), in.Username, in.Password)
+	token, expires, err := s.auth.LoginCode(clientKey(r), in.Username, in.Password, in.Code)
 	if err != nil {
-		s.log.Warn("failed sign-in", "from", clientKey(r))
+		if s.log != nil {
+			s.log.Warn("failed sign-in", "from", clientKey(r))
+		}
 		s.fail(w, r, err)
 		return
 	}
@@ -121,6 +161,9 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, err)
 			return
 		}
+	}
+	if s.citizen != nil {
+		_ = s.citizen.Logout(w, r)
 	}
 	clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
