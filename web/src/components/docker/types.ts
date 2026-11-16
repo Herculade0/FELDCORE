@@ -20,6 +20,8 @@ export interface Container {
   webUrl: string;
   icon?: string;
   network: string;
+  /** True when this container is on its own feldcore-app-<name> bridge. */
+  isolated?: boolean;
   ips: string[];
   vpn?: string;
   vpnGateway?: boolean;
@@ -83,8 +85,31 @@ export interface Spec {
   icon: string;
   extraParams: string;
   privileged: boolean;
+  /**
+   * "private" gives the container its own bridge. "shared" keeps the network
+   * named above. New containers default to private.
+   */
+  isolate: "private" | "shared";
+  /** Other containers that join this app's network. */
+  links: string[];
+  /** Set only for the request that acknowledges high-risk findings. */
+  deployAnyway: boolean;
   /** Tunnel id, or empty to stay on the selected network. */
   vpn: string;
+}
+
+export interface Finding {
+  id: string;
+  severity: string;
+  title: string;
+  reason: string;
+  suggestion: string;
+  fix: boolean;
+}
+
+export interface Peer {
+  name: string;
+  id: string;
 }
 
 export interface SpecInfo {
@@ -115,6 +140,7 @@ export interface Options {
   gpus: Gpu[];
   gpuAvailable: boolean;
   vpns?: VpnChoice[];
+  peers?: Peer[];
 }
 
 export const CONFIG_TYPES: { key: ConfigType; label: string }[] = [

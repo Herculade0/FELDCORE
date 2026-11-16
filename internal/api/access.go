@@ -218,6 +218,9 @@ func isContainerWrite(method, p string) bool {
 	if p == "/docker/containers" && method == http.MethodPost {
 		return true
 	}
+	if p == "/docker/review" && method == http.MethodPost {
+		return true
+	}
 	rest, ok := strings.CutPrefix(p, "/docker/containers/")
 	if !ok || rest == "" {
 		return false

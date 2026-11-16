@@ -125,6 +125,11 @@ func (m *Manager) ApplySpec(ctx context.Context, spec Spec) (string, error) {
 	if spec.Name == "" {
 		return "", invalid("A snapshot needs a container name to restore.")
 	}
+	// A snapshot records the network the container had. An empty isolation
+	// choice must not move an old bridge container onto a private network.
+	if spec.Isolate == "" {
+		spec.Isolate = IsolateShared
+	}
 	in, err := m.inspect(ctx, spec.Name)
 	if NotFound(err) {
 		return m.Create(ctx, spec)
