@@ -13,12 +13,15 @@ import (
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
-// Scopes a token can carry. Admin includes the other three. Shell access is
-// not a scope: an agent token cannot open one, whatever it was granted.
+// Scopes a token can carry. Admin includes the others. files:write includes
+// files:read. Shell access is not a scope: an agent token cannot open one,
+// whatever it was granted.
 const (
 	ScopeRead       = "read"
 	ScopeContainers = "containers"
 	ScopeVMs        = "vms"
+	ScopeFilesRead  = "files:read"
+	ScopeFilesWrite = "files:write"
 	ScopeAdmin      = "admin"
 )
 
@@ -40,19 +43,19 @@ var maxAudit = MaxAuditEvents
 // ErrTokenNotFound means the id does not match a stored token.
 var ErrTokenNotFound = errors.New("token not found")
 
-var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeAdmin}
+var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeAdmin}
 
 // Allows reports whether a token's scopes include need. Admin includes every
-// real scope. An unknown need is never allowed, so a shell cannot be smuggled
-// in as a scope name.
+// real scope, and files:write includes files:read. An unknown need is never
+// allowed, so a shell cannot be smuggled in as a scope name.
 func Allows(have []string, need string) bool {
 	switch need {
-	case ScopeRead, ScopeContainers, ScopeVMs, ScopeAdmin:
+	case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeAdmin:
 	default:
 		return false
 	}
 	for _, s := range have {
-		if s == ScopeAdmin || s == need {
+		if s == ScopeAdmin || s == need || (need == ScopeFilesRead && s == ScopeFilesWrite) {
 			return true
 		}
 	}
@@ -277,10 +280,10 @@ func normalizeScopes(in []string) ([]string, error) {
 	have := map[string]bool{}
 	for _, s := range in {
 		switch s {
-		case ScopeRead, ScopeContainers, ScopeVMs, ScopeAdmin:
+		case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeAdmin:
 			have[s] = true
 		default:
-			return nil, &InputError{"Scopes are read, containers, vms and admin."}
+			return nil, &InputError{"Scopes are read, containers, vms, files:read, files:write and admin."}
 		}
 	}
 	out := make([]string, 0, len(have))
