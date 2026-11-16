@@ -11,6 +11,38 @@ import (
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
+func TestImageStillUsed(t *testing.T) {
+	const (
+		image = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		gone  = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+		other = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+	containers := []apiContainer{
+		{ID: gone, ImageID: image},
+		{ID: "sha256:" + other, ImageID: image},
+	}
+
+	// Another container still based on this image: do not delete it.
+	if !imageStillUsed(image, gone, containers) {
+		t.Fatal("image should count as in use when another container has it")
+	}
+	// The container being removed does not, by itself, keep the image.
+	if imageStillUsed(image, gone, []apiContainer{{ID: gone, ImageID: image}}) {
+		t.Fatal("the container being removed must not keep its own image")
+	}
+	// A different image is free to delete.
+	if imageStillUsed("sha256:"+other, gone, []apiContainer{{ID: gone, ImageID: image}}) {
+		t.Fatal("a different image was treated as in use")
+	}
+	// Prefix differences and an unknown image id must not look like a match.
+	if imageStillUsed(strings.TrimPrefix(image, "sha256:"), strings.TrimPrefix(gone, "sha256:"), containers) == false {
+		t.Fatal("sha256 prefix should not hide a container that still uses the image")
+	}
+	if imageStillUsed("", gone, containers) {
+		t.Fatal("an empty image id should not count as in use")
+	}
+}
+
 func TestSplitRef(t *testing.T) {
 	cases := map[string][2]string{
 		"nginx":                 {"nginx", "latest"},

@@ -23,6 +23,39 @@ func newTestService(t *testing.T) *Service {
 
 const testPass = "correct horse battery"
 
+func TestChangePasswordAndSessionTimeout(t *testing.T) {
+	a := newTestService(t)
+	if err := a.Setup("admin", testPass); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ChangePassword("nope", "a new password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong current password: %v", err)
+	}
+	if err := a.ChangePassword(testPass, "a new password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.Login("ip", "admin", testPass); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatal("old password still worked")
+	}
+	if _, _, err := a.Login("ip", "admin", "a new password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetSessionHours(0); err == nil {
+		t.Fatal("accepted 0 hours")
+	}
+	if err := a.SetSessionHours(24); err != nil {
+		t.Fatal(err)
+	}
+	_, exp, err := a.Login("ip", "admin", "a new password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	left := time.Until(exp)
+	if left < 23*time.Hour || left > 25*time.Hour {
+		t.Fatalf("session expiry %s", left)
+	}
+}
+
 func TestSetupOnlyOnce(t *testing.T) {
 	a := newTestService(t)
 	if !a.SetupRequired() {

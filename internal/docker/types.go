@@ -83,13 +83,14 @@ type Container struct {
 	Status   string   `json:"status"` // human text, e.g. "Up 3 hours"
 	Created  int64    `json:"created"`
 	Ports    []Port   `json:"ports"`
-	Managed  bool     `json:"managed"` // created by FELDCORE
-	Compose  bool     `json:"compose"` // owned by Docker Compose
-	GPU      bool     `json:"gpu"`     // has GPU access granted by FELDCORE
-	WebURL   string   `json:"webUrl"`  // best guess at a browser URL, if any
-	Network  string   `json:"network"` // network name(s)
-	IPs      []string `json:"ips"`     // address(es) the container answers on
-	CPUPct   float64  `json:"cpuPct"`  // live, 0 when not running
+	Managed  bool     `json:"managed"`        // created by FELDCORE
+	Compose  bool     `json:"compose"`        // owned by Docker Compose
+	GPU      bool     `json:"gpu"`            // has GPU access granted by FELDCORE
+	WebURL   string   `json:"webUrl"`         // best guess at a browser URL, if any
+	Icon     string   `json:"icon,omitempty"` // http(s) icon, when the container has one
+	Network  string   `json:"network"`        // network name(s)
+	IPs      []string `json:"ips"`            // address(es) the container answers on
+	CPUPct   float64  `json:"cpuPct"`         // live, 0 when not running
 	MemUsed  int64    `json:"memUsed"`
 	MemLimit int64    `json:"memLimit"`
 }
@@ -145,6 +146,12 @@ type Config struct {
 
 	Key   string `json:"key"`
 	Value string `json:"value"`
+
+	// Display, Required and Mask come from an Unraid template. Display is
+	// "always", "advanced" or "hidden". Mask keeps a value out of the UI.
+	Display  string `json:"display,omitempty"`
+	Required bool   `json:"required,omitempty"`
+	Mask     bool   `json:"mask,omitempty"`
 }
 
 // Spec is the editable definition of a container: what the create/edit dialog
@@ -157,6 +164,12 @@ type Spec struct {
 	GPU           bool     `json:"gpu"`
 	Configs       []Config `json:"configs"`
 	Autostart     bool     `json:"autostart"` // start after creating
+
+	// Filled in from an Unraid template. Empty for a container created by hand.
+	WebUI       string `json:"webUi,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	ExtraParams string `json:"extraParams,omitempty"`
+	Privileged  bool   `json:"privileged,omitempty"`
 }
 
 // SpecInfo is a container's current Spec plus whether it may be edited.

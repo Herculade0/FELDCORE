@@ -61,10 +61,15 @@ type Share struct {
 }
 
 // ConfigMeta is the human labelling of one container setting (a path, port,
-// variable...). Docker has nowhere to keep it, so FELDCORE does.
+// variable...). Docker has nowhere to keep it, so FELDCORE does. Display,
+// Required and Mask are copied from an Unraid template so a later edit still
+// knows which values to hide.
 type ConfigMeta struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
+	Display     string `json:"display,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Mask        bool   `json:"mask,omitempty"`
 }
 
 // State is everything FELDCORE persists.
@@ -78,6 +83,49 @@ type State struct {
 	// ContainerMeta holds setting names/descriptions per container name,
 	// keyed by a stable id for the setting (e.g. "path:/config").
 	ContainerMeta map[string]map[string]ConfigMeta `json:"containerMeta,omitempty"`
+	// Appdata is the host folder Unraid's /mnt/user/appdata paths are rewritten
+	// to. Empty means "a share named appdata, or <shares root>/appdata".
+	Appdata string `json:"appdata,omitempty"`
+	// SharesRoot is the wizard's chosen shares directory. Empty means the
+	// daemon flag/default is still in force.
+	SharesRoot string `json:"sharesRoot,omitempty"`
+	// Wizard is the first-start setup. Nil means this install predates the
+	// wizard (or it has not been claimed yet) and should not be forced through it.
+	Wizard *Wizard `json:"wizard,omitempty"`
+	// Prefs are choices made on the Settings page.
+	Prefs Prefs `json:"prefs,omitempty"`
+}
+
+// Prefs holds Settings choices that are not part of a share or a container.
+type Prefs struct {
+	SessionHours int    `json:"sessionHours,omitempty"`
+	RemoveImage  bool   `json:"removeImage,omitempty"`
+	FeedURL      string `json:"feedURL,omitempty"`
+	NTPServers   string `json:"ntpServers,omitempty"`
+	Unattended   bool   `json:"unattended,omitempty"`
+	UpdateCheck  bool   `json:"updateCheck,omitempty"`
+	Firewall     bool   `json:"firewall,omitempty"`
+	// Touched is set once Settings has saved update or firewall choices, so
+	// those win over the values the wizard stored.
+	Touched bool `json:"touched,omitempty"`
+}
+
+// Wizard is how far first-start setup has got, and the choices made so far.
+type Wizard struct {
+	Done        bool     `json:"done"`
+	Step        string   `json:"step"`
+	Hostname    string   `json:"hostname,omitempty"`
+	Timezone    string   `json:"timezone,omitempty"`
+	NTP         string   `json:"ntp,omitempty"`
+	NetMode     string   `json:"netMode,omitempty"`
+	Samba       bool     `json:"samba"`
+	NFS         bool     `json:"nfs"`
+	Docker      bool     `json:"docker"`
+	Libvirt     bool     `json:"libvirt"`
+	ShareNames  []string `json:"shareNames,omitempty"`
+	Unattended  bool     `json:"unattended"`
+	Firewall    bool     `json:"firewall"`
+	UpdateCheck bool     `json:"updateCheck"`
 }
 
 func (s State) clone() State {
@@ -93,6 +141,11 @@ func (s State) clone() State {
 		c.Shares[i] = sh
 	}
 	c.ShareUsers = append([]string(nil), s.ShareUsers...)
+	if s.Wizard != nil {
+		w := *s.Wizard
+		w.ShareNames = append([]string(nil), s.Wizard.ShareNames...)
+		c.Wizard = &w
+	}
 	if s.ContainerMeta != nil {
 		c.ContainerMeta = make(map[string]map[string]ConfigMeta, len(s.ContainerMeta))
 		for name, items := range s.ContainerMeta {
@@ -122,6 +175,19 @@ func (s *Store) SetContainerMeta(name string, meta map[string]ConfigMeta) error 
 			st.ContainerMeta = map[string]map[string]ConfigMeta{}
 		}
 		st.ContainerMeta[name] = meta
+		return nil
+	})
+}
+
+// Appdata returns the configured app-data folder, or "" for the default.
+func (s *Store) Appdata() string {
+	return s.Snapshot().Appdata
+}
+
+// SetAppdata stores the app-data folder. An empty path clears it.
+func (s *Store) SetAppdata(path string) error {
+	return s.Update(func(st *State) error {
+		st.Appdata = path
 		return nil
 	})
 }
