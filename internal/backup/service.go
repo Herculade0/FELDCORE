@@ -51,7 +51,8 @@ type Service struct {
 	RunExec    Exec
 	Exists     func(string) bool
 
-	// Events receives backup failures so another agent can alert. Nil is fine.
+	// Events receives backup, check, and restore failures. Nil publishes on
+	// the process bus after the daemon has called events.SetDefault.
 	Events *events.Bus
 	// Audit records state-changing actions. The HTTP layer sets it.
 	Audit func(actor, tokenID, action, target, result string)
