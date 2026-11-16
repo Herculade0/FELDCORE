@@ -1,0 +1,41 @@
+#!/bin/bash
+# A boot that reached userspace is healthy. Drop the boot counter on the
+# booted slot and pin the boot menu to that stable entry. A staged update
+# clears the pin; three failed boots of a counted entry sort it last.
+set -euo pipefail
+
+slot=$(sed -n 's/.*[[:space:]]feldcore\.slot=\([ab]\).*/\1/p; s/^feldcore\.slot=\([ab]\).*/\1/p' /proc/cmdline | head -1)
+if [[ -z ${slot} ]]; then
+	exit 0
+fi
+dir=/efi/loader/entries
+if [[ ! -d ${dir} ]]; then
+	echo "feldcore-bless: the EFI partition is not mounted" >&2
+	exit 0
+fi
+
+shopt -s nullglob
+counted=("${dir}/feldcore-${slot}"+*.conf)
+stable="${dir}/feldcore-${slot}.conf"
+if ((${#counted[@]} > 0)); then
+	cp "${counted[0]}" "${stable}"
+	rm -f "${counted[@]}"
+fi
+if [[ ! -f ${stable} ]]; then
+	exit 0
+fi
+
+loader=/efi/loader/loader.conf
+if [[ ! -f ${loader} ]]; then
+	printf 'timeout 3\nconsole-mode max\neditor no\nauto-entries no\nauto-firmware no\n' >"${loader}"
+fi
+name="feldcore-${slot}.conf"
+tmp=$(mktemp)
+awk -v name="${name}" '
+	$1 == "default" { next }
+	{ print }
+	END { print "default " name }
+' "${loader}" >"${tmp}"
+mv "${tmp}" "${loader}"
+sync
+echo "feldcore-bless: slot ${slot} is the good image"

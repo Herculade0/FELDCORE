@@ -17,3 +17,9 @@ web/dist/*
 
 # Local development state
 /.data/
+
+# OS image outputs and signing keys. The public key may be published.
+# A private key must never be committed.
+/dist/
+os/keys/*.key
+os/keys/*.sec

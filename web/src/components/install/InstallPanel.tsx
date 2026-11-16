@@ -96,22 +96,28 @@ export function useInstall(name: string, onDone?: () => void) {
     }
   }, [job]);
 
-  const start = useCallback(async () => {
-    setStarting(true);
-    setError(null);
-    try {
-      const next = await api<InstallJob>("/installs", { method: "POST", body: { name } });
-      watched.current = true;
-      setJob(next);
-      return next;
-    } catch (e) {
-      const msg = errorMessage(e);
-      setError(msg);
-      throw e;
-    } finally {
-      setStarting(false);
-    }
-  }, [name]);
+  const start = useCallback(
+    async (override?: { path: string; method?: "POST" | "DELETE" }) => {
+      setStarting(true);
+      setError(null);
+      try {
+        const next = await api<InstallJob>(override?.path ?? "/installs", {
+          method: override?.method ?? "POST",
+          body: override ? undefined : { name },
+        });
+        watched.current = true;
+        setJob(next);
+        return next;
+      } catch (e) {
+        const msg = errorMessage(e);
+        setError(msg);
+        throw e;
+      } finally {
+        setStarting(false);
+      }
+    },
+    [name],
+  );
 
   const active = !!job && (job.state === "queued" || job.state === "running");
   return { job, active, starting, error, start };
@@ -121,10 +127,16 @@ export function InstallPanel({
   job,
   onRetry,
   busy = false,
+  title = "Install progress",
+  success,
+  doneLabel = "Installed",
 }: {
   job: InstallJob;
   onRetry?: () => void;
   busy?: boolean;
+  title?: string;
+  success?: string;
+  doneLabel?: string;
 }) {
   const ticking = job.state === "queued" || job.state === "running";
   const [now, setNow] = useState(() => Date.now());
@@ -137,7 +149,10 @@ export function InstallPanel({
   const startAt = Date.parse(job.startedAt || job.createdAt);
   const endAt = job.finishedAt ? Date.parse(job.finishedAt) : now;
   const elapsed = formatElapsed(endAt - startAt);
-  const tone = STATE[job.state] ?? STATE.queued;
+  const tone =
+    job.state === "succeeded"
+      ? { label: doneLabel, cls: STATE.succeeded.cls }
+      : (STATE[job.state] ?? STATE.queued);
   const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -151,7 +166,7 @@ export function InstallPanel({
     <div className="w-full space-y-3" aria-busy={ticking}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-3">Install progress</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-3">{title}</p>
           <p className="truncate text-sm font-extrabold text-ink">{job.step || job.label}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -169,7 +184,7 @@ export function InstallPanel({
       >
         {lines.length ? lines.join("\n") : ticking ? "Waiting for output…" : ""}
       </pre>
-      {job.state === "succeeded" && <Alert tone="info">{job.label} is installed.</Alert>}
+      {job.state === "succeeded" && <Alert tone="info">{success ?? `${job.label} is installed.`}</Alert>}
       {job.state === "failed" && (
         <>
           <Alert>{job.error || "The install failed."}</Alert>

@@ -1,0 +1,15 @@
+systemd
+systemd-sysv
+systemd-boot
+systemd-boot-efi
+linux-image-amd64
+dbus
+ca-certificates
+iproute2
+kmod
+e2fsprogs
+dosfstools
+gdisk
+zstd
+firmware-linux-free
+tzdata

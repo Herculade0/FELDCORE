@@ -120,31 +120,31 @@ A private catalogue merged on top of Community Apps: game profiles, VM templates
 
 ## FELDCORE OS (the FELDCORE distro)
 
-Long-term, after the Debian package is the normal way to run FELDCORE. An Unraid-style immutable appliance, booting from a dedicated disk partition instead of a USB stick. This is a design note, not something the current daemon does.
+Long-term, after the Debian package is the normal way to run FELDCORE. An Unraid-style immutable appliance, booting from a dedicated disk partition instead of a USB stick. The image, the installer, and the update flow are described in [OS-IMAGE.md](OS-IMAGE.md).
 
-The running system is a Debian image (kernel plus a squashfs root), built with debootstrap, mkosi, or live-build. Each boot loads that image into RAM or mounts it read-only. A small persistent config partition, in the role of Unraid's `/boot/config`, holds FELDCORE state, network settings, share definitions, and container templates. Data, appdata, and VM disks stay on the storage disks. Updates write a new image into the inactive A/B slot and boot it; boot counting falls back to the last good image if that boot is not healthy. An installer ISO partitions the target disk. First boot reuses the first-start wizard.
+The running system is a Debian root on an ext4 slot, built with debootstrap (mkosi can build the same root). The kernel mounts that slot read-only. A persistent state partition, in the role of Unraid's `/boot/config`, holds FELDCORE state at `/var/lib/feldcore`. Data, appdata, and VM disks stay on the storage disks. Updates write a new image into the inactive A/B slot and boot it; boot counting falls back to the last good image if that boot is not healthy. An installer disk image partitions the target disk. First boot reuses the first-start wizard.
 
 ### OS-1 — A bootable image
-- [ ] Build a Debian root with debootstrap, mkosi, or live-build
-- [ ] Kernel plus squashfs, mounted read-only or copied into RAM on boot
-- [ ] Boot from a disk partition with systemd-boot, UEFI only, not from USB
-- [ ] Persistent config partition, mounted at a fixed path, holding FELDCORE state
+- [x] Build a Debian root with debootstrap or mkosi
+- [x] Kernel plus an ext4 slot, mounted read-only
+- [x] Boot from a disk partition with systemd-boot, UEFI only, not from USB
+- [x] Persistent state partition, mounted at `/var/lib/feldcore`
 
-### OS-2 — Installer ISO
-- [ ] ISO that partitions one chosen OS disk: boot partition, A and B image slots, config partition
-- [ ] Write only that disk. Data disks are left untouched
-- [ ] First boot runs the existing setup wizard
+### OS-2 — Installer image
+- [x] Installer image that partitions one chosen OS disk: ESP, A and B slots, state partition
+- [x] Write only that disk. Data disks are left untouched
+- [x] First boot runs the existing setup wizard
 
 ### OS-3 — Atomic updates
-- [ ] Update the OS only by writing a new image into the inactive slot and booting it. The running system has no apt
-- [ ] Use systemd-boot boot counting so a failed boot falls back to the previous slot
-- [ ] Keep the config partition out of the image, so an update does not wipe state
+- [x] Update the OS only by writing a new image into the inactive slot and booting it. The running system has no apt
+- [x] Use systemd-boot boot counting so a failed boot falls back to the previous slot
+- [x] Keep the state partition out of the image, so an update does not wipe state
 
 ### OS-4 — Appliance layout
-- [ ] Data, appdata, and VM disks live on the storage disks, not on the OS slots
-- [ ] Share definitions and container templates stay on the config partition
-- [ ] Drivers and extra software ship as systemd-sysext images
-- [ ] Apps run as Docker containers. No apt on the running system
+- [x] Data, appdata, and VM disks live on the storage disks, not on the OS slots
+- [x] Share definitions and container templates stay on the state partition
+- [x] Extensions install as systemd-sysext images on the state partition. The manager is in the UI. NVIDIA, the container toolkit, and libvirt are not built into this image
+- [x] The running system has no apt. Apps are containers; Docker itself is an extension, not a package in the base image
 
 ### Decisions
 

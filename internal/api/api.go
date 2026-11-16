@@ -24,6 +24,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/files"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/notify"
+	"github.com/Herculade0/feldcore/internal/osupdate"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
@@ -55,6 +56,7 @@ type Deps struct {
 	Backups    *backup.Service
 	Mail       *notify.Service
 	Publish    *publish.Service
+	OS         *osupdate.Service
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -82,6 +84,7 @@ type Server struct {
 	fetcher    *files.Fetcher
 	installs   *install.Runner
 	publish    *publish.Service
+	os         *osupdate.Service
 }
 
 // New returns a Server.
@@ -92,6 +95,7 @@ func New(d Deps) *Server {
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
+		os: d.OS,
 	}
 	s.uploads = files.NewUploads()
 	s.fetcher = files.NewFetcher(func() bool {
@@ -274,6 +278,16 @@ func (s *Server) Router() http.Handler {
 				r.Get("/installs/{id}", s.handleInstall)
 				r.Post("/installs", s.handleInstallStart)
 
+				r.Get("/os", s.handleOS)
+				r.Post("/os/check", s.handleOSCheck)
+				r.Post("/os/update", s.handleOSUpdate)
+				r.Post("/os/rollback", s.handleOSRollback)
+				r.Put("/os/schedule", s.handleOSSchedule)
+				r.Put("/os/source", s.handleOSSource)
+				r.Post("/os/sysexts/{id}", s.handleOSSysextInstall)
+				r.Delete("/os/sysexts/{id}", s.handleOSSysextRemove)
+				r.Post("/os/reboot", s.handleOSReboot)
+
 				r.Get("/audit", s.handleAudit)
 				r.Get("/agent/tokens", s.handleTokensList)
 				r.Post("/agent/tokens", s.handleTokenCreate)
@@ -401,6 +415,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		fileOp       *files.OpError
 		fileConflict *files.ConflictError
 		fileForbid   *files.ForbiddenURL
+		osInput      *osupdate.InputError
+		osOp         *osupdate.OpError
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -429,6 +445,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, pubInput.Msg)
 	case errors.As(err, &snapInput):
 		writeError(w, http.StatusBadRequest, snapInput.Msg)
+	case errors.As(err, &osInput):
+		writeError(w, http.StatusBadRequest, osInput.Msg)
+	case errors.Is(err, osupdate.ErrBusy):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.As(err, &fileInput):
 		writeError(w, http.StatusBadRequest, fileInput.Msg)
 	case errors.As(err, &fileForbid):
@@ -474,6 +494,11 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &snapOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, snapOp.Msg)
+	case errors.As(err, &osOp):
+		if s.log != nil {
+			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, osOp.Msg)
 	case errors.As(err, &fileOp):
 		if s.log != nil {
 			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)

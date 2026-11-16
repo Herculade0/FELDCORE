@@ -9,6 +9,7 @@ import { IconButton } from "./components/form";
 import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import AuditPage from "./components/AuditPage";
+import UpdatesPage from "./components/UpdatesPage";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
@@ -123,6 +124,8 @@ function Shell() {
             <VMsPage />
           ) : active === "audit" ? (
             <AuditPage />
+          ) : active === "updates" ? (
+            <UpdatesPage />
           ) : active === "settings" ? (
             <SettingsPage onOpenAudit={() => setActive("audit")} />
           ) : null}

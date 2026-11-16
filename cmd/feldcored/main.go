@@ -24,6 +24,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/notify"
+	"github.com/Herculade0/feldcore/internal/osupdate"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
@@ -183,6 +184,16 @@ func main() {
 		}
 	}()
 
+	osSvc := &osupdate.Service{
+		DataDir:       cfg.DataDir,
+		DaemonVersion: version.Current,
+		Store:         st,
+		ManifestURL:   os.Getenv("FELDCORE_UPDATE_URL"),
+		PubKey:        os.Getenv("FELDCORE_UPDATE_PUBKEY"),
+		Root:          os.Getenv("FELDCORE_OS_ROOT"),
+		AllowLocal:    os.Getenv("FELDCORE_UPDATE_ALLOW_LOCAL") == "1",
+		Log:           log,
+	}
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
@@ -223,7 +234,9 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		OS:         osSvc,
 	})
+	go srv.OSLoop(ctx)
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Router(),

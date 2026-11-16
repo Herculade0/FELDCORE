@@ -65,6 +65,7 @@ func (s *Server) wireInstalls() {
 			},
 		})
 	}
+	s.registerOSJobs()
 	if s.remote != nil {
 		rem := s.remote
 		s.installs.Register("cloudflared", install.Spec{

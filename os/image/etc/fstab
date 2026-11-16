@@ -1,0 +1,10 @@
+# The root filesystem is mounted read-only by the kernel (root=LABEL=feldcore-a ro).
+# It is intentionally absent here so systemd-remount-fs does not make it writable.
+LABEL=FC-ESP          /efi                 vfat  umask=0077,nofail                    0 2
+LABEL=feldcore-state  /var/lib/feldcore    ext4  defaults,nofail,x-systemd.mkdir     0 2
+tmpfs                 /tmp                 tmpfs nosuid,nodev,mode=1777             0 0
+tmpfs                 /var/tmp             tmpfs nosuid,nodev,mode=1777             0 0
+tmpfs                 /var/log             tmpfs nosuid,nodev                       0 0
+tmpfs                 /var/cache           tmpfs nosuid,nodev                       0 0
+tmpfs                 /var/lib/systemd     tmpfs nosuid,nodev                       0 0
+tmpfs                 /home                tmpfs nosuid,nodev                       0 0
