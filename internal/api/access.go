@@ -128,6 +128,41 @@ func (s *Server) enforceScope(next http.Handler) http.Handler {
 	})
 }
 
+func actorOf(r *http.Request) (string, string) {
+	p, ok := principalFrom(r.Context())
+	if !ok {
+		return "admin", ""
+	}
+	if p.ViaToken {
+		name := p.TokenName
+		if name == "" {
+			name = "agent"
+		}
+		return name, p.TokenID
+	}
+	if p.Username != "" {
+		return p.Username, ""
+	}
+	return "admin", ""
+}
+
+// auditFile records a share change made by a signed-in administrator or by an
+// agent token. Reads are not recorded here; enforceScope already logs token calls.
+func (s *Server) auditFile(r *http.Request, action, target, result string) {
+	if s.auth == nil {
+		return
+	}
+	name, id := actorOf(r)
+	if err := s.auth.Record(id, store.AuditEvent{
+		TokenName: name,
+		Action:    action,
+		Target:    clip(target, 200),
+		Result:    result,
+	}); err != nil && s.log != nil {
+		s.log.Warn("audit log write failed", "err", err)
+	}
+}
+
 func (s *Server) record(p principal, action, target, result string) {
 	if s.auth == nil || !p.ViaToken {
 		return
@@ -177,6 +212,9 @@ func scopeFor(method, path string) string {
 	if p == "/terminal" || strings.HasSuffix(p, "/terminal") || strings.HasSuffix(p, "/console") {
 		return "shell"
 	}
+	if scope, ok := fileScope(method, p); ok {
+		return scope
+	}
 	if method == http.MethodGet || method == http.MethodHead {
 		if isReadPath(p) {
 			return auth.ScopeRead
@@ -190,6 +228,31 @@ func scopeFor(method, path string) string {
 		return auth.ScopeVMs
 	}
 	return auth.ScopeAdmin
+}
+
+// fileScope classifies the share file browser. A zip download is a POST so
+// the browser can send the selection, but it does not change the share.
+// files:write includes files:read; admin includes both.
+func fileScope(method, p string) (string, bool) {
+	rest, ok := strings.CutPrefix(p, "/shares/")
+	if !ok {
+		return "", false
+	}
+	_, sub, ok := strings.Cut(rest, "/")
+	if !ok {
+		return "", false
+	}
+	switch {
+	case sub == "files" || strings.HasPrefix(sub, "files/"):
+	case sub == "uploads" || strings.HasPrefix(sub, "uploads/"):
+	case sub == "fetch" || strings.HasPrefix(sub, "fetch/"):
+	default:
+		return "", false
+	}
+	if method == http.MethodGet || method == http.MethodHead || (method == http.MethodPost && sub == "files/zip") {
+		return auth.ScopeFilesRead, true
+	}
+	return auth.ScopeFilesWrite, true
 }
 
 func isReadPath(p string) bool {

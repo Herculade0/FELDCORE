@@ -38,6 +38,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"updates":  map[string]any{"unattended": view.Unattended, "updateCheck": view.UpdateCheck},
 		"apps":     map[string]any{"feedURL": feed, "feedDefault": apps.FeedURL},
 		"defaults": map[string]any{"removeImage": view.RemoveImage},
+		"files":    map[string]any{"allowLANURLs": s.auth != nil && s.auth.AllowLANURLs()},
 	})
 }
 
