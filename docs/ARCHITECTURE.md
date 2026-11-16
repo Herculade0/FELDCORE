@@ -29,6 +29,9 @@ The whole product ships as one executable with the web UI embedded via
   embedded SPA with an index.html fallback.
 - **`internal/shares`** *(wip)* — model a share as a managed directory; render
   Samba and NFS config fragments; reload services.
+- **`internal/storage`** — disk inventory, pools (btrfs, ZFS, XFS), UUID mounts,
+  and scrub, balance and trim on the install job runner. The first-run wizard
+  calls the same Go API. See [STORAGE.md](STORAGE.md).
 - **`internal/docker`** — talk to the Docker Engine API over its unix socket.
 - **`internal/apps`** — the App Store. It caches the public Community
   Applications feed (the same JSON Unraid's CA plugin downloads, which already

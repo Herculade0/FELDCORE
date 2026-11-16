@@ -21,10 +21,13 @@ address.
 
 | Scope | What it allows |
 | --- | --- |
-| `read` | Look at the host, shares, the App Store, containers, container logs, and VMs. Required for MCP. |
+| `read` | Look at the host, shares, the App Store, containers, container logs, VMs, and the storage inventory. Required for MCP. |
 | `containers` | Create, start, stop, restart and delete containers over the HTTP API. |
 | `vms` | Create, edit, start, stop and delete virtual machines over the HTTP API. Listing VMs is `read`. |
-| `admin` | Settings, shares, tokens and every other API call. Includes the three scopes above. |
+| `files:read` | List, preview and download files in a share. |
+| `files:write` | Upload, rename, move, copy and delete files in a share. Includes `files:read`. |
+| `storage` | Create and change pools, mount them by UUID, add or replace a disk, and run scrub, balance and trim. Looking at disks is `read`. |
+| `admin` | Settings, shares, tokens and every other API call. Includes the scopes above. |
 
 `admin` does not include a shell. The host terminal, container consoles and a VM's VNC console stay on the signed-in browser session. An agent token that calls them is refused and the refusal is written to the audit log.
 

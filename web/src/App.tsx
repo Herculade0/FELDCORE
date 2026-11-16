@@ -12,6 +12,7 @@ import AuditPage from "./components/AuditPage";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
+import StoragePage from "./components/storage/StoragePage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
@@ -113,6 +114,8 @@ function Shell() {
         <ErrorBoundary resetKey={active} area={NAV.find((n) => n.key === active)?.label}>
           {active === "dashboard" ? (
             <Dashboard onNavigate={setActive} />
+          ) : active === "storage" ? (
+            <StoragePage />
           ) : active === "shares" ? (
             <SharesPage />
           ) : active === "docker" ? (

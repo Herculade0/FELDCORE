@@ -32,6 +32,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
+	"github.com/Herculade0/feldcore/internal/storage"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/version"
@@ -183,6 +184,24 @@ func main() {
 		}
 	}()
 
+	diskSvc, err := storage.Open(storage.Deps{
+		DataDir: cfg.DataDir, SharesRoot: shareMgr.Root,
+		PermitHostDisks: true, ApplySystem: os.Geteuid() == 0, Log: log,
+		SetAppdata: st.SetAppdata,
+		ShareNames: func() []string {
+			folders := shareMgr.Folders()
+			names := make([]string, 0, len(folders))
+			for _, f := range folders {
+				names = append(names, f.Name)
+			}
+			return names
+		},
+	})
+	if err != nil {
+		log.Error("cannot open storage", "err", err)
+		os.Exit(1)
+	}
+
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
@@ -223,7 +242,14 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		Storage:    diskSvc,
 	})
+	go func() {
+		if err := diskSvc.Restore(ctx); err != nil {
+			log.Warn("a storage pool was not mounted", "err", err)
+		}
+		diskSvc.Loop(ctx)
+	}()
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Router(),
