@@ -303,6 +303,10 @@ func TestSpecFromInspect(t *testing.T) {
 
 	want := fullSpec()
 	want.Configs[0].Description = "Static files"
+	want.Isolate = IsolateShared
+	// The container had a capability that was not stored in the extra
+	// parameters. The form shows it so a later edit can keep or remove it.
+	want.ExtraParams = "--cap-add=NET_ADMIN"
 	if !reflect.DeepEqual(got, want) {
 		gj, _ := json.MarshalIndent(got, "", " ")
 		wj, _ := json.MarshalIndent(want, "", " ")
@@ -341,6 +345,7 @@ func TestRecreateBodyPreservesAndCleans(t *testing.T) {
 	in := inspectFixture(t)
 	s := fullSpec()
 	s.Configs[1].HostPort = 9090 // the edit: move the web port
+	s.ExtraParams = "--cap-add=NET_ADMIN"
 	body := recreateBody(in, imageFixture(t), s, nil)
 
 	// Settings FELDCORE does not model survive the round trip untouched,

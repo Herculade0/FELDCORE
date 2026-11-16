@@ -300,16 +300,41 @@ func (s *Service) Apply(ctx context.Context) error {
 		if !r.Enabled {
 			continue
 		}
-		mode, err := s.Engine.NetworkMode(ctx, r.Container)
-		if err != nil || mode == "host" || mode == "none" {
-			continue
-		}
-		_ = s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, r.Container)
+		_ = s.Attach(ctx, r.Container)
 	}
 	if s.Log != nil {
 		s.Log.Info("web proxy applied", "sites", len(sites), "acme", needsACME)
 	}
 	return nil
+}
+
+// Attach connects one container to the proxy network when a hostname points
+// at it. A private app bridge is a normal Docker network, so the proxy reaches
+// the app by name once the app is also on the proxy network. That is the same
+// path a container on any user-defined network already uses.
+//
+// Host and none have no second network. A container that shares another
+// container's network (a VPN workload, network mode container:<gateway>)
+// cannot join one either; its published port stays on the gateway.
+func (s *Service) Attach(ctx context.Context, name string) error {
+	if s == nil || s.Engine == nil || name == "" || s.Store == nil {
+		return nil
+	}
+	want := false
+	for _, r := range s.Store.Snapshot().Web.Routes {
+		if r.Enabled && r.Container == name {
+			want = true
+			break
+		}
+	}
+	if !want {
+		return nil
+	}
+	mode, err := s.Engine.NetworkMode(ctx, name)
+	if err != nil || mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") {
+		return nil
+	}
+	return s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, name)
 }
 
 // URLFor returns the browser URL for a container, or "" when it has no name.
