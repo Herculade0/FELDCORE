@@ -94,6 +94,11 @@ func TestParseFeedFiltersAndMaps(t *testing.T) {
 	if plex.Deprecated {
 		t.Fatal("plex should not be deprecated")
 	}
+	for _, rec := range parsed.apps {
+		if rec.app.Categories == nil {
+			t.Fatalf("%s has a null category list", rec.app.Name)
+		}
+	}
 	if parsed.labels["MediaApp-Video"] != "Media Applications / Video" {
 		t.Errorf("label %q", parsed.labels["MediaApp-Video"])
 	}

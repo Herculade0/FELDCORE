@@ -73,10 +73,11 @@ export default function AppsPage() {
   const apps = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (cat?.apps ?? []).filter((a) => {
+      const cats = a.categories ?? [];
       if (!showDeprecated && a.deprecated) return false;
-      if (category && !a.categories.includes(category)) return false;
+      if (category && !cats.includes(category)) return false;
       if (!q) return true;
-      const hay = [a.name, a.author, a.image, a.overview, ...a.categories].join(" ").toLowerCase();
+      const hay = [a.name, a.author, a.image, a.overview, ...cats].join(" ").toLowerCase();
       return hay.includes(q);
     });
   }, [cat, query, category, showDeprecated]);
@@ -244,7 +245,7 @@ function AppCard({
         {app.overview || "No description."}
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {app.categories.slice(0, 2).map((c) => (
+        {(app.categories ?? []).slice(0, 2).map((c) => (
           <span key={c} className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
             {label(c)}
           </span>
