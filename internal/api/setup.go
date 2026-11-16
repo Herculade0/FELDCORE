@@ -35,21 +35,3 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, view)
 }
-
-func (s *Server) handleNetConfirm(w http.ResponseWriter, r *http.Request) {
-	if s.wiz == nil {
-		writeError(w, http.StatusNotFound, "Setup is not available.")
-		return
-	}
-	var in struct {
-		Token string `json:"token"`
-	}
-	if !readJSON(w, r, &in) {
-		return
-	}
-	if err := s.wiz.ConfirmNet(in.Token); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "kept"})
-}

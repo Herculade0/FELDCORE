@@ -81,9 +81,8 @@ that changes the machine shows what it will do before it does it:
 
 1. Host name, time zone and NTP (`systemd-timesyncd`, or chrony).
 2. The current interface and address. DHCP stays as it is unless you choose a
-   static address. A static change is applied a few seconds after the page
-   shows the new URL, and the previous settings are restored if that URL is
-   not confirmed within 90 seconds.
+   static address. The page shows the new URL before applying it. A wrong
+   address drops the page; fix it from the console, or start setup over.
 3. Where share folders live, with free space, and a warning when that folder
    is on the operating-system disk. Nothing is partitioned or formatted.
 4. Samba, NFS and Docker, plus libvirt/KVM only when the CPU can virtualise.
@@ -152,7 +151,8 @@ or a disposable VM.
   Without root, the defaults are not created.
 - The one-time setup code is deleted after the administrator account is
   created. A static network change writes a FELDCORE drop-in for
-  systemd-networkd or ifupdown and removes it again if you do not confirm.
+  systemd-networkd or ifupdown and reloads that interface. It does not
+  switch the address back if the new one is unreachable.
   Choosing the firewall installs ufw and adds allow rules only; it does not
   change sshd. Choosing automatic security updates installs
   `unattended-upgrades` and turns on the Debian security-update schedule.
@@ -194,7 +194,7 @@ internal/store     JSON state file (atomic writes)
 internal/shares    SMB/NFS share management
 internal/docker    Docker Engine API client + container management
 internal/apps      App Store: cached Community Applications catalogue
-internal/setup     first-start wizard, claim code, network rollback
+internal/setup     first-start wizard and the one-time claim code
 scripts/           integration tests
 web/               React front-end (Vite + Tailwind), embedded via go:embed
 deploy/            install.sh, get.sh and the systemd unit

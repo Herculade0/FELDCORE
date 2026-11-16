@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { LogOut, Moon, Sun } from "lucide-react";
 import { NAV, type NavKey } from "./nav";
 import { VERSION } from "./version";
@@ -15,7 +15,6 @@ import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import Wizard from "./components/setup/Wizard";
-import { api } from "./lib/api";
 
 export default function App() {
   return (
@@ -30,15 +29,6 @@ export default function App() {
 /** Nothing behind this renders until the visitor is signed in. */
 function Gate() {
   const { phase, wizardPending, refresh } = useAuth();
-  useEffect(() => {
-    const tok = new URLSearchParams(window.location.search).get("net");
-    if (!tok) return;
-    void api("/setup/network/confirm", { method: "POST", body: { token: tok } }).finally(() => {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("net");
-      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
-    });
-  }, []);
   switch (phase) {
     case "ready":
       return wizardPending ? <Wizard onDone={() => void refresh()} /> : <Shell />;

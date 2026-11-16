@@ -2,7 +2,6 @@ package setup
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -374,65 +373,36 @@ func (s *Service) applySecurity(ctx context.Context, req Request) error {
 	return nil
 }
 
-// scheduleNet returns before the address changes, so the browser can show
-// the new URL. The change itself waits a few seconds, then reverts unless
-// the new page confirms with the token.
-func (s *Service) scheduleNet(ctx context.Context, w *store.Wizard, req Request) error {
+// applyNet writes a static address and reloads that interface. A wrong
+// address can lock the browser out; that is recovered from the console,
+// not by an automatic rollback.
+func (s *Service) applyNet(ctx context.Context, req Request) error {
 	if s.backend() == "" {
 		return &OpError{"This server is not using systemd-networkd or ifupdown, so FELDCORE will not change the address. Stay on DHCP."}
 	}
-	token := randomToken()
-	deadline := s.now().Add(90 * time.Second)
-	s.mu.Lock()
-	s.netToken = token
-	s.netURL = NewURL(req.Address, s.listenPort)
-	s.netOK = false
-	s.netDeadline = deadline
-	s.mu.Unlock()
-	if err := s.saveWizard(*w); err != nil {
-		return err
-	}
-	go func() {
-		// Answer the browser first, then change the address.
-		time.Sleep(3 * time.Second)
-		if err := s.commitNet(context.Background(), req); err != nil {
-			s.log.Error("network change failed; leaving the current address", "err", err)
-			s.mu.Lock()
-			s.netToken = ""
-			s.mu.Unlock()
-			return
-		}
-		time.Sleep(time.Until(deadline))
-		s.rollbackIfNeeded()
-	}()
-	return nil
-}
-
-func (s *Service) commitNet(ctx context.Context, req Request) error {
 	path, body := s.netFile(req)
-	prev, err := os.ReadFile(path)
-	missing := os.IsNotExist(err)
-	if err != nil && !missing {
-		return err
+	prev, readErr := os.ReadFile(path)
+	missing := os.IsNotExist(readErr)
+	if readErr != nil && !missing {
+		return &OpError{"Could not read the current network settings: " + readErr.Error()}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return &OpError{"Could not write the network settings: " + err.Error()}
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return err
+		return &OpError{"Could not write the network settings: " + err.Error()}
 	}
-	s.mu.Lock()
-	s.rollback = func() {
+	if err := s.reloadNet(ctx, req.Iface); err != nil {
+		// The reload itself failed, so put the file back. A reload that
+		// succeeds and then strands the browser is left as it is.
 		if missing {
 			_ = os.Remove(path)
 		} else {
 			_ = os.WriteFile(path, prev, 0o644)
 		}
-		s.reloadNet(context.Background(), req.Iface)
+		return &OpError{"The address was not applied: " + err.Error()}
 	}
-	s.mu.Unlock()
-	s.persistPending(path, prev, missing, req.Iface)
-	return s.reloadNet(ctx, req.Iface)
+	return nil
 }
 
 func (s *Service) netFile(req Request) (string, string) {
@@ -459,75 +429,6 @@ func (s *Service) reloadNet(ctx context.Context, iface string) error {
 	_, _ = s.cmd.Run(ctx, "ifdown", iface)
 	_, err := s.cmd.Run(ctx, "ifup", iface)
 	return err
-}
-
-func (s *Service) persistPending(path string, prev []byte, missing bool, iface string) {
-	raw, _ := json.Marshal(map[string]any{"path": path, "prev": prev, "missing": missing, "iface": iface})
-	_ = os.WriteFile(filepath.Join(s.dataDir, "net-pending.json"), raw, 0o600)
-}
-
-func (s *Service) recoverNet() {
-	b, err := os.ReadFile(filepath.Join(s.dataDir, "net-pending.json"))
-	if err != nil {
-		return
-	}
-	// A restart during the confirm window is treated as a failure: put the
-	// previous address back rather than risk stranding the server.
-	var p struct {
-		Path    string `json:"path"`
-		Prev    []byte `json:"prev"`
-		Missing bool   `json:"missing"`
-		Iface   string `json:"iface"`
-	}
-	if json.Unmarshal(b, &p) == nil {
-		if p.Missing {
-			_ = os.Remove(p.Path)
-		} else if p.Path != "" {
-			_ = os.WriteFile(p.Path, p.Prev, 0o644)
-		}
-		_ = s.reloadNet(context.Background(), p.Iface)
-	}
-	_ = os.Remove(filepath.Join(s.dataDir, "net-pending.json"))
-	s.log.Warn("network change was not confirmed before a restart; previous settings were restored")
-}
-
-// ConfirmNet accepts the one-time token from the new address and keeps the
-// new settings. It does not need a login cookie, because the cookie was
-// issued for the old address.
-func (s *Service) ConfirmNet(token string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.netToken == "" || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(s.netToken)) != 1 {
-		return &InputError{"That network confirmation is not valid."}
-	}
-	if s.now().After(s.netDeadline) {
-		return &InputError{"The confirm window has closed. The previous network settings were kept."}
-	}
-	s.netOK = true
-	s.netToken = ""
-	s.rollback = nil
-	_ = os.Remove(filepath.Join(s.dataDir, "net-pending.json"))
-	w := s.wizard()
-	w.Step = nextStep("network")
-	w.NetMode = "static"
-	go func() { _ = s.saveWizard(w) }()
-	return nil
-}
-
-func (s *Service) rollbackIfNeeded() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.netOK || s.rollback == nil {
-		return
-	}
-	if !NeedsRollback(s.netOK, s.now(), s.netDeadline) && s.now().Before(s.netDeadline) {
-		return
-	}
-	s.log.Warn("network change was not confirmed; restoring the previous address")
-	s.rollback()
-	s.rollback = nil
-	s.netToken = ""
-	_ = os.Remove(filepath.Join(s.dataDir, "net-pending.json"))
 }
 
 func (s *Service) summary(w store.Wizard, v View) []string {
