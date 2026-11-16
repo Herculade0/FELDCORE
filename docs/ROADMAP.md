@@ -72,6 +72,40 @@ Follow-ups
 - [ ] Create VM wizard (ISO, disk, CPU, RAM, virtio)
 - [ ] Browser console (VNC/SPICE)
 
+## FELDCORE OS (the FELDCORE distro)
+
+Long-term, after the Debian package is the normal way to run FELDCORE. An Unraid-style immutable appliance, booting from a dedicated disk partition instead of a USB stick. This is a design note, not something the current daemon does.
+
+The running system is a Debian image (kernel plus a squashfs root), built with debootstrap, mkosi, or live-build. Each boot loads that image into RAM or mounts it read-only. A small persistent config partition, in the role of Unraid's `/boot/config`, holds FELDCORE state, network settings, share definitions, and container templates. Data, appdata, and VM disks stay on the storage disks. Updates write a new image into the inactive A/B slot and boot it; if that boot is not healthy, the machine falls back to the last good image. An installer ISO partitions the target disk. First boot reuses the first-start wizard.
+
+### OS-1 — A bootable image
+- [ ] Build a Debian root with debootstrap, mkosi, or live-build
+- [ ] Kernel plus squashfs, mounted read-only or copied into RAM on boot
+- [ ] Boot from a disk partition, not from USB
+- [ ] Persistent config partition, mounted at a fixed path, holding FELDCORE state
+
+### OS-2 — Installer ISO
+- [ ] ISO that partitions a chosen disk: boot partition, A and B image slots, config partition
+- [ ] Leave the rest of that disk, and any other disks, for storage
+- [ ] First boot runs the existing setup wizard
+
+### OS-3 — Atomic updates
+- [ ] Write the new image into the inactive slot and boot it
+- [ ] If that boot does not come up healthy, fall back to the previous slot
+- [ ] Keep the config partition out of the image, so an update does not wipe state
+
+### OS-4 — Appliance layout
+- [ ] Data, appdata, and VM disks live on the storage disks, not on the OS slots
+- [ ] Share definitions and container templates stay on the config partition
+
+Open questions, unset on purpose:
+
+- Bootloader: systemd-boot or GRUB, and UEFI only or BIOS as well
+- Secure Boot signing of the kernel and the image
+- How someone adds a driver or a package on an immutable root: an overlay, or systemd-sysext
+- How a machine already running FELDCORE on plain Debian moves onto the image
+- Whether the running system stays apt-based, or the image is the only way software changes
+
 ## Cross-cutting
 - [ ] Packaging: .deb, and a one-line curl installer
 - [ ] Config persistence (embedded db or on-disk state in /var/lib/feldcore)

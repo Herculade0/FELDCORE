@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Herculade0/feldcore/internal/store"
 )
@@ -115,7 +114,7 @@ func TestSkipWizard(t *testing.T) {
 	}
 }
 
-func TestNetworkValidationAndRollback(t *testing.T) {
+func TestNetworkValidation(t *testing.T) {
 	if err := ValidateNet(NetInput{Mode: "dhcp"}); err != nil {
 		t.Fatal(err)
 	}
@@ -127,13 +126,6 @@ func TestNetworkValidationAndRollback(t *testing.T) {
 	}
 	if NewURL("192.168.1.20/24", 8787) != "http://192.168.1.20:8787/" {
 		t.Fatal(NewURL("192.168.1.20/24", 8787))
-	}
-	now := time.Now()
-	if !NeedsRollback(false, now, now.Add(-time.Second)) {
-		t.Fatal("should roll back")
-	}
-	if NeedsRollback(true, now, now.Add(-time.Second)) || NeedsRollback(false, now, now.Add(time.Minute)) {
-		t.Fatal("should keep")
 	}
 }
 

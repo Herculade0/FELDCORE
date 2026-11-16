@@ -80,9 +80,6 @@ func (s *Server) Router() http.Handler {
 			r.Get("/auth/status", s.handleAuthStatus)
 			r.Post("/auth/setup", s.handleAuthSetup)
 			r.Post("/auth/login", s.handleAuthLogin)
-			// The network confirm token is the credential. The login cookie
-			// belongs to the old address, so this stays open.
-			r.Post("/setup/network/confirm", s.handleNetConfirm)
 			r.Post("/auth/logout", s.handleAuthLogout)
 		})
 

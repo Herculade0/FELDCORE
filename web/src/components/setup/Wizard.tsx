@@ -28,8 +28,6 @@ interface WizardView {
   netMode: string;
   backend: string;
   newUrl?: string;
-  netToken?: string;
-  netWait?: boolean;
   mounts?: Mount[];
   sharesRoot: string;
   onOsDisk: boolean;
@@ -275,17 +273,14 @@ export default function Wizard({ onDone }: { onDone: () => void }) {
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
                       placeholder="192.168.1.20/24"
-                      hint="IPv4 address and prefix. The new page is shown before anything changes, and the old address comes back if you do not confirm within 90 seconds."
+                      hint="IPv4 address and prefix. Review shows the new address. A wrong one drops this page; fix it from the console, or start setup over."
                     />
                     <TextField label="Gateway" value={gateway} onChange={(e) => setGateway(e.target.value)} />
                     <TextField label="DNS" value={dns} onChange={(e) => setDns(e.target.value)} placeholder="1.1.1.1 8.8.8.8" />
                   </>
                 )}
-                {view.netWait && view.newUrl && (
-                  <Alert tone="warn">
-                    Open {view.newUrl}
-                    {view.netToken ? `?net=${view.netToken}` : ""} within 90 seconds. If that page does not load, wait and this address will be restored.
-                  </Alert>
+                {view.newUrl && netMode === "static" && (
+                  <Alert tone="warn">After this, open {view.newUrl}. If that address is wrong, this page will not come back on its own.</Alert>
                 )}
               </div>
             </section>

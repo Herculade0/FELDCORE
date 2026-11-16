@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Steps are the wizard pages, in order, after the one-time claim.
@@ -91,11 +90,6 @@ func NewURL(address string, port int) string {
 		return ""
 	}
 	return fmt.Sprintf("http://%s/", net.JoinHostPort(ip.String(), strconv.Itoa(port)))
-}
-
-// NeedsRollback is true once the confirm window has passed without a confirm.
-func NeedsRollback(confirmed bool, now, deadline time.Time) bool {
-	return !confirmed && !deadline.IsZero() && !now.Before(deadline)
 }
 
 // sshPortsFrom reads sshd -T output and `ss` output. If nothing is found it

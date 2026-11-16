@@ -4,8 +4,6 @@ package setup
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -45,15 +43,10 @@ type Service struct {
 
 	lim codeLimiter
 
-	mu          sync.Mutex
-	pkgLog      strings.Builder
-	pkgRunning  bool
-	pkgErr      string
-	netToken    string
-	netURL      string
-	netDeadline time.Time
-	netOK       bool
-	rollback    func()
+	mu         sync.Mutex
+	pkgLog     strings.Builder
+	pkgRunning bool
+	pkgErr     string
 }
 
 // Deps wires the wizard to the rest of the daemon.
@@ -87,7 +80,6 @@ func New(d Deps) *Service {
 		releaseURL: "https://api.github.com/repos/Herculade0/FELDCORE/releases/latest",
 	}
 	s.lim.fails = map[string][]time.Time{}
-	s.recoverNet()
 	return s
 }
 
@@ -135,19 +127,16 @@ type View struct {
 	Zones    []string `json:"zones,omitempty"`
 	NTP      string   `json:"ntp"`
 
-	Iface    string   `json:"iface"`
-	IP       string   `json:"ip"`
-	Gateway  string   `json:"gateway"`
-	DNS      []string `json:"dns"`
-	NetMode  string   `json:"netMode"`
-	Backend  string   `json:"backend"`
-	NewURL   string   `json:"newUrl,omitempty"`
-	NetToken string   `json:"netToken,omitempty"`
-	NetWait  bool     `json:"netWait"`
-
-	Mounts     []Mount `json:"mounts"`
-	SharesRoot string  `json:"sharesRoot"`
-	OnOSDisk   bool    `json:"onOsDisk"`
+	Iface      string   `json:"iface"`
+	IP         string   `json:"ip"`
+	Gateway    string   `json:"gateway"`
+	DNS        []string `json:"dns"`
+	NetMode    string   `json:"netMode"`
+	Backend    string   `json:"backend"`
+	NewURL     string   `json:"newUrl,omitempty"`
+	Mounts     []Mount  `json:"mounts"`
+	SharesRoot string   `json:"sharesRoot"`
+	OnOSDisk   bool     `json:"onOsDisk"`
 
 	Virt     bool   `json:"virt"`
 	Samba    bool   `json:"samba"`
@@ -257,8 +246,8 @@ func (s *Service) plan(ctx context.Context, req Request) (lines []string, warn s
 			lines = []string{
 				"Give " + req.Iface + " the address " + req.Address + ".",
 				"Gateway " + req.Gateway + ", DNS " + req.DNS + ".",
-				"FELDCORE will move to " + NewURL(req.Address, s.listenPort) + ".",
-				"If that page does not confirm within 90 seconds, the previous network settings are put back.",
+				"Open FELDCORE at " + NewURL(req.Address, s.listenPort) + " after this.",
+				"A wrong address drops this page. Fix it from the console, or start setup over.",
 			}
 		}
 	case "storage":
@@ -327,7 +316,9 @@ func (s *Service) apply(ctx context.Context, w *store.Wizard, req Request) error
 		}
 		w.NetMode = req.NetMode
 		if req.NetMode == "static" {
-			return s.scheduleNet(ctx, w, req)
+			if err := s.applyNet(ctx, req); err != nil {
+				return err
+			}
 		}
 	case "storage":
 		if err := s.checkRoot(req.SharesRoot); err != nil {
@@ -362,10 +353,7 @@ func (s *Service) apply(ctx context.Context, w *store.Wizard, req Request) error
 	default:
 		return &InputError{"Unknown step."}
 	}
-	if req.Step != "summary" && req.Step != "network" {
-		w.Step = nextStep(w.Step)
-	}
-	if req.Step == "network" && req.NetMode != "static" {
+	if req.Step != "summary" {
 		w.Step = nextStep(w.Step)
 	}
 	return s.saveWizard(*w)
@@ -403,11 +391,6 @@ func (s *Service) view(ctx context.Context, preview []string, warn string) View 
 	}
 	s.mu.Lock()
 	log, running, pkgErr := s.pkgLog.String(), s.pkgRunning, s.pkgErr
-	wait := s.netToken != "" && !s.netOK && s.now().Before(s.netDeadline)
-	token, newURL := "", ""
-	if wait {
-		token, newURL = s.netToken, s.netURL
-	}
 	s.mu.Unlock()
 	names := w.ShareNames
 	if names == nil {
@@ -421,7 +404,6 @@ func (s *Service) view(ctx context.Context, preview []string, warn string) View 
 		PkgLog: log, PkgRun: running, PkgError: pkgErr,
 		ShareNames: names, SSHPorts: s.sshPorts(ctx), ListenPort: s.listenPort,
 		Unattended: w.Unattended, Firewall: w.Firewall, UpdateCheck: w.UpdateCheck,
-		NewURL: newURL, NetToken: token, NetWait: wait,
 	}
 	s.fillNet(&v)
 	if w.Done || w.Step == "summary" {
@@ -485,10 +467,4 @@ func joinPorts(ports []int) string {
 		b.WriteString(fmt.Sprintf("%d", p))
 	}
 	return b.String()
-}
-
-func randomToken() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }
