@@ -27,8 +27,12 @@ type Config struct {
 	DockerSocket string
 
 	// DefaultShares creates Unraid's appdata, system, domains and isos
-	// shares when they are missing. Set false to leave the shares root alone.
+	// shares when they are missing. The wizard asks first; this flag covers
+	// a headless install that skips the wizard.
 	DefaultShares bool
+	// SkipWizard finishes first-start setup without the browser wizard.
+	// The one-time setup code is still required to claim the server.
+	SkipWizard bool
 }
 
 // envOr returns the value of the named env var, or def when unset/empty.
@@ -54,11 +58,25 @@ func envBool(name string, def bool) bool {
 	}
 }
 
+// SharesRootForced reports whether the operator set the shares directory
+// explicitly. A wizard choice in the state file is used only when they did not.
+func SharesRootForced() bool {
+	if os.Getenv("FELDCORE_SHARES_ROOT") != "" {
+		return true
+	}
+	for _, a := range os.Args[1:] {
+		if a == "-shares-root" || strings.HasPrefix(a, "-shares-root=") {
+			return true
+		}
+	}
+	return false
+}
+
 // Load resolves configuration from flags first, then environment, then defaults.
 //
 // Env vars: FELDCORE_LISTEN, FELDCORE_DATA_DIR, FELDCORE_SHARES_ROOT,
 // FELDCORE_SAMBA_CONF, FELDCORE_SAMBA_INCLUDE, FELDCORE_EXPORTS_FILE,
-// FELDCORE_DEFAULT_SHARES.
+// FELDCORE_DEFAULT_SHARES, FELDCORE_SKIP_WIZARD.
 func Load() *Config {
 	c := &Config{
 		SambaConf:    envOr("FELDCORE_SAMBA_CONF", "/etc/samba/smb.conf"),
@@ -74,6 +92,8 @@ func Load() *Config {
 		"directory under which share folders are created")
 	flag.BoolVar(&c.DefaultShares, "default-shares", envBool("FELDCORE_DEFAULT_SHARES", true),
 		"create Unraid's default shares (appdata, system, domains, isos) when missing")
+	flag.BoolVar(&c.SkipWizard, "skip-wizard", envBool("FELDCORE_SKIP_WIZARD", false),
+		"finish first-start setup without the browser wizard (scripted installs)")
 	flag.Parse()
 	return c
 }

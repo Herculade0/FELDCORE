@@ -76,7 +76,8 @@ type Manager struct {
 	id  identity
 	log *slog.Logger
 
-	mu sync.Mutex // serialises mutations and applies
+	mu     sync.Mutex // serialises mutations and applies
+	pathMu sync.RWMutex
 
 	statusMu sync.RWMutex
 	smbErr   string
@@ -144,7 +145,21 @@ type Overview struct {
 	SuggestedClients string   `json:"suggestedClients"`
 }
 
-func (m *Manager) dir(name string) string { return filepath.Join(m.p.SharesRoot, name) }
+func (m *Manager) dir(name string) string { return filepath.Join(m.Root(), name) }
+
+// Root is the directory share folders live under.
+func (m *Manager) Root() string {
+	m.pathMu.RLock()
+	defer m.pathMu.RUnlock()
+	return m.p.SharesRoot
+}
+
+// SetRoot points new shares at a different directory. It does not move files.
+func (m *Manager) SetRoot(root string) {
+	m.pathMu.Lock()
+	m.p.SharesRoot = root
+	m.pathMu.Unlock()
+}
 
 // Folder is a share's name and where it lives on disk.
 type Folder struct {
@@ -181,7 +196,7 @@ func (m *Manager) Overview(ctx context.Context) Overview {
 	sort.Strings(users)
 	return Overview{
 		Shares:           views,
-		Root:             m.p.SharesRoot,
+		Root:             m.Root(),
 		Users:            users,
 		Services:         svc,
 		SuggestedClients: suggestedClients(),
@@ -384,8 +399,8 @@ func (m *Manager) Delete(ctx context.Context, name string) (folderKept bool, err
 
 // makeDir creates the folder for a share (adopting it if it already exists).
 func (m *Manager) makeDir(name string) error {
-	if err := os.MkdirAll(m.p.SharesRoot, 0o755); err != nil {
-		return &OpError{fmt.Sprintf("FELDCORE could not create %s: %v", m.p.SharesRoot, osReason(err))}
+	if err := os.MkdirAll(m.Root(), 0o755); err != nil {
+		return &OpError{fmt.Sprintf("FELDCORE could not create %s: %v", m.Root(), osReason(err))}
 	}
 	dir := m.dir(name)
 	if st, err := os.Stat(dir); err == nil {
