@@ -2,7 +2,7 @@
 
 Design only. Nothing in this document is built yet. The milestone is [M2e in the roadmap](ROADMAP.md).
 
-Internal Affairs is the cabinet where the owner's agents file case reports: a change they made, an error they hit, or a note about something they looked into. Each report is an ordinary Markdown file on the server. Agents can add a report, and add an update to a report they filed. They cannot change or delete what is already written. The signed-in administrator reads the cabinet in the web UI and is the only one who can redact.
+Internal Affairs is the cabinet where the owner's agents file case reports: a change they made, an error they hit, or a note about something they looked into. Each report is an ordinary Markdown file on the server. Agents can add a report, and add an update to a report they filed. They cannot change or delete what is already written. The signed-in administrator reads the cabinet in the web UI, can file a note from that page, and is the only one who can redact.
 
 The name is the FELDCORP one: an agent **files with Internal Affairs**. The page should sound like that, and still make sense to someone who has never run a server.
 
@@ -32,7 +32,7 @@ A locked share named `internal-affairs`, under the shares root. On a default ins
 
 The shares root is the wizard's folder, or `-shares-root` / `FELDCORE_SHARES_ROOT`. The cabinet follows that root the same way `appdata` does. It is not stored in `/var/lib/feldcore/state.json`. Reports would make that file huge, and the atomic JSON rewrite is the wrong tool for a folder of Markdown.
 
-The share name matches the existing share-name rule (`internal-affairs` is 17 characters). The daemon creates it on startup the way it creates `appdata`, `system`, `domains`, and `isos`, and adopts the folder if it is already there.
+The share name is `internal-affairs`. That is decided, and it matches the existing share-name rule (17 characters). The daemon creates it on startup the way it creates `appdata`, `system`, `domains`, and `isos`, and adopts the folder if it is already there.
 
 If a share with that name already exists and is not this locked share, Internal Affairs stays off. It does not take over a folder the owner created. The page says so: "Internal Affairs is off because a share named internal-affairs already exists. Rename that share if you want the cabinet here."
 
@@ -42,7 +42,7 @@ The share record gains a `locked` flag. A locked share is visible on the Shares 
 
 Comment stored on the share: "Internal Affairs case files. FELDCORE writes these."
 
-SMB and NFS start **off**, same as the other default shares. See [Who can read it from the network](#who-can-read-it-from-the-network).
+SMB and NFS stay **off** for the first version. That is decided. See [Who can read it from the network](#who-can-read-it-from-the-network).
 
 ### On-disk layout
 
@@ -67,7 +67,7 @@ File names are ASCII: a UTC timestamp, a slug of the title, and the report id. N
 # Internal Affairs
 
 Case files filed by agents on this server. FELDCORE writes this page.
-Add a report from an agent. Read and redact reports in the FELDCORE app.
+Add a report from an agent, or file a note in the FELDCORE app. Read and redact reports there too.
 Do not edit these files by hand.
 
 ## Claude Code
@@ -87,7 +87,7 @@ That keeps other local Unix accounts out. Turning on the reading room (later) is
 
 ### Who can read it from the network
 
-**Not in the first version.** The administrator reads reports in the web UI. The folder is not on SMB or NFS, so a guest on the LAN cannot open it and cannot edit it.
+**Decided: off for the first version.** The administrator reads reports in the web UI. The folder is not on SMB or NFS, so a guest on the LAN cannot open it and cannot edit it. A reading room, if it is ever added, comes later.
 
 Today's SMB "read only" mode is `guest ok`: anyone on the network can read. That is the wrong default for case files. Today's "private" mode is read-write for the listed share users. There is no private read-only mode yet.
 
@@ -102,7 +102,7 @@ Obsidian then opens the share as a vault. The hint on the page tells the owner t
 
 ### Git, later
 
-The first version does not put the cabinet in git. History is the ledger below, which is enough to see that a file changed and does not need a git binary on the server.
+**Decided:** the first version does not put the cabinet in git. The hash-chain ledger below is the history. It is enough to see that a file changed, and it does not need a git binary on the server. Git commits come later.
 
 A later version can add a bare repo at `/var/lib/feldcore/internal-affairs.git` with the cabinet as its work tree. The share holds a `.git` pointer file, not the objects. Each ledger entry becomes one commit by `FELDCORE Internal Affairs <internal-affairs@localhost>`. The daemon signs those commits with an SSH key it creates at `/var/lib/feldcore/ia_ed25519` (`0600`). The public key is shown on the page. Agents do not get a git remote.
 
@@ -123,11 +123,11 @@ They are separate. A token can have one, the other, or both. The Agent access ca
 
 ### What `admin` and `read` do not include
 
-`admin` includes `read`, `containers`, and `vms`. It must **not** include `ia:file` or `ia:read`. `read` must not include `ia:read`.
+**Decided:** `admin` includes `read`, `containers`, and `vms`, and does **not** include `ia:file` or `ia:read`. An existing admin token does not gain access when Internal Affairs ships. Reading the cabinet needs `ia:read` ticked on that token. Filing needs `ia:file`. `read` does not include `ia:read`.
 
 This is the same idea as the shell. Shell is not a scope, and `Allows` rejects it. These two scopes are real, but `Allows` treats them as an exception: an `admin` token matches `admin` and the three scopes it already includes, and does not match `ia:file` or `ia:read`. A new route stays closed until it is classified, which is already the rule in `scopeFor`. The Internal Affairs routes have to be classified explicitly. Left unclassified, they would fall through to `admin`, and an admin token could file or read.
 
-The browser session is the administrator and is not scoped, as it is everywhere else. The session can read the cabinet. It cannot file or append in the first version. It can redact. Redaction is refused to every token, including `admin`, the way the host terminal is.
+The browser session is the administrator and is not scoped, as it is everywhere else. The session can read the cabinet, file a note, append to a note the session filed, and redact. It cannot append to a report an agent filed. Redaction, and filing from the page, are refused to every token, including `admin`, the way the host terminal is.
 
 ### Append-only
 
@@ -135,7 +135,7 @@ Enforced in the daemon, not by asking agents to behave.
 
 - **File** creates a new id and a new file. If the file exists, the call fails. Nothing is overwritten.
 - **Append** reads the file, checks its bytes against the ledger, then writes the original body unchanged plus a new section at the end. Frontmatter may change only `updated`, `append_count`, `prev`, `hash`, and the copied audit list (new entries may be added). `kind`, `title`, `agent`, `token_id`, `filed`, `severity`, and `target` stay as filed.
-- The caller's token id must equal the report's `token_id`. A different token, even one with the same display name, is refused: "You can only add to reports this token filed."
+- The caller's token id must equal the report's `token_id`. A different token, even one with the same display name, is refused: "You can only add to reports this token filed." The daemon may append to an automatic stub it already filed for that same token. That exception is described with the stub, and it is not available to any token.
 - A revoked or expired token cannot authenticate, so it cannot append. Creating a new token named "Claude Code" does not inherit the old token's reports.
 - There is no edit tool and no delete tool on the MCP server or for bearer tokens.
 
@@ -145,7 +145,9 @@ Severity is fixed at filing. To escalate, the agent files a new report and links
 
 ### The administrator
 
-The signed-in session can redact in the first version, because a scrubber will miss some secrets and there has to be a way to remove them.
+The signed-in session can file a note from the Internal Affairs page. That is decided. The note is kind `note`, with `source: administrator` and the administrator's username in `agent`. It has no token id. The same page can append to a note filed this way. The append is marked as the administrator's. An agent token cannot append to it, and the session cannot append to a report an agent filed. Agents keep their own reports.
+
+The signed-in session can also redact, because a scrubber will miss some secrets and there has to be a way to remove them.
 
 Redaction:
 
@@ -227,12 +229,12 @@ The MCP audit middleware records a tool argument named `id`, `name`, or `query` 
 
 ### REST
 
-Same rules, same scrubber, same ledger. Session cookies can call the reads and the redact. Bearer tokens can call the routes their scopes allow.
+Same rules, same scrubber, same ledger. A bearer token can call the routes its scopes allow. The session can read, file a note, append to its own notes, and redact.
 
 | Method and path | Who |
 | --- | --- |
-| `POST /api/v1/internal-affairs/reports` | `ia:file` |
-| `POST /api/v1/internal-affairs/reports/{id}/append` | `ia:file`, and the token owns the report |
+| `POST /api/v1/internal-affairs/reports` | `ia:file`. The session may also call it, and the kind is forced to `note`. |
+| `POST /api/v1/internal-affairs/reports/{id}/append` | `ia:file`, and the token owns the report. The session may append only when `source` is `administrator`. |
 | `GET /api/v1/internal-affairs/reports` | `ia:read`, or the session. Query params match `search_reports` and `list_recent`. |
 | `GET /api/v1/internal-affairs/reports/{id}` | `ia:read`, or the session |
 | `POST /api/v1/internal-affairs/reports/{id}/redact` | Session only |
@@ -296,6 +298,7 @@ severity: info
 target_kind: container
 target_name: plex
 scrubbed: false
+source: agent
 append_count: 0
 audit:
   - id: 9f2a...
@@ -311,7 +314,7 @@ tags:
 ---
 ```
 
-`agent` is the token's name at filing time. `token_id` is the id. Both are copied from the authenticated token, never from the request. `filed` is the daemon's clock, UTC, RFC 3339. `tags` is `kind` plus `target_kind` when that was set, so Obsidian's tag search has something to use. `hash` is the sha256 of the file with the `hash` line blanked, so a reader can recompute it. `prev` is empty on the first write and is the previous file hash after an append or a redaction.
+`agent` is the token's name at filing time. `token_id` is the id. Both are copied from the authenticated token, never from the request. `filed` is the daemon's clock, UTC, RFC 3339. `source` is `agent` when a token filed it, `daemon` when the stub below was filed automatically, and `administrator` when the signed-in administrator filed a note. `tags` is `kind` plus `target_kind` when that was set, so Obsidian's tag search has something to use. `hash` is the sha256 of the file with the `hash` line blanked, so a reader can recompute it. `prev` is empty on the first write and is the previous file hash after an append or a redaction.
 
 Ids look like `ia_` plus 16 hex characters, the same random id the audit log already uses.
 
@@ -380,7 +383,26 @@ The implementation updates `docs/AGENTS.md`. The short version, also in the MCP 
 
 > After you change something, hit an error, or finish looking into a problem, file a report with `file_report`. To add to a report you already filed, use `append_report` with its id. You cannot edit or delete a report. Do not put tokens or passwords in the body.
 
-The daemon does not auto-file in the first version. A token that never calls `file_report` leaves no case file. The audit log still has the call. Auto-filing from an approved phase 2 action is a later hook: the daemon would file a change record in that token's name, with the audit id of the action that was applied.
+**Decided:** agents file by calling the tool, and the daemon also auto-files a stub when a token-authenticated call errors.
+
+An error is the audit result `error` (the call returned a failure). A denial (`denied`, including a missing scope) does not auto-file. Successful calls do not auto-file. The audit log still records all three.
+
+The stub is an incident:
+
+- `source: daemon`
+- `kind: incident`, severity `medium`
+- `agent` and `token_id` copied from the token that made the call, so that agent can append to it
+- title `Error: <action>`, scrubbed and clipped to 120 characters
+- "What went wrong" filled with the action, the target, and the result, in plain sentences. The other two headings stay empty
+- `audit` holds that one event
+
+The daemon will not auto-file from Internal Affairs itself. A failed `file_report`, append, search, get, list, or any `/api/v1/internal-affairs` route does not create another stub.
+
+The same token, action, and target within 15 minutes appends one line to the open stub instead of creating a second file. That append is the daemon writing to a stub it already filed for that token. Another token still cannot append to it.
+
+Automatic stubs do not use up the agent's `file_report` allowance. They have their own cap of 30 new stubs per token per rolling hour. Past that cap, further errors stay in the audit log and are not filed. The cabinet cap still applies: a full cabinet means the stub is skipped.
+
+Auto-filing a change record when a phase 2 approval is applied is a separate, later hook. The error stub above does not wait for that.
 
 ## 5. UI
 
@@ -400,9 +422,11 @@ Same layout language as the Audit page: a title, one sentence, a card, rows.
 
 **Title:** Internal Affairs
 
-**Subtitle:** Reports your agents file when they change something, hit an error, or look into a problem. Each report is a Markdown file on this server. Agents can add a report. They cannot change or delete what was already filed.
+**Subtitle:** Reports filed when an agent changes something, hits an error, or looks into a problem. Each report is a Markdown file on this server. Agents can add a report. A failed call from an agent is filed here on its own. You can file a note. Nobody can change or delete what was already filed, except you, and only by redacting.
 
-**Empty:** No case files yet. When an agent with an Internal Affairs token files a report, it shows up here. Signing in and clicking around does not.
+**Empty:** No case files yet. When an agent with an Internal Affairs token files a report, or one of its calls fails, it shows up here.
+
+**File a note:** a button on the page, session only. It asks for a title and a body, and optionally a severity and a target. It always files a note, with the administrator's name on it. The open note can take an update from the same page. It does not offer a way to write into an agent's report.
 
 **Seal ok:** The cabinet matches the Internal Affairs seal.
 
@@ -427,7 +451,7 @@ Same layout language as the Audit page: a title, one sentence, a card, rows.
 
 While sharing is off, the hint says the folder is on this server and is not shared on the network. It does not tell the owner to turn on guest access.
 
-**Retention card:** how many reports, how much space, the cap, and "Reports are kept until you remove them. Automatic deletion is off." The cap is shown even though editing it can wait. Cloud backup is a line of status: "Cloud backup is not set up." See the next section.
+**Retention card:** how many reports, how much space, the cap, and "Reports are kept, and nothing is deleted automatically, until cloud backup is set up. After a report has been backed up, old reports may be pruned. How old is not set yet." The cap is shown even though editing it can wait. Until the backup job exists, cloud backup reads "Cloud backup is not set up." See the next section.
 
 The page is behind the normal sign-in. There is no anonymous view.
 
@@ -444,17 +468,13 @@ The `admin` hint stays accurate: it does not include these two, and the hint sho
 
 ### Retention
 
-Default: keep every report until an administrator removes it. Do not copy the audit log's 90 days and 1,000 rows. The audit log is the short memory of calls. The cabinet is the long memory of what agents learned. A 90-day cabinet would throw away the incident an agent is supposed to find next time.
+**Decided.** Keep every report, with no automatic deletion, until Proton Drive backups exist. The audit log's 90 days and 1,000 rows do not apply here. The audit log is the short memory of calls. The cabinet is the long memory of what agents learned.
+
+After Proton Drive backups exist, local pruning of old reports is allowed, and only for a report that has a backed-up copy. A report that has never been in a completed backup stays on disk. How old a report must be before it can be pruned is not decided yet. That window is the remaining choice, and it is not made in this design.
 
 The caps in the limits table are safety limits, not a retention policy. Hitting the cap stops new filings. It does not delete old ones.
 
-Automatic expiry waits until a backup has actually run. The settings that will exist later:
-
-- keep forever, or a number of days
-- the size cap
-- a confirmation when expiry would delete a report that has never been in a successful backup
-
-Expiry, when it exists, writes a ledger entry and withdraws the file. It does not unlink a file in silence. That feature is not in the first version. The page says automatic deletion is off, so the owner is not left wondering which number applies.
+The first version does not prune. When pruning is built, it writes a ledger entry and withdraws the file. It does not unlink a file in silence. The page states the rule above so the owner is not left wondering which number applies.
 
 ### Snapshots
 
@@ -472,7 +492,8 @@ No Proton Drive client exists in this repo. When one does, Internal Affairs is a
 - **Leave out:** `.obsidian/` (Obsidian's local UI state). A later git object store lives under `/var/lib/feldcore`, not in this copy. If the owner wants off-site history, the job uploads a git bundle the daemon produced, not a live `.git` directory.
 - **Direction:** one way, this server to Proton. Do not mount Proton Drive as the live cabinet, and do not two-way sync it. A laptop edit would break append-only and the seal, and a sync conflict would fork a report.
 - **When:** on a schedule (daily is enough), not after every filing. The job records the ledger head it uploaded, in `state.json`.
-- **Retention there:** longer than whatever local expiry eventually does. Local expiry must not delete a report whose head has not been recorded as uploaded. Until the job exists, that field stays empty and the page says cloud backup is not set up.
+- **In the first backup set.** Decided: when Proton Drive backups exist, the cabinet is included from the first set, not added in a later pass. How many generations to keep is not decided yet.
+- **Local pruning** of a report is allowed only after a completed backup contains that report. The age threshold is not decided yet. Until the job exists, the backup-head field stays empty and the page says cloud backup is not set up.
 - **Secrets:** scrubbing happens at filing time, so the copy should never contain a bearer token the scrubber recognized. Proton's own encryption is the transport. It is not a reason to skip scrubbing.
 - **Credential:** a Proton account for the server, stored with the daemon's other secrets, never as a case file and never in the cabinet.
 
@@ -484,31 +505,34 @@ The first version only reserves the status field and the sentence on the page. I
 
 Ship this before the reading room, git, or Proton.
 
-- Locked `internal-affairs` share, SMB and NFS off, left alone if the name is already taken
-- `ia:file` and `ia:read`, excluded from `admin` and from `read`
+- Locked share named `internal-affairs`, SMB and NFS off, left alone if that name is already taken by some other share
+- `ia:file` and `ia:read`, excluded from `admin` and from `read`. Existing admin tokens do not gain either scope
 - Per-tool MCP scope check, and the five tools
-- The REST table, including session read and session redact
+- The REST table, including session read, session redact, and a session "file a note"
+- An incident stub auto-filed when a token call's audit result is `error`, with the 15-minute dedup and the separate hourly cap. Denials do not auto-file
 - Three templates, daemon-written frontmatter, append-only body
 - Scrubber, rate limits, size caps
-- Ledger, seal in `state.json`, freeze and reseal
+- Ledger, seal in `state.json`, freeze and reseal. No git
+- No automatic deletion. The retention card says reports are kept until cloud backup exists
 - Audit snapshot and a Case file link on the Audit page
-- Internal Affairs page: timeline, filters, viewer, Obsidian hint, retention card that says deletion is off
+- Internal Affairs page: timeline, filters, viewer, Obsidian hint, File a note
 - `docs/AGENTS.md` updated so an agent knows it should file
-- Tests: another token cannot append; a second file cannot overwrite; body bytes survive an append; scrubbed token is not on disk; `read` cannot file; `ia:file` cannot list containers; a flipped byte breaks the seal and blocks filing; a path in `targetName` is rejected; redact is refused to a bearer token
+- Tests: another token cannot append; an admin token without `ia:read` cannot read; a second file cannot overwrite; body bytes survive an append; scrubbed token is not on disk; `read` cannot file; `ia:file` cannot list containers; an `error` result creates one stub and a repeat within 15 minutes appends; a `denied` result does not; an Internal Affairs failure does not file a stub; the session can file a note and cannot append to an agent's report; a flipped byte breaks the seal and blocks filing; a path in `targetName` is rejected; redact is refused to a bearer token
 
 ### IA-2 — reading room and withdrawal
 
-- Private read-only SMB for one share user, switch on the Internal Affairs page
+- Private read-only SMB for one share user, switch on the Internal Affairs page. NFS stays off
 - Withdraw a report: move it out of the timeline, keep the bytes, ledger `op: seal`
-- Administrator appends a note that is clearly marked as the administrator's, not the agent's
-- Optional day cap, still refusing to delete a report that has never been backed up once a backup head exists
+- The administrator can append a marked note onto an agent's report. Filing their own note is already in the first version
 - Editable cabinet cap
+- Still no pruning. Pruning waits until a backup copy exists, and the age window is still not chosen
 
 ### IA-3 — history and backup
 
 - Git commits for each ledger entry, SSH-signed, public key on the page
 - The snapshot mismatch case described above, which falls out of the seal check once restores happen
-- Proton Drive one-way job, honoring this contract
+- Proton Drive one-way job. The cabinet is in the first backup set. The number of generations is still to be chosen
+- Once that job has recorded a backup, local pruning of reports that are in it. The age window is chosen then, not before
 - When a phase 2 approval is applied, file a change record for that token with the audit id attached
 
 ### Explicitly not this feature
@@ -532,13 +556,17 @@ Ship this before the reading room, git, or Proton.
 - **Clock and names.** The daemon's clock is the timestamp. The token name is a label frozen at filing time; the id is the identity.
 - **Home.md rewrites** will look like tampering if the checker hashes every file and forgets that `index` operations are legitimate.
 
-## Open questions
+## Decisions
 
-1. **Reading room in the first version?** This design leaves SMB off until IA-2. If you already open vaults from a laptop, private read-only SMB moves into IA-1 and guest access stays unavailable.
-2. **Should your existing admin token be able to read the cabinet?** This design says no: tick `ia:read` on the agent that should learn from old reports. An admin token is otherwise the one you would hand to a trusted agent.
-3. **Auto-file an incident when a token call returns an error?** This design files only when the agent calls `file_report`, so a noisy container does not fill the cabinet with stubs. The other way is a one-line incident, scrubbed, for each `error` or `denied` result.
-4. **Keep forever, locally, until Proton exists?** This design does. If you want a bound sooner, name the period (a year is the shortest that still helps an agent avoid an old mistake).
-5. **Git in the first version?** The ledger is enough to detect tampering. Git is for browsing history in a clone. Say if you want that clone before IA-3.
-6. **May you file from the page, or only agents?** This design is agents file, you read and redact. A "File a note" button for the signed-in administrator is a small addition if you want your own notes in the same cabinet.
-7. **Proton retention, when that backup exists.** How many generations, and is the cabinet in the first backup set or a later one? Local expiry will key off whatever you pick. No client is built here.
-8. **Share name.** `internal-affairs` matches the theme and the share-name rule. If you already plan to use that folder for something else, pick the name before IA-1 creates it.
+Corey decided these. They used to be open questions at the end of this design.
+
+1. **Network.** SMB and NFS stay off for the first version. Any network reading room comes later. The administrator reads reports in the web UI.
+2. **Admin tokens.** Existing `admin` tokens do not get Internal Affairs access. Reading the cabinet needs `ia:read` ticked explicitly. Filing needs `ia:file`.
+3. **Who files.** Agents file by calling `file_report` (and append with `append_report`). The daemon also auto-files an incident stub when a token-authenticated call ends in an error. A denial does not auto-file.
+4. **Retention.** Keep reports forever, with no automatic deletion, until Proton Drive backups exist. After that, local pruning of old reports is allowed only when a backed-up copy of that report exists. The pruning window — how old a report must be — is not decided yet.
+5. **History.** The hash-chain ledger is enough for now. Git history comes later.
+6. **Administrator notes.** The signed-in administrator can file a note from the Internal Affairs page, as well as agents filing through their tokens.
+7. **Proton Drive.** The cabinet is in the first Proton Drive backup set. The number of generations to keep is not decided yet.
+8. **Share name.** The share is named `internal-affairs`.
+
+Two numbers remain unset, and both wait on purpose: the pruning window, and how many Proton Drive generations to keep. Neither blocks the first version, which does not prune and does not upload.
