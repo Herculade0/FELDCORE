@@ -4,7 +4,7 @@ import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, Modal, SelectField, TextField, Toggle } from "./form";
 
-type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "storage" | "admin";
+type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "storage" | "backups:read" | "backups:write" | "admin";
 
 interface Token {
   id: string;
@@ -53,9 +53,19 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
     hint: "Create and change pools, mount them, and run scrub, balance and trim. Looking at disks is included in Read.",
   },
   {
+    key: "backups:read",
+    label: "Backups, read",
+    hint: "See destinations, jobs, copies and the files inside a copy.",
+  },
+  {
+    key: "backups:write",
+    label: "Backups, write",
+    hint: "Run backups, checks and restores, and change destinations. Includes reading them.",
+  },
+  {
     key: "admin",
     label: "Admin",
-    hint: "Settings, shares, tokens and every other API call. Includes the scopes above, including share files.",
+    hint: "Settings, shares, tokens and every other API call. Includes the scopes above.",
   },
 ];
 
@@ -98,6 +108,8 @@ export default function AgentAccessCard({ onOpenAudit }: { onOpenAudit?: () => v
     "files:read": false,
     "files:write": false,
     storage: false,
+    "backups:read": false,
+    "backups:write": false,
     admin: false,
   });
   const [busy, setBusy] = useState(false);
