@@ -10,6 +10,7 @@ import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
+import AuditPage from "./components/AuditPage";
 import ComingSoon from "./components/ComingSoon";
 import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
@@ -116,8 +117,10 @@ function Shell() {
             <DockerPage onOpenApps={() => setActive("apps")} />
           ) : active === "apps" ? (
             <AppsPage />
+          ) : active === "audit" ? (
+            <AuditPage />
           ) : active === "settings" ? (
-            <SettingsPage />
+            <SettingsPage onOpenAudit={() => setActive("audit")} />
           ) : (
             <ComingSoon nav={active} />
           )}

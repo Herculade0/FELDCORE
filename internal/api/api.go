@@ -1,5 +1,6 @@
 // Package api wires FELDCORE's HTTP surface: a versioned JSON API under
-// /api/v1 plus the embedded single-page front-end served for everything else.
+// /api/v1, a read-only MCP server at /mcp, plus the embedded single-page
+// front-end served for everything else.
 package api
 
 import (
@@ -22,6 +23,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/system"
+	"github.com/Herculade0/feldcore/internal/vm"
 )
 
 // Deps are the services the HTTP layer exposes.
@@ -50,15 +52,19 @@ type Server struct {
 	skipWizard bool
 	webRoot    fs.FS
 	log        *slog.Logger
+	vmProbe    vm.Probe
+	mcpHTTP    http.Handler
 }
 
 // New returns a Server.
 func New(d Deps) *Server {
-	return &Server{
+	s := &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
 		docker: d.Docker, apps: d.Apps, wiz: d.Setup, skipWizard: d.SkipWizard,
 		webRoot: d.WebRoot, log: d.Log,
 	}
+	s.initMCP()
+	return s
 }
 
 // Router builds the full chi router.
@@ -83,9 +89,10 @@ func (s *Server) Router() http.Handler {
 			r.Post("/auth/logout", s.handleAuthLogout)
 		})
 
-		// Everything else needs a signed-in session.
+		// Everything else needs a signed-in session or a scoped agent token.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.enforceScope)
 
 			// Long-lived or slow endpoints sit outside the short timeout.
 			r.Get("/system/stream", s.handleSystemStream)
@@ -141,6 +148,14 @@ func (s *Server) Router() http.Handler {
 				r.Get("/docker/containers/{id}/spec", s.handleDockerSpec)
 				r.Get("/docker/images", s.handleDockerImages)
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
+				r.Get("/vms", s.handleVMs)
+
+				r.Get("/audit", s.handleAudit)
+				r.Get("/agent/tokens", s.handleTokensList)
+				r.Post("/agent/tokens", s.handleTokenCreate)
+				r.Post("/agent/tokens/revoke-all", s.handleTokensRevokeAll)
+				r.Delete("/agent/tokens/{id}", s.handleTokenRevoke)
+
 				r.Post("/docker/containers/{id}/start", s.handleDockerStart)
 				r.Post("/docker/containers/{id}/stop", s.handleDockerStop)
 				r.Post("/docker/containers/{id}/restart", s.handleDockerRestart)
@@ -152,6 +167,13 @@ func (s *Server) Router() http.Handler {
 			writeError(w, http.StatusNotFound, "No such API endpoint.")
 		})
 	})
+
+	// Agents speak MCP here. Bearer token only; a browser session is not enough.
+	if s.mcpHTTP != nil {
+		mcpGate := s.requireBearer(auth.ScopeRead, s.mcpHTTP)
+		r.Handle("/mcp", mcpGate)
+		r.Handle("/mcp/", mcpGate)
+	}
 
 	// Everything else is the SPA (static assets, or index.html fallback).
 	r.NotFound(s.handleSPA)
