@@ -1,15 +1,16 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "../lib/auth";
-import { errorMessage } from "../lib/api";
+import { api, errorMessage } from "../lib/api";
 import { loginWithPasskey, passkeysAvailable } from "../lib/webauthn";
+import { asBrand, type SignInBrand } from "./citizen/SignInBrand";
 import { LogoMark, Wordmark } from "./Logo";
 import { Alert, Button, TextField } from "./form";
 
 /** Full-page frame shared by the sign-in, setup and status screens. */
-function Frame({ children }: { children: ReactNode }) {
+function Frame({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-10">
+    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-10" style={style}>
       <div className="mb-8 flex items-center gap-3.5">
         <LogoMark size={48} />
         <div className="scale-110 origin-left">
@@ -127,6 +128,13 @@ export function LoginScreen() {
   const [needsCode, setNeedsCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [brand, setBrand] = useState<SignInBrand | null>(null);
+
+  useEffect(() => {
+    api<SignInBrand>("/citizen/brand")
+      .then((b) => setBrand(asBrand(b)))
+      .catch(() => setBrand(null));
+  }, []);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -158,15 +166,42 @@ export function LoginScreen() {
     }
   };
 
+  const accent = brand?.accent && /^#[0-9a-fA-F]{6}$/.test(brand.accent) ? brand.accent : "#0b5cff";
+  const background = brand?.background?.trim() ?? "";
+  const bgImage =
+    background.startsWith("data:image/png;base64,") ||
+    background.startsWith("data:image/jpeg;base64,") ||
+    background.startsWith("data:image/webp;base64,")
+      ? background
+      : "";
+  const bgColor = !bgImage && /^#[0-9a-fA-F]{6}$/.test(background) ? background : undefined;
+  const title = brand?.title?.trim() || "Citizen ID";
+  const welcome = brand?.welcome?.trim() || "One sign-in for this server and the apps published on it.";
+  const logoRaw = brand?.logo ?? "";
+  const logo =
+    logoRaw.startsWith("data:image/png;base64,") ||
+    logoRaw.startsWith("data:image/jpeg;base64,") ||
+    logoRaw.startsWith("data:image/webp;base64,")
+      ? logoRaw
+      : "";
+
   return (
-    <Frame>
+    <Frame
+      style={{
+        backgroundColor: bgColor,
+        backgroundImage: bgImage ? `url("${bgImage}")` : undefined,
+        backgroundSize: bgImage ? "cover" : undefined,
+        backgroundPosition: "center",
+      }}
+    >
       <form onSubmit={submit} className="glass w-full max-w-sm rounded-[2rem] p-7">
-        <h1 className="text-xl font-extrabold tracking-tight text-ink">Citizen ID</h1>
+        <div className="flex items-center gap-3">
+          {logo && <img src={logo} alt="" className="h-10 w-10 rounded-xl object-cover" />}
+          <h1 className="text-xl font-extrabold tracking-tight text-ink">{title}</h1>
+        </div>
         <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.2em] text-ink-3">FELDCORE</p>
         <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
-          {needsCode
-            ? `Enter the 6-digit code from the authenticator for ${username.trim()}.`
-            : "One sign-in for this server and the apps published on it."}
+          {needsCode ? `Enter the 6-digit code from the authenticator for ${username.trim()}.` : welcome}
         </p>
         <div className="mt-6 space-y-4">
           {!needsCode && (
@@ -204,7 +239,13 @@ export function LoginScreen() {
           )}
           {error && <Alert>{error}</Alert>}
         </div>
-        <Button type="submit" variant="primary" loading={busy} className="mt-6 w-full">
+        <Button
+          type="submit"
+          variant="primary"
+          loading={busy}
+          className="mt-6 w-full"
+          style={{ backgroundImage: `linear-gradient(135deg, ${accent}, #38bdf8)` }}
+        >
           {needsCode ? "Verify" : "Sign in"}
         </Button>
         {needsCode ? (
@@ -228,6 +269,17 @@ export function LoginScreen() {
             </Button>
           )
         )}
+        {!needsCode && brand?.footer?.trim() && (
+          <p className="mt-4 text-xs font-medium leading-relaxed text-ink-2">{brand.footer.trim()}</p>
+        )}
+        {!needsCode &&
+          (brand?.links ?? [])
+            .filter((l) => l.label.trim() && (l.url.startsWith("https://") || (l.url.startsWith("/") && !l.url.startsWith("//"))))
+            .map((l) => (
+              <a key={`${l.label}-${l.url}`} href={l.url} className="mt-1 block text-xs font-bold" style={{ color: accent }}>
+                {l.label.trim()}
+              </a>
+            ))}
       </form>
     </Frame>
   );

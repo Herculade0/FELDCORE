@@ -26,6 +26,8 @@ import RemoteAccess from "./settings/RemoteAccess";
 import WebAddresses from "./settings/WebAddresses";
 import SnapshotSettings from "./settings/SnapshotSettings";
 import CitizenID from "./settings/CitizenID";
+import { InstallPanel, useInstall } from "./install/InstallPanel";
+import PublishingSettings from "./publish/ProtectionSettings";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -64,7 +66,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"general" | "network" | "remote" | "citizen">("general");
+  const [tab, setTab] = useState<"general" | "network" | "remote" | "publishing" | "citizen">("general");
 
   const reload = () =>
     api<Settings>("/settings")
@@ -86,7 +88,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
       <header>
         <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Settings</h1>
         <p className="mt-2 text-sm font-semibold text-ink-2">
-          Appearance, this server, names on the network, remote access, Citizen ID, and agent access.
+          Appearance, this server, names on the network, publishing, remote access, Citizen ID, and agent access.
         </p>
       </header>
 
@@ -95,6 +97,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
           [
             ["general", "General"],
             ["network", "Network"],
+            ["publishing", "Publishing"],
             ["remote", "Remote access"],
             ["citizen", "Citizen ID"],
           ] as const
@@ -116,6 +119,8 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
       {loadError && <Alert>{loadError}</Alert>}
 
       {tab === "remote" && <RemoteAccess />}
+
+      {tab === "publishing" && <PublishingSettings />}
 
       {tab === "citizen" && <CitizenID />}
 
@@ -316,25 +321,59 @@ function ServicesCard({ services, onSaved }: { services: Svc[]; onSaved: () => v
 
 function ServiceRow({ svc, onSaved }: { svc: Svc; onSaved: () => void }) {
   const [on, setOn] = useState(svc.enabled);
+  const inst = useInstall(svc.name, onSaved);
+  useEffect(() => {
+    if (inst.active) setOn(true);
+  }, [inst.active]);
+  const turningOn = on && !svc.enabled;
+  const showPanel =
+    !!inst.job &&
+    (inst.active ||
+      (inst.job.state === "failed" && !svc.running) ||
+      (inst.job.state === "succeeded" && !svc.running));
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface-2 px-4 py-3 ${svc.available ? "" : "opacity-60"}`}>
-      <div className="min-w-0">
-        <p className="text-sm font-bold text-ink">{svc.label}</p>
-        <p className="text-xs font-medium text-ink-3">
-          {svc.available
-            ? `${svc.installed ? "Installed" : "Not installed"} · ${svc.running ? "running" : "stopped"}`
-            : "This CPU has no virtualisation."}
-        </p>
+    <div className={`rounded-2xl border border-line bg-surface-2 px-4 py-3 ${svc.available ? "" : "opacity-60"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-ink">{svc.label}</p>
+          <p className="text-xs font-medium text-ink-3">
+            {svc.available
+              ? `${svc.installed ? "Installed" : "Not installed"} · ${svc.running ? "running" : "stopped"}`
+              : "This CPU has no virtualisation."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Toggle checked={on || inst.active} onChange={setOn} label={svc.label} disabled={!svc.available || inst.active} />
+          {turningOn || inst.active ? (
+            <Button
+              variant="primary"
+              size="sm"
+              loading={inst.active || inst.starting}
+              disabled={!svc.available}
+              onClick={() => void inst.start().catch(() => {})}
+            >
+              {inst.active ? "Installing…" : "Turn on"}
+            </Button>
+          ) : (
+            <Save
+              label={on ? "Turn on" : "Turn off"}
+              disabled={!svc.available || on === svc.enabled}
+              onClick={() => api("/settings/services", { method: "PUT", body: { name: svc.name, enabled: on } })}
+              onSaved={onSaved}
+            />
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        <Toggle checked={on} onChange={setOn} label={svc.label} disabled={!svc.available} />
-        <Save
-          label={on ? "Turn on" : "Turn off"}
-          disabled={!svc.available || on === svc.enabled}
-          onClick={() => api("/settings/services", { method: "PUT", body: { name: svc.name, enabled: on } })}
-          onSaved={onSaved}
-        />
-      </div>
+      {inst.error && (
+        <div className="mt-3">
+          <Alert>{inst.error}</Alert>
+        </div>
+      )}
+      {showPanel && inst.job && (
+        <div className="mt-3">
+          <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
+        </div>
+      )}
     </div>
   );
 }

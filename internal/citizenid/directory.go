@@ -50,11 +50,12 @@ type AppInfo struct {
 
 // Directory is the Citizen ID page.
 type Directory struct {
-	Admin  UserInfo    `json:"admin"`
-	Users  []UserInfo  `json:"users"`
-	Groups []GroupInfo `json:"groups"`
-	Apps   []AppInfo   `json:"apps"`
-	Domain string      `json:"domain"`
+	Admin  UserInfo          `json:"admin"`
+	Users  []UserInfo        `json:"users"`
+	Groups []GroupInfo       `json:"groups"`
+	Apps   []AppInfo         `json:"apps"`
+	Domain string            `json:"domain"`
+	Brand  store.SignInBrand `json:"brand"`
 }
 
 // LauncherApp is one app a signed-in person is allowed to open.
@@ -84,9 +85,13 @@ type PasskeyInfo struct {
 
 func (g *Gateway) Directory() Directory {
 	snap := g.st.Snapshot()
+	brand := snap.CitizenBrand
+	if brand.Links == nil {
+		brand.Links = []store.BrandLink{}
+	}
 	out := Directory{
 		Users: []UserInfo{}, Groups: []GroupInfo{}, Apps: []AppInfo{},
-		Domain: g.parentDomain(),
+		Domain: g.parentDomain(), Brand: brand,
 	}
 	if snap.Admin != nil {
 		out.Admin = g.userInfoAdmin(snap)

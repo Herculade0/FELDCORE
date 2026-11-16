@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Herculade0/feldcore/internal/install"
 )
 
 // OpError is an operational failure whose message is safe to show the user.
@@ -30,8 +32,10 @@ func (m *Manager) Install(ctx context.Context) error {
 	}
 
 	ctx = context.WithoutCancel(ctx)
-	m.log.Info("installing docker.io")
-	if _, err := run(ctx, 5*time.Minute, "apt-get", "update"); err != nil {
+	if m.log != nil {
+		m.log.Info("installing docker.io")
+	}
+	if _, err := run(ctx, 5*time.Minute, "apt-get", "update"); err != nil && m.log != nil {
 		m.log.Warn("apt-get update failed; trying the install anyway", "err", err)
 	}
 	if _, err := run(ctx, 15*time.Minute, "apt-get", "install", "-y", "docker.io"); err != nil {
@@ -57,7 +61,9 @@ func (m *Manager) Install(ctx context.Context) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	m.log.Info("docker installed")
+	if m.log != nil {
+		m.log.Info("docker installed")
+	}
 	return nil
 }
 
@@ -70,6 +76,19 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	if install.WantsLines(ctx) {
+		text, err := install.Run(ctx, timeout, name, args...)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return text, context.DeadlineExceeded
+			}
+			if tail := lastLine(text); tail != "" {
+				return text, fmt.Errorf("%s", tail)
+			}
+			return text, err
+		}
+		return text, nil
+	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "DEBIAN_FRONTEND=noninteractive")
 	out, err := cmd.CombinedOutput()

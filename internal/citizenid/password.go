@@ -28,7 +28,10 @@ func hashPassword(p argonParams, password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	sum := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
+	var sum []byte
+	limitArgon(func() {
+		sum = argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
+	})
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, p.memory, p.time, p.threads,
 		base64.RawStdEncoding.EncodeToString(salt),
@@ -75,6 +78,19 @@ func verifyPassword(encoded, password string) bool {
 	if err != nil || len(want) == 0 {
 		return false
 	}
-	sum := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	var sum []byte
+	limitArgon(func() {
+		sum = argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	})
 	return subtle.ConstantTimeCompare(sum, want) == 1
+}
+
+// argonSlots caps concurrent argon2id hashes. Each one can use tens of
+// megabytes, so an open sign-in form must not be able to start hundreds.
+var argonSlots = make(chan struct{}, 4)
+
+func limitArgon(fn func()) {
+	argonSlots <- struct{}{}
+	defer func() { <-argonSlots }()
+	fn()
 }

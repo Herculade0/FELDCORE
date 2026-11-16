@@ -1,12 +1,15 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Herculade0/feldcore/internal/citizenid"
+	"github.com/Herculade0/feldcore/internal/store"
 )
 
 func (s *Server) requireCitizen() bool { return s.citizen != nil }
@@ -20,7 +23,7 @@ func (s *Server) viewer(r *http.Request) (citizenid.Identity, bool) {
 			return id, true
 		}
 	}
-	return s.citizen.Identity(r)
+	return s.citizen.DeskIdentity(r)
 }
 
 // requireUser accepts the administrator session or any Citizen ID session.
@@ -74,7 +77,93 @@ func (s *Server) handleCitizenLogin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	if err := s.issueDesk(w, r, id); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"username": id.Username, "admin": id.Admin})
+}
+
+// issueDesk sets the host-only cookie the management UI uses, and the
+// administrator session when this person is the administrator. /api/v1 does
+// not read the parent-domain citizen cookie.
+func (s *Server) issueDesk(w http.ResponseWriter, r *http.Request, id citizenid.Identity) error {
+	if err := s.citizen.StartDesk(w, r, id); err != nil {
+		return err
+	}
+	if id.Admin && s.auth != nil {
+		token, expires, err := s.auth.IssueSession(id.Username)
+		if err != nil {
+			return err
+		}
+		setSessionCookie(w, r, token, expires)
+	}
+	return nil
+}
+
+func readJSONAllowEmpty(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		writeError(w, http.StatusBadRequest, "The request was not valid JSON.")
+		return false
+	}
+	return true
+}
+
+// confirmFactor checks the signed-in caller's password and current
+// authenticator before a factor is changed or removed.
+func (s *Server) confirmFactor(w http.ResponseWriter, r *http.Request) bool {
+	caller, ok := s.viewer(r)
+	if !ok || s.citizen == nil {
+		writeError(w, http.StatusUnauthorized, "Sign in to continue.")
+		return false
+	}
+	var body struct {
+		Password string `json:"password"`
+		TOTP     string `json:"totp"`
+	}
+	if !readJSONAllowEmpty(w, r, &body) {
+		return false
+	}
+	if err := s.citizen.ConfirmCaller(r, caller, body.Password, body.TOTP); err != nil {
+		s.fail(w, r, err)
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleCitizenBrand(w http.ResponseWriter, r *http.Request) {
+	if s.citizen == nil {
+		writeJSON(w, http.StatusOK, store.SignInBrand{Title: "Citizen ID"})
+		return
+	}
+	host := r.URL.Query().Get("host")
+	if host == "" {
+		host = r.Host
+	}
+	writeJSON(w, http.StatusOK, s.citizen.BrandForHost(host))
+}
+
+func (s *Server) handleCitizenDefaults(w http.ResponseWriter, r *http.Request) {
+	if s.citizen == nil {
+		writeError(w, http.StatusNotFound, "Citizen ID is not available.")
+		return
+	}
+	var body store.SignInBrand
+	if !readJSON(w, r, &body) {
+		return
+	}
+	saved, err := s.citizen.SetBrand(body)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
 }
 
 func (s *Server) handleCitizenLogout(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +267,9 @@ func (s *Server) handleCitizenTOTPReset(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "Citizen ID is not available.")
 		return
 	}
+	if !s.confirmFactor(w, r) {
+		return
+	}
 	if err := s.citizen.ResetTOTP(chi.URLParam(r, "id")); err != nil {
 		s.fail(w, r, err)
 		return
@@ -265,6 +357,12 @@ func (s *Server) handleCitizenAppAccess(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, r, err)
 		return
 	}
+	if s.proxy != nil {
+		if err := s.proxy.Apply(r.Context()); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
@@ -273,6 +371,19 @@ func (s *Server) handleTOTPBegin(w http.ResponseWriter, r *http.Request) {
 	if !ok || s.citizen == nil {
 		writeError(w, http.StatusUnauthorized, "Sign in to continue.")
 		return
+	}
+	if s.citizen.FactorOn(id) {
+		var body struct {
+			Password string `json:"password"`
+			TOTP     string `json:"totp"`
+		}
+		if !readJSONAllowEmpty(w, r, &body) {
+			return
+		}
+		if err := s.citizen.ConfirmCaller(r, id, body.Password, body.TOTP); err != nil {
+			s.fail(w, r, err)
+			return
+		}
 	}
 	setup, err := s.citizen.BeginTOTP(id)
 	if err != nil {
@@ -324,6 +435,10 @@ func (s *Server) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request
 		s.fail(w, r, err)
 		return
 	}
+	if err := s.issueDesk(w, r, id); err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"username": id.Username, "admin": id.Admin})
 }
 
@@ -360,6 +475,9 @@ func (s *Server) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Sign in to continue.")
 		return
 	}
+	if !s.confirmFactor(w, r) {
+		return
+	}
 	if err := s.citizen.DeletePasskey(id.ID, chi.URLParam(r, "id")); err != nil {
 		s.fail(w, r, err)
 		return
@@ -370,6 +488,9 @@ func (s *Server) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCitizenPasskeyDelete(w http.ResponseWriter, r *http.Request) {
 	if !s.requireCitizen() {
 		writeError(w, http.StatusNotFound, "Citizen ID is not available.")
+		return
+	}
+	if !s.confirmFactor(w, r) {
 		return
 	}
 	if err := s.citizen.DeletePasskey(chi.URLParam(r, "id"), chi.URLParam(r, "key")); err != nil {

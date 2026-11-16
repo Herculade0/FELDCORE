@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"image/png"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,15 @@ type TOTPSetup struct {
 
 func totpName(id string) string    { return "totp-" + id }
 func totpPending(id string) string { return "totp-p-" + id }
+func totpUsed(id string) string    { return "totp-used-" + id }
+
+// secondFactorError is a missing authenticator code. It does not count as a
+// failed password. errors.Is matches ErrSecondFactor.
+type secondFactorError struct{}
+
+func (secondFactorError) Error() string             { return ErrSecondFactor.Error() }
+func (secondFactorError) Is(err error) bool         { return err == ErrSecondFactor }
+func (secondFactorError) SecondFactorPending() bool { return true }
 
 func normalizeCode(code string) string {
 	code = strings.TrimSpace(code)
@@ -37,7 +47,7 @@ func (g *Gateway) totpOK(id string, enrolled bool, code string) error {
 	}
 	code = normalizeCode(code)
 	if code == "" {
-		return ErrSecondFactor
+		return secondFactorError{}
 	}
 	if g.box == nil {
 		return ErrInvalidCode
@@ -46,13 +56,85 @@ func (g *Gateway) totpOK(id string, enrolled bool, code string) error {
 	if err != nil || !ok || secret == "" {
 		return ErrInvalidCode
 	}
-	valid, err := totp.ValidateCustom(code, secret, g.now(), totp.ValidateOpts{
-		Period: 30, Skew: 1, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1,
-	})
-	if err != nil || !valid {
+	return g.acceptStep(id, secret, code)
+}
+
+// acceptStep accepts code for secret when it matches the current window
+// (one step either side) and has not been used before. The matched step is
+// stored so the same code cannot be replayed.
+func (g *Gateway) acceptStep(id, secret, code string) error {
+	code = normalizeCode(code)
+	now := g.now()
+	base := now.Unix() / 30
+	var matched int64
+	found := false
+	for _, delta := range []int64{0, -1, 1} {
+		step := base + delta
+		at := time.Unix(step*30+15, 0).UTC()
+		valid, err := totp.ValidateCustom(code, secret, at, totp.ValidateOpts{
+			Period: 30, Skew: 0, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1,
+		})
+		if err == nil && valid {
+			matched = step
+			found = true
+			break
+		}
+	}
+	if !found {
 		return ErrInvalidCode
 	}
+	g.stepMu.Lock()
+	defer g.stepMu.Unlock()
+	last := int64(0)
+	if g.box != nil {
+		if raw, ok, err := g.box.Get(totpUsed(id)); err == nil && ok && raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+				last = n
+			}
+		}
+	}
+	if matched <= last {
+		return ErrInvalidCode
+	}
+	if g.box == nil {
+		return ErrInvalidCode
+	}
+	if err := g.box.Put(totpUsed(id), strconv.FormatInt(matched, 10)); err != nil {
+		return err
+	}
 	return nil
+}
+
+// AdminFactor is the authenticator check for the original administrator
+// sign-in. It allows the password through when no authenticator is enrolled.
+func (g *Gateway) AdminFactor(username, code string) error {
+	snap := g.st.Snapshot()
+	if snap.Admin == nil || snap.Admin.Username != username || !snap.Admin.TOTP {
+		return nil
+	}
+	return g.totpOK("admin", true, code)
+}
+
+// FactorOn reports whether id already has an authenticator.
+func (g *Gateway) FactorOn(id Identity) bool {
+	snap := g.st.Snapshot()
+	if id.ID == "admin" && snap.Admin != nil {
+		return snap.Admin.TOTP
+	}
+	for _, a := range snap.Accounts {
+		if a.ID == id.ID {
+			return a.TOTP
+		}
+	}
+	return false
+}
+
+// ConfirmCaller checks the caller's password and, when an authenticator is
+// enrolled, the current code. A signed-in session on its own is not enough
+// to change or remove a factor.
+func (g *Gateway) ConfirmCaller(r *http.Request, id Identity, password, code string) error {
+	_, err := g.authenticate(r, id.Username, password, code)
+	return err
 }
 
 // BeginTOTP starts enrolment. The previous authenticator keeps working until
@@ -93,12 +175,8 @@ func (g *Gateway) ConfirmTOTP(id Identity, code string) error {
 	if !ok || secret == "" {
 		return &InputError{"Set up an authenticator first."}
 	}
-	code = normalizeCode(code)
-	valid, err := totp.ValidateCustom(code, secret, g.now(), totp.ValidateOpts{
-		Period: 30, Skew: 1, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1,
-	})
-	if err != nil || !valid {
-		return ErrInvalidCode
+	if err := g.acceptStep(id.ID, secret, code); err != nil {
+		return err
 	}
 	if err := g.box.Put(totpName(id.ID), secret); err != nil {
 		return err
@@ -157,7 +235,7 @@ func (g *Gateway) FinishSecondFactor(w http.ResponseWriter, r *http.Request, cod
 	key := hashKey(c.Value)
 	g.mu.Lock()
 	p, ok := g.pending[key]
-	if ok && (p.IP != clientIP(r) || !p.Expires.After(g.now())) {
+	if ok && (p.IP != g.clientIP(r) || !p.Expires.After(g.now())) {
 		delete(g.pending, key)
 		ok = false
 	}
@@ -165,13 +243,16 @@ func (g *Gateway) FinishSecondFactor(w http.ResponseWriter, r *http.Request, cod
 	if !ok {
 		return Identity{}, &InputError{"That sign-in expired. Enter your password again."}
 	}
-	ip := clientIP(r)
-	if g.lim.blocked("ip:"+ip, g.now()) || g.lim.blocked("user:"+strings.ToLower(p.Username), g.now()) {
+	ip := g.clientIP(r)
+	userKey := "user:" + strings.ToLower(p.Username)
+	done, allowed := g.lim.begin(g.now(), "ip:"+ip, userKey)
+	if !allowed {
 		g.record(p.Username, "sign-in failed", "locked", "denied")
 		return Identity{}, ErrRateLimited
 	}
 	id, found := g.lookup(p.Username)
 	if !found {
+		done(true)
 		return Identity{}, ErrInvalidCredentials
 	}
 	enrolled := false
@@ -187,14 +268,15 @@ func (g *Gateway) FinishSecondFactor(w http.ResponseWriter, r *http.Request, cod
 	}
 	if err := g.totpOK(id.ID, enrolled, code); err != nil {
 		if !errorsIsSecond(err) {
-			g.lim.fail("ip:"+ip, g.now())
-			g.lim.fail("user:"+strings.ToLower(p.Username), g.now())
+			done(true)
 			g.record(p.Username, "sign-in failed", "totp", "denied")
+		} else {
+			done(false)
 		}
 		return Identity{}, err
 	}
-	g.lim.reset("ip:" + ip)
-	g.lim.reset("user:" + strings.ToLower(p.Username))
+	done(false)
+	g.lim.reset(userKey)
 	g.mu.Lock()
 	delete(g.pending, key)
 	g.mu.Unlock()
@@ -225,7 +307,7 @@ func (g *Gateway) issuePending(w http.ResponseWriter, r *http.Request, username 
 	if len(g.pending) > 1024 {
 		g.pending = map[string]pendingLogin{}
 	}
-	g.pending[hashKey(token)] = pendingLogin{Username: username, IP: clientIP(r), Expires: now.Add(5 * time.Minute)}
+	g.pending[hashKey(token)] = pendingLogin{Username: username, IP: g.clientIP(r), Expires: now.Add(5 * time.Minute)}
 	g.mu.Unlock()
 	httpSet(w, r, pendingCookie, token, "/citizen", 300)
 	return nil

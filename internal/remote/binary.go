@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/secrets"
 )
 
@@ -139,6 +140,29 @@ func (h *HostCloudflared) Install(ctx context.Context) error {
 	return os.Chmod(dest, 0o755)
 }
 
+// byteProgress reports download size on the install job's log, a few
+// megabytes at a time. With no job hooked up it only copies.
+type byteProgress struct {
+	ctx  context.Context
+	r    io.Reader
+	n    int64
+	mark int64
+}
+
+func (b *byteProgress) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	b.n += int64(n)
+	if b.n-b.mark >= 4<<20 {
+		b.mark = b.n
+		install.Line(b.ctx, "Downloaded "+itoaMB(b.n)+" MB")
+	}
+	return n, err
+}
+
+func itoaMB(n int64) string {
+	return fmt.Sprintf("%d", n>>20)
+}
+
 func (h *HostCloudflared) path() string {
 	return filepath.Join(h.Dir, "cloudflared")
 }
@@ -171,7 +195,7 @@ func download(ctx context.Context, url, dest string) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	if _, err := io.Copy(tmp, &byteProgress{ctx: ctx, r: resp.Body}); err != nil {
 		tmp.Close()
 		return err
 	}

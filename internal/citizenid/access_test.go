@@ -63,7 +63,7 @@ func signIn(t *testing.T, g *Gateway, username, password, code, remote string) *
 func authed(cookie *http.Cookie, host string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "http://"+host+"/library", nil)
 	req.Host = host
-	req.RemoteAddr = "192.0.2.40:9"
+	req.RemoteAddr = "127.0.0.1:9"
 	if cookie != nil {
 		req.AddCookie(cookie)
 	}
@@ -162,11 +162,14 @@ func TestAccessDecisions(t *testing.T) {
 		t.Fatalf("admin app %+v %v", d, err)
 	}
 	adminCookie := signIn(t, g, "admin", "correct horse", "", "192.0.2.12:9")
-	for _, app := range []AppAccess{users, files, panel, unknown} {
+	for _, app := range []AppAccess{users, files, panel} {
 		d, err := g.Authorize(authed(adminCookie, "admin.home.arpa"), app)
 		if err != nil || !d.Allow || d.Identity == nil || !d.Identity.Admin {
 			t.Fatalf("admin bypass %+v %+v %v", app, d, err)
 		}
+	}
+	if d, err := g.Authorize(authed(adminCookie, "admin.home.arpa"), unknown); err != nil || d.Allow || d.Reason != "forbidden" {
+		t.Fatalf("unknown level stays closed for an administrator %+v %v", d, err)
 	}
 
 	off := false
@@ -386,6 +389,7 @@ func TestMiddlewareRedirects(t *testing.T) {
 	}))
 	req := httptest.NewRequest(http.MethodGet, "http://wiki.home.arpa/", nil)
 	req.Host = "wiki.home.arpa"
+	req.RemoteAddr = "127.0.0.1:9"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "/citizen/signin?next=") {

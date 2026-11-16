@@ -22,8 +22,11 @@ import (
 	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/files"
+	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
+	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
@@ -53,6 +56,7 @@ type Deps struct {
 	VPN        *vpn.Service
 	Backups    *backup.Service
 	Mail       *notify.Service
+	Publish    *publish.Service
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -77,6 +81,10 @@ type Server struct {
 	vpn        *vpn.Service
 	backups    *backup.Service
 	mail       *notify.Service
+	uploads    *files.Uploads
+	fetcher    *files.Fetcher
+	installs   *install.Runner
+	publish    *publish.Service
 }
 
 // New returns a Server.
@@ -86,8 +94,17 @@ func New(d Deps) *Server {
 		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup,
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
-		vpn: d.VPN, backups: d.Backups, mail: d.Mail,
+		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
 	}
+	s.uploads = files.NewUploads()
+	s.fetcher = files.NewFetcher(func() bool {
+		if s.auth == nil {
+			return false
+		}
+		return s.auth.AllowLANURLs()
+	})
+	s.fetcher.OnSettle = s.settleFetch
+	s.wireInstalls()
 	s.initMCP()
 	return s
 }
@@ -112,6 +129,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/auth/setup", s.handleAuthSetup)
 			r.Post("/auth/login", s.handleAuthLogin)
 			r.Post("/auth/logout", s.handleAuthLogout)
+			r.Get("/citizen/brand", s.handleCitizenBrand)
 			r.Post("/citizen/login", s.handleCitizenLogin)
 			r.Post("/citizen/logout", s.handleCitizenLogout)
 			r.Post("/citizen/webauthn/login/begin", s.handlePasskeyLoginBegin)
@@ -145,6 +163,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/docker/install", s.handleDockerInstall)
 			r.Post("/docker/containers", s.handleDockerCreate)
 			r.Put("/docker/containers/{id}", s.handleDockerUpdate)
+			r.Post("/docker/review", s.handleDockerReview)
 			// The catalogue is about 20MB; a refresh must not sit under the
 			// short request timeout.
 			r.Post("/apps/refresh", s.handleAppsRefresh)
@@ -168,9 +187,17 @@ func (s *Server) Router() http.Handler {
 			r.Post("/remote/install", s.handleRemoteInstall)
 			r.Put("/proxy", s.handleProxySave)
 			r.Put("/docker/containers/{id}/address", s.handleAddressSave)
+			r.Put("/publish", s.handlePublishSave)
+			r.Put("/docker/containers/{id}/publish", s.handleContainerPublishSave)
 			r.Post("/docker/containers/{id}/snapshots", s.handleSnapshotCreate)
 			r.Post("/docker/containers/{id}/snapshots/{snap}/restore", s.handleSnapshotRestore)
 			r.Put("/snapshots", s.handleSnapshotSettings)
+			// File downloads, archives and upload chunks can outlive the short timeout.
+			r.Get("/shares/{name}/files/content", s.handleFileContent)
+			r.Head("/shares/{name}/files/content", s.handleFileContent)
+			r.Post("/shares/{name}/files/zip", s.handleFileZip)
+			r.Post("/shares/{name}/uploads", s.handleUploadCreate)
+			r.Patch("/shares/{name}/uploads/{id}", s.handleUploadPatch)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -182,6 +209,19 @@ func (s *Server) Router() http.Handler {
 				r.Post("/shares", s.handleShareCreate)
 				r.Put("/shares/{name}", s.handleShareUpdate)
 				r.Delete("/shares/{name}", s.handleShareDelete)
+
+				r.Get("/shares/{name}/files", s.handleFileList)
+				r.Post("/shares/{name}/files/mkdir", s.handleFileMkdir)
+				r.Post("/shares/{name}/files/rename", s.handleFileRename)
+				r.Post("/shares/{name}/files/move", s.handleFileMove)
+				r.Post("/shares/{name}/files/copy", s.handleFileCopy)
+				r.Post("/shares/{name}/files/delete", s.handleFileDelete)
+				r.Get("/shares/{name}/uploads/{id}", s.handleUploadStatus)
+				r.Delete("/shares/{name}/uploads/{id}", s.handleUploadAbort)
+				r.Post("/shares/{name}/fetch", s.handleFetchStart)
+				r.Get("/shares/{name}/fetch", s.handleFetchList)
+				r.Get("/shares/{name}/fetch/{id}", s.handleFetchGet)
+				r.Delete("/shares/{name}/fetch/{id}", s.handleFetchCancel)
 
 				r.Post("/shares/users", s.handleShareUserCreate)
 				r.Put("/shares/users/{name}/password", s.handleShareUserPassword)
@@ -203,6 +243,8 @@ func (s *Server) Router() http.Handler {
 				r.Put("/settings/feed", s.handleSettingsFeed)
 				r.Put("/settings/defaults", s.handleSettingsDefaults)
 				r.Post("/settings/shares", s.handleSettingsShares)
+				r.Get("/settings/files", s.handleFileSettingsGet)
+				r.Put("/settings/files", s.handleFileSettingsPut)
 
 				r.Get("/vpn", s.handleVPN)
 				r.Post("/vpn/parse", s.handleVPNParse)
@@ -242,10 +284,16 @@ func (s *Server) Router() http.Handler {
 				r.Get("/docker/containers", s.handleDockerContainers)
 				r.Get("/docker/containers/{id}/spec", s.handleDockerSpec)
 				r.Get("/docker/containers/{id}/address", s.handleAddress)
+				r.Get("/publish", s.handlePublish)
+				r.Get("/docker/containers/{id}/publish", s.handleContainerPublish)
 				r.Get("/docker/containers/{id}/snapshots", s.handleSnapshots)
 				r.Delete("/docker/containers/{id}/snapshots/{snap}", s.handleSnapshotDelete)
 				r.Get("/docker/images", s.handleDockerImages)
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
+
+				r.Get("/installs", s.handleInstalls)
+				r.Get("/installs/{id}", s.handleInstall)
+				r.Post("/installs", s.handleInstallStart)
 
 				r.Get("/audit", s.handleAudit)
 				r.Get("/citizen", s.handleCitizenDirectory)
@@ -259,6 +307,7 @@ func (s *Server) Router() http.Handler {
 				r.Put("/citizen/groups/{id}", s.handleCitizenGroupUpdate)
 				r.Delete("/citizen/groups/{id}", s.handleCitizenGroupDelete)
 				r.Put("/citizen/apps/{container}", s.handleCitizenAppAccess)
+				r.Put("/citizen/defaults", s.handleCitizenDefaults)
 				r.Get("/agent/tokens", s.handleTokensList)
 				r.Post("/agent/tokens", s.handleTokenCreate)
 				r.Post("/agent/tokens/revoke-all", s.handleTokensRevokeAll)
@@ -364,30 +413,36 @@ func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, max int64) boo
 // fail maps a service error onto an HTTP response.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var (
-		authInput   *auth.InputError
-		citInput    *citizenid.InputError
-		shareInput  *shares.InputError
-		shareOp     *shares.OpError
-		dockerInput *docker.InputError
-		dockerOp    *docker.OpError
-		appsInput   *apps.InputError
-		appsOp      *apps.OpError
-		vmInput     *vm.InputError
-		vmOp        *vm.OpError
-		setupInput  *setup.InputError
-		setupOp     *setup.OpError
-		vpnInput    *vpn.InputError
-		vpnOp       *vpn.OpError
-		backupInput *backup.InputError
-		backupOp    *backup.OpError
-		mailInput   *notify.InputError
-		mailOp      *notify.OpError
-		remoteInput *remote.InputError
-		remoteOp    *remote.OpError
-		proxyInput  *proxy.InputError
-		proxyOp     *proxy.OpError
-		snapInput   *snapshots.InputError
-		snapOp      *snapshots.OpError
+		authInput    *auth.InputError
+		citInput     *citizenid.InputError
+		shareInput   *shares.InputError
+		shareOp      *shares.OpError
+		dockerInput  *docker.InputError
+		dockerOp     *docker.OpError
+		appsInput    *apps.InputError
+		appsOp       *apps.OpError
+		vmInput      *vm.InputError
+		vmOp         *vm.OpError
+		setupInput   *setup.InputError
+		setupOp      *setup.OpError
+		vpnInput     *vpn.InputError
+		vpnOp        *vpn.OpError
+		backupInput  *backup.InputError
+		backupOp     *backup.OpError
+		mailInput    *notify.InputError
+		mailOp       *notify.OpError
+		remoteInput  *remote.InputError
+		remoteOp     *remote.OpError
+		proxyInput   *proxy.InputError
+		proxyOp      *proxy.OpError
+		pubInput     *publish.InputError
+		pubOp        *publish.OpError
+		snapInput    *snapshots.InputError
+		snapOp       *snapshots.OpError
+		fileInput    *files.InputError
+		fileOp       *files.OpError
+		fileConflict *files.ConflictError
+		fileForbid   *files.ForbiddenURL
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -414,8 +469,19 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, remoteInput.Msg)
 	case errors.As(err, &proxyInput):
 		writeError(w, http.StatusBadRequest, proxyInput.Msg)
+	case errors.As(err, &pubInput):
+		writeError(w, http.StatusBadRequest, pubInput.Msg)
 	case errors.As(err, &snapInput):
 		writeError(w, http.StatusBadRequest, snapInput.Msg)
+	case errors.As(err, &fileInput):
+		writeError(w, http.StatusBadRequest, fileInput.Msg)
+	case errors.As(err, &fileForbid):
+		writeError(w, http.StatusBadRequest, fileForbid.Error())
+	case errors.As(err, &fileConflict):
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": fileConflict.Error(), "conflict": true,
+			"name": fileConflict.Name, "path": fileConflict.Path,
+		})
 	case errors.As(err, &shareOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, shareOp.Msg)
@@ -446,19 +512,29 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &proxyOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, proxyOp.Msg)
+	case errors.As(err, &pubOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, pubOp.Msg)
 	case errors.As(err, &snapOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, snapOp.Msg)
+	case errors.As(err, &fileOp):
+		if s.log != nil {
+			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, fileOp.Msg)
 	case errors.Is(err, apps.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):
 		writeError(w, http.StatusNotFound, "That container no longer exists.")
-	case errors.Is(err, shares.ErrNotFound):
+	case errors.Is(err, shares.ErrNotFound), errors.Is(err, files.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That item no longer exists.")
 	case errors.Is(err, auth.ErrSetupDone):
 		writeError(w, http.StatusConflict, "FELDCORE has already been set up. Sign in instead.")
 	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, citizenid.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "Incorrect username or password.")
+	case errors.Is(err, citizenid.ErrSecondFactor):
+		writeError(w, http.StatusUnauthorized, "Enter the code from your authenticator.")
 	case errors.Is(err, citizenid.ErrInvalidCode), errors.Is(err, citizenid.ErrPasskey):
 		writeError(w, http.StatusUnauthorized, "That verification could not be confirmed.")
 	case errors.Is(err, citizenid.ErrDisabled):

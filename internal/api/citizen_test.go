@@ -31,6 +31,7 @@ func citizenServer(t *testing.T) (*Server, *citizenid.Gateway) {
 		t.Fatal(err)
 	}
 	g := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: accounts})
+	accounts.SetSecondFactor(g.AdminFactor)
 	return New(Deps{Auth: accounts, Citizen: g}), g
 }
 
@@ -47,36 +48,43 @@ func TestDirectoryUserCannotManage(t *testing.T) {
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"admin":true`) {
 		t.Fatalf("login %d %s", rec.Code, rec.Body.String())
 	}
-	var cookie *http.Cookie
+	var citizen, desk *http.Cookie
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == "feldcore_citizen" {
-			cookie = c
+			citizen = c
+		}
+		if c.Name == "feldcore_desk" {
+			desk = c
 		}
 	}
-	if cookie == nil {
-		t.Fatal("no session")
+	if citizen == nil || desk == nil {
+		t.Fatal("login did not set both cookies")
 	}
-	call := func(method, path string) *httptest.ResponseRecorder {
+	call := func(method, path string, c *http.Cookie) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(method, path, nil)
-		r.AddCookie(cookie)
+		if c != nil {
+			r.AddCookie(c)
+		}
 		w := httptest.NewRecorder()
 		srv.Router().ServeHTTP(w, r)
 		return w
 	}
-	settings := call(http.MethodGet, "/api/v1/audit")
-	if settings.Code != http.StatusForbidden || !strings.Contains(settings.Body.String(), "administrator") {
-		t.Fatalf("audit %d %s", settings.Code, settings.Body.String())
+	// The parent-domain cookie is not a management session, even for a replay.
+	for _, path := range []string{"/api/v1/audit", "/api/v1/citizen", "/api/v1/citizen/me", "/api/v1/launcher"} {
+		got := call(http.MethodGet, path, citizen)
+		if got.Code != http.StatusUnauthorized {
+			t.Fatalf("citizen cookie %s %d %s", path, got.Code, got.Body.String())
+		}
 	}
-	dir := call(http.MethodGet, "/api/v1/citizen")
-	if dir.Code != http.StatusForbidden {
-		t.Fatalf("directory %d %s", dir.Code, dir.Body.String())
+	if got := call(http.MethodGet, "/api/v1/audit", desk); got.Code != http.StatusUnauthorized {
+		t.Fatalf("desk cookie is not an administrator session %d %s", got.Code, got.Body.String())
 	}
-	me := call(http.MethodGet, "/api/v1/citizen/me")
+	me := call(http.MethodGet, "/api/v1/citizen/me", desk)
 	if me.Code != http.StatusOK || !strings.Contains(me.Body.String(), `"username":"ada"`) {
 		t.Fatalf("me %d %s", me.Code, me.Body.String())
 	}
-	launch := call(http.MethodGet, "/api/v1/launcher")
+	launch := call(http.MethodGet, "/api/v1/launcher", desk)
 	if launch.Code != http.StatusOK || !strings.Contains(launch.Body.String(), `"apps"`) {
 		t.Fatalf("launcher %d %s", launch.Code, launch.Body.String())
 	}
@@ -129,8 +137,8 @@ func TestCitizenLoginAsksForTOTP(t *testing.T) {
 	legacy.RemoteAddr = "192.0.2.82:9"
 	lrec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(lrec, legacy)
-	if lrec.Code != http.StatusOK {
-		t.Fatalf("legacy login still requires a code: %d %s", lrec.Code, lrec.Body.String())
+	if lrec.Code != http.StatusUnauthorized || !strings.Contains(lrec.Body.String(), "authenticator") {
+		t.Fatalf("legacy login without a code: %d %s", lrec.Code, lrec.Body.String())
 	}
 
 	first := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
@@ -145,7 +153,14 @@ func TestCitizenLoginAsksForTOTP(t *testing.T) {
 		t.Fatalf("prompt set a cookie: %v", frec.Result().Cookies())
 	}
 
-	second := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"admin","password":"correct horse","totp":"`+code+`"}`))
+	next, err := totp.GenerateCode(setup.Secret, time.Now().Add(30*time.Second))
+	if err != nil || next == code {
+		next, err = totp.GenerateCode(setup.Secret, time.Now().Add(60*time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"admin","password":"correct horse","totp":"`+next+`"}`))
 	second.Header.Set("Content-Type", "application/json")
 	second.RemoteAddr = "192.0.2.84:9"
 	srec := httptest.NewRecorder()

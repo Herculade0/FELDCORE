@@ -33,6 +33,7 @@ import (
 
 const (
 	cookieName    = "feldcore_citizen"
+	deskCookie    = "feldcore_desk"
 	csrfCookie    = "feldcore_csrf"
 	pendingCookie = "feldcore_pending"
 	passkeyCookie = "feldcore_passkey"
@@ -113,6 +114,9 @@ type Deps struct {
 	Secrets *secrets.Box
 	Audit   Auditor
 	Log     *slog.Logger
+	// Trust reports whether a TCP peer is Caddy or cloudflared. Forwarded
+	// client headers are honoured only from those peers and from loopback.
+	Trust trustPeer
 }
 
 // Gateway is the sign-in service the proxy and the UI call.
@@ -127,13 +131,18 @@ type Gateway struct {
 	argon    argonParams
 	now      func() time.Time
 
-	cookieMu  sync.Mutex
-	dummyOnce sync.Once
-	dummy     string
+	cookieMu    sync.Mutex
+	dummyOnce   sync.Once
+	dummy       string
+	bcryptOnce  sync.Once
+	bcryptDummy []byte
+	trust       trustPeer
+	stepMu      sync.Mutex
 
 	mu         sync.Mutex
 	pending    map[string]pendingLogin
 	ceremonies map[string]ceremony
+	noise      map[string]time.Time
 }
 
 type pendingLogin struct {
@@ -158,7 +167,7 @@ func FromContext(ctx context.Context) (Identity, bool) {
 // Open returns a gateway. The local provider is installed.
 func Open(d Deps) *Gateway {
 	g := &Gateway{
-		st: d.Store, box: d.Secrets, audit: d.Audit, log: d.Log,
+		st: d.Store, box: d.Secrets, audit: d.Audit, log: d.Log, trust: d.Trust,
 		lim: newLimiter(8, 5*time.Minute), argon: prodArgon, now: time.Now,
 		pending: map[string]pendingLogin{}, ceremonies: map[string]ceremony{},
 	}
@@ -195,11 +204,20 @@ func (g *Gateway) ProviderName() string {
 }
 
 // Gated reports whether a level needs the proxy to call Citizen ID.
-// Public, and anything unrecognised as a tighter level, stays open so
-// existing hostnames keep working until an administrator sets a rule.
+// Public and empty stay open. Anything else, including a level this
+// version does not recognise, is closed.
 func Gated(level string) bool {
 	switch level {
-	case LevelUsers, LevelGroups, LevelAdmin:
+	case "", LevelPublic:
+		return false
+	default:
+		return true
+	}
+}
+
+func knownLevel(level string) bool {
+	switch level {
+	case LevelPublic, LevelUsers, LevelGroups, LevelAdmin:
 		return true
 	default:
 		return false
@@ -219,7 +237,24 @@ func (g *Gateway) Authorize(r *http.Request, app AppAccess) (Decision, error) {
 	if level == LevelPublic {
 		return Decision{Allow: true, Reason: "public"}, nil
 	}
+	// A gated app on plain HTTP is only answered for a local client.
+	// A public address must use TLS before a session cookie is accepted.
+	if !requestSecure(r) && !localClient(g.clientIP(r)) {
+		g.record("", "access denied", appLabel(app), "denied")
+		return Decision{Allow: false, Reason: "forbidden"}, nil
+	}
 	id, ok := g.Identity(r)
+	if !knownLevel(level) {
+		if ok {
+			g.record(id.Username, "access denied", appLabel(app), "denied")
+			cp := id
+			return Decision{Allow: false, Reason: "forbidden", Identity: &cp}, nil
+		}
+		return Decision{
+			Allow: false, Reason: "unauthenticated",
+			Location: "/citizen/signin?next=" + url.QueryEscape(g.safeNext(r, g.returnURL(r))),
+		}, nil
+	}
 	if !ok {
 		return Decision{
 			Allow: false, Reason: "unauthenticated",
@@ -376,6 +411,11 @@ func (g *Gateway) identity(ctx context.Context) (Identity, bool) {
 	if g.sessions.GetString(ctx, "ver") != strconv.Itoa(id.Version) {
 		return Identity{}, false
 	}
+	// The session is bound to the account id. Recreating a username does
+	// not revive a deleted person's session.
+	if g.sessions.GetString(ctx, "uid") != id.ID {
+		return Identity{}, false
+	}
 	return id, true
 }
 
@@ -418,33 +458,86 @@ func (g *Gateway) Login(w http.ResponseWriter, r *http.Request, username, passwo
 }
 
 func (g *Gateway) authenticate(r *http.Request, username, password, code string) (Identity, error) {
-	ip := clientIP(r)
+	ip := g.clientIP(r)
 	userKey := "user:" + strings.ToLower(username)
-	if g.lim.blocked("ip:"+ip, g.now()) || (username != "" && g.lim.blocked(userKey, g.now())) {
-		g.record(username, "sign-in failed", "locked", "denied")
+	keys := []string{"ip:" + ip}
+	if username != "" {
+		keys = append(keys, userKey)
+	}
+	done, allowed := g.lim.begin(g.now(), keys...)
+	if !allowed {
+		if g.knownAccount(username) {
+			g.record(username, "sign-in failed", "locked", "denied")
+		} else {
+			g.recordNoise(ip)
+		}
 		return Identity{}, ErrRateLimited
 	}
 	id, err := g.provider.Authenticate(username, password, code)
 	if err == nil {
-		g.lim.reset("ip:" + ip)
-		g.lim.reset(userKey)
+		done(false)
+		if username != "" {
+			// A success clears the username bucket only. The address keeps
+			// its failures, so one good password cannot reset a shared IP.
+			g.lim.reset(userKey)
+		}
 		return id, nil
 	}
 	if errors.Is(err, ErrSecondFactor) {
+		done(false)
 		return Identity{}, err
 	}
-	g.lim.fail("ip:"+ip, g.now())
-	if username != "" {
-		g.lim.fail(userKey, g.now())
+	done(true)
+	if g.knownAccount(username) {
+		g.record(username, "sign-in failed", "", "denied")
+	} else {
+		g.recordNoise(ip)
 	}
-	g.record(username, "sign-in failed", "", "denied")
 	return Identity{}, err
+}
+
+func (g *Gateway) knownAccount(username string) bool {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return false
+	}
+	snap := g.st.Snapshot()
+	if snap.Admin != nil && snap.Admin.Username == username {
+		return true
+	}
+	for _, a := range snap.Accounts {
+		if a.Username == username {
+			return true
+		}
+	}
+	return false
+}
+
+// recordNoise keeps at most one anonymous failure per address per minute,
+// and marks it so the audit trim can drop it before a real security event.
+func (g *Gateway) recordNoise(ip string) {
+	g.mu.Lock()
+	if g.noise == nil {
+		g.noise = map[string]time.Time{}
+	}
+	now := g.now()
+	if t, ok := g.noise[ip]; ok && now.Sub(t) < time.Minute {
+		g.mu.Unlock()
+		return
+	}
+	if len(g.noise) > 1024 {
+		g.noise = map[string]time.Time{}
+	}
+	g.noise[ip] = now
+	g.mu.Unlock()
+	g.record("", "sign-in noise", ip, "denied")
 }
 
 // Logout ends the Citizen ID session and clears the cookie.
 func (g *Gateway) Logout(w http.ResponseWriter, r *http.Request) error {
 	g.cookieMu.Lock()
 	defer g.cookieMu.Unlock()
+	g.dropDeskLocked(w, r)
 	g.prepareCookie(r)
 	ctx, err := g.loadLocked(r)
 	if err != nil {
@@ -481,10 +574,130 @@ func (g *Gateway) startSession(w http.ResponseWriter, r *http.Request, id Identi
 	return g.commitLocked(w, ctx)
 }
 
+// StartDesk sets the host-only cookie the management UI uses. The parent-domain
+// citizen cookie is never accepted by /api/v1.
+func (g *Gateway) StartDesk(w http.ResponseWriter, r *http.Request, id Identity) error {
+	g.cookieMu.Lock()
+	defer g.cookieMu.Unlock()
+	name := deskCookie
+	secure := requestSecure(r)
+	if secure {
+		name = "__Host-" + deskCookie
+	}
+	g.sessions.Cookie.Name = name
+	g.sessions.Cookie.Domain = ""
+	g.sessions.Cookie.Secure = secure
+	g.sessions.Cookie.Path = "/"
+	g.sessions.Cookie.HttpOnly = true
+	g.sessions.Cookie.SameSite = http.SameSiteStrictMode
+	g.sessions.Cookie.Persist = true
+	g.sessions.Lifetime = g.lifetime()
+	ctx, err := g.sessions.Load(r.Context(), "")
+	if err != nil {
+		g.prepareCookie(r)
+		return err
+	}
+	if err := g.sessions.RenewToken(ctx); err != nil {
+		g.prepareCookie(r)
+		return err
+	}
+	fresh, ok := g.lookup(id.Username)
+	if !ok {
+		g.prepareCookie(r)
+		return ErrInvalidCredentials
+	}
+	g.sessions.Put(ctx, "username", fresh.Username)
+	g.sessions.Put(ctx, "uid", fresh.ID)
+	g.sessions.Put(ctx, "admin", fresh.Admin)
+	g.sessions.Put(ctx, "ver", strconv.Itoa(fresh.Version))
+	g.sessions.Put(ctx, "factor", "desk")
+	err = g.commitLocked(w, ctx)
+	g.prepareCookie(r)
+	return err
+}
+
+// DeskIdentity resolves the host-only management cookie. The parent-domain
+// citizen cookie is ignored here.
+func (g *Gateway) DeskIdentity(r *http.Request) (Identity, bool) {
+	g.cookieMu.Lock()
+	defer g.cookieMu.Unlock()
+	token := ""
+	for _, name := range []string{"__Host-" + deskCookie, deskCookie} {
+		if c, err := r.Cookie(name); err == nil && c.Value != "" {
+			token = c.Value
+			break
+		}
+	}
+	if token == "" {
+		return Identity{}, false
+	}
+	ctx, err := g.sessions.Load(r.Context(), token)
+	if err != nil {
+		return Identity{}, false
+	}
+	return g.identity(ctx)
+}
+
+func (g *Gateway) dropDeskLocked(w http.ResponseWriter, r *http.Request) {
+	for _, name := range []string{"__Host-" + deskCookie, deskCookie} {
+		c, err := r.Cookie(name)
+		if err != nil || c.Value == "" {
+			continue
+		}
+		secure := requestSecure(r) || strings.HasPrefix(name, "__Host-")
+		g.sessions.Cookie.Name = name
+		g.sessions.Cookie.Domain = ""
+		g.sessions.Cookie.Secure = secure
+		g.sessions.Cookie.Path = "/"
+		g.sessions.Cookie.HttpOnly = true
+		g.sessions.Cookie.SameSite = http.SameSiteStrictMode
+		ctx, err := g.sessions.Load(r.Context(), c.Value)
+		if err == nil {
+			_ = g.sessions.Destroy(ctx)
+			_ = g.commitLocked(w, ctx)
+		}
+	}
+}
+
+// ResolveGroups turns stored group names or ids into ids.
+func (g *Gateway) ResolveGroups(names []string) []string {
+	snap := g.st.Snapshot()
+	var ids []string
+	seen := map[string]bool{}
+	for _, name := range names {
+		n := strings.TrimSpace(name)
+		if n == "" {
+			continue
+		}
+		for _, gr := range snap.Groups {
+			if gr.ID == n || strings.EqualFold(gr.Name, n) {
+				if !seen[gr.ID] {
+					ids = append(ids, gr.ID)
+					seen[gr.ID] = true
+				}
+			}
+		}
+	}
+	return ids
+}
+
 func (g *Gateway) prepareCookie(r *http.Request) {
 	g.sessions.Lifetime = g.lifetime()
-	g.sessions.Cookie.Domain = g.cookieDomain(r)
-	g.sessions.Cookie.Secure = requestSecure(r)
+	domain := g.cookieDomain(r)
+	secure := requestSecure(r)
+	name := cookieName
+	// __Host- forbids a Domain attribute. The parent-domain cookie therefore
+	// keeps the plain name. On a host-only HTTPS sign-in the prefix is used.
+	if secure && domain == "" {
+		name = "__Host-" + cookieName
+	}
+	g.sessions.Cookie.Name = name
+	g.sessions.Cookie.Domain = domain
+	g.sessions.Cookie.Secure = secure
+	g.sessions.Cookie.Path = "/"
+	g.sessions.Cookie.HttpOnly = true
+	g.sessions.Cookie.SameSite = http.SameSiteLaxMode
+	g.sessions.Cookie.Persist = true
 }
 
 func (g *Gateway) load(r *http.Request) (context.Context, error) {
@@ -495,8 +708,11 @@ func (g *Gateway) load(r *http.Request) (context.Context, error) {
 
 func (g *Gateway) loadLocked(r *http.Request) (context.Context, error) {
 	token := ""
-	if c, err := r.Cookie(cookieName); err == nil {
-		token = c.Value
+	for _, name := range []string{cookieName, "__Host-" + cookieName} {
+		if c, err := r.Cookie(name); err == nil && c.Value != "" {
+			token = c.Value
+			break
+		}
 	}
 	return g.sessions.Load(r.Context(), token)
 }
@@ -519,10 +735,18 @@ func (g *Gateway) commitLocked(w http.ResponseWriter, ctx context.Context) error
 }
 
 func (g *Gateway) writeClear(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name: cookieName, Value: "", Path: "/", Domain: g.sessions.Cookie.Domain,
-		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestSecure(r),
-	})
+	for _, name := range []string{cookieName, "__Host-" + cookieName} {
+		http.SetCookie(w, &http.Cookie{
+			Name: name, Value: "", Path: "/", Domain: g.sessions.Cookie.Domain,
+			MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestSecure(r) || strings.HasPrefix(name, "__Host-"),
+		})
+	}
+	for _, name := range []string{deskCookie, "__Host-" + deskCookie} {
+		http.SetCookie(w, &http.Cookie{
+			Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+			SameSite: http.SameSiteStrictMode, Secure: requestSecure(r) || strings.HasPrefix(name, "__Host-"),
+		})
+	}
 }
 
 func (g *Gateway) lifetime() time.Duration {
@@ -598,34 +822,79 @@ func (g *Gateway) returnURL(r *http.Request) string {
 	return proto + "://" + host + uri
 }
 
-// safeNext returns next when it points at this server or a published app,
-// and "/" otherwise, so the sign-in page cannot be used as an open redirect.
+// safeNext returns next when it is a single-slash path or an absolute URL
+// whose host is a published app (or the management UI). Control characters,
+// backslashes, scheme-relative URLs and any other host become "/".
 func (g *Gateway) safeNext(r *http.Request, next string) string {
 	next = strings.TrimSpace(next)
 	if next == "" {
 		return "/"
 	}
-	if strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") && !strings.ContainsAny(next, "\\\r\n") {
-		return next
+	decoded := next
+	for i := 0; i < 4; i++ {
+		d, err := url.PathUnescape(decoded)
+		if err != nil || d == decoded {
+			break
+		}
+		decoded = d
 	}
-	u, err := url.Parse(next)
-	if err != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if decoded == "" || hasControl(decoded) || strings.Contains(decoded, "\\") {
 		return "/"
 	}
-	host := strings.ToLower(stripPort(u.Host))
-	if host == strings.ToLower(stripPort(forwardedHost(r))) {
-		return u.Scheme + "://" + u.Host + u.EscapedPath() + q(u.RawQuery)
+	if strings.HasPrefix(decoded, "/") {
+		if strings.HasPrefix(decoded, "//") || strings.Contains(decoded, "://") {
+			return "/"
+		}
+		return decoded
 	}
-	parent := g.parentDomain()
-	if parent != "" && (host == parent || strings.HasSuffix(host, "."+parent)) {
-		return u.Scheme + "://" + u.Host + u.EscapedPath() + q(u.RawQuery)
+	u, err := url.Parse(decoded)
+	if err != nil || u.User != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "/"
 	}
-	for _, rt := range g.st.Snapshot().Web.Routes {
-		if strings.EqualFold(rt.Hostname, host) {
-			return u.Scheme + "://" + u.Host + u.EscapedPath() + q(u.RawQuery)
+	if hasControl(u.Path) || strings.Contains(u.Path, "\\") || strings.HasPrefix(u.EscapedPath(), "//") {
+		return "/"
+	}
+	if !g.allowedNextHost(strings.ToLower(stripPort(u.Host))) {
+		return "/"
+	}
+	return u.Scheme + "://" + u.Host + u.EscapedPath() + q(u.RawQuery)
+}
+
+func hasControl(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
 		}
 	}
-	return "/"
+	return false
+}
+
+func (g *Gateway) allowedNextHost(host string) bool {
+	snap := g.st.Snapshot()
+	for _, rt := range snap.Web.Routes {
+		if rt.Enabled && strings.EqualFold(rt.Hostname, host) {
+			return true
+		}
+	}
+	for _, app := range snap.Publish.Apps {
+		if app.Enabled && strings.EqualFold(app.Hostname, host) {
+			return true
+		}
+	}
+	if snap.Web.UIEnabled {
+		h := snap.Web.UIHostname
+		if h == "" {
+			d := snap.Web.Domain
+			if d == "" {
+				d = "home.arpa"
+			}
+			h = "feldcore." + d
+		}
+		if strings.EqualFold(stripPort(h), host) {
+			return true
+		}
+	}
+	return false
 }
 
 func q(raw string) string {
@@ -647,14 +916,6 @@ func requestSecure(r *http.Request) bool {
 		return true
 	}
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func stripPort(host string) string {

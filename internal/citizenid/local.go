@@ -23,43 +23,54 @@ func (p *localProvider) Authenticate(username, password, code string) (Identity,
 
 func (g *Gateway) authenticateLocal(username, password, code string) (Identity, error) {
 	username = strings.TrimSpace(username)
-	if username == "" || password == "" {
-		_ = verifyPassword(g.dummyPassword(), password+"pad")
-		return Identity{}, ErrInvalidCredentials
-	}
 	snap := g.st.Snapshot()
-	if snap.Admin != nil && snap.Admin.Username == username {
-		if bcrypt.CompareHashAndPassword([]byte(snap.Admin.PasswordHash), []byte(password)) != nil {
-			return Identity{}, ErrInvalidCredentials
+	var (
+		kind       string
+		bcryptHash []byte
+		argonHash  string
+		account    *store.Account
+	)
+	if snap.Admin != nil && snap.Admin.Username == username && username != "" {
+		kind = "admin"
+		bcryptHash = []byte(snap.Admin.PasswordHash)
+	} else if username != "" {
+		for i := range snap.Accounts {
+			if snap.Accounts[i].Username == username {
+				account = &snap.Accounts[i]
+				kind = "user"
+				argonHash = account.PasswordHash
+				break
+			}
 		}
-		id, _ := g.lookup(username)
-		if err := g.totpOK(id.ID, snap.Admin.TOTP, code); err != nil {
-			return Identity{}, err
-		}
-		return id, nil
 	}
-	var account *store.Account
-	for i := range snap.Accounts {
-		if snap.Accounts[i].Username == username {
-			account = &snap.Accounts[i]
-			break
-		}
+	// Every attempt runs one bcrypt comparison and one argon2id comparison,
+	// so an unknown name, a directory user, and the administrator take the
+	// same shape of time.
+	if len(bcryptHash) == 0 {
+		bcryptHash = g.dummyBcrypt()
 	}
-	if account == nil {
-		_ = verifyPassword(g.dummyPassword(), password)
+	if argonHash == "" {
+		argonHash = g.dummyPassword()
+	}
+	bcryptOK := len(bcryptHash) > 0 && bcrypt.CompareHashAndPassword(bcryptHash, []byte(password)) == nil
+	argonOK := argonHash != "" && verifyPassword(argonHash, password)
+	if password == "" || kind == "" || (kind == "admin" && !bcryptOK) || (kind == "user" && !argonOK) {
 		return Identity{}, ErrInvalidCredentials
 	}
-	if !verifyPassword(account.PasswordHash, password) {
-		return Identity{}, ErrInvalidCredentials
-	}
-	if account.Disabled {
+	if kind == "user" && account != nil && account.Disabled {
 		return Identity{}, ErrDisabled
 	}
 	id, ok := g.lookup(username)
 	if !ok {
 		return Identity{}, ErrInvalidCredentials
 	}
-	if err := g.totpOK(id.ID, account.TOTP, code); err != nil {
+	enrolled := false
+	if kind == "admin" && snap.Admin != nil {
+		enrolled = snap.Admin.TOTP
+	} else if account != nil {
+		enrolled = account.TOTP
+	}
+	if err := g.totpOK(id.ID, enrolled, code); err != nil {
 		return Identity{}, err
 	}
 	return id, nil
@@ -75,4 +86,19 @@ func (g *Gateway) dummyPassword() string {
 		g.dummy = h
 	})
 	return g.dummy
+}
+
+func (g *Gateway) dummyBcrypt() []byte {
+	g.bcryptOnce.Do(func() {
+		cost := bcrypt.DefaultCost
+		if g.argon.memory < 1024 {
+			cost = bcrypt.MinCost
+		}
+		h, err := bcrypt.GenerateFromPassword([]byte("feldcore-timing-pad"), cost)
+		if err != nil {
+			return
+		}
+		g.bcryptDummy = h
+	})
+	return g.bcryptDummy
 }
