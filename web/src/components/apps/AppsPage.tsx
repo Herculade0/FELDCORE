@@ -20,7 +20,7 @@ export default function AppsPage() {
   const [showDeprecated, setShowDeprecated] = useState(false);
   const [shown, setShown] = useState(PAGE);
   const [opening, setOpening] = useState<string | null>(null);
-  const [setup, setSetup] = useState<{ spec: Spec; notes: string[]; title: string } | null>(null);
+  const [setup, setSetup] = useState<{ spec: Spec; notes: string[]; title: string; requires?: string } | null>(null);
   const auto = useRef(false);
 
   const load = useCallback(async () => {
@@ -86,7 +86,12 @@ export default function AppsPage() {
     setError(null);
     try {
       const res = await api<AppSpec>(`/apps/${encodeURIComponent(app.id)}`);
-      setSetup({ spec: res.spec, notes: res.notes ?? [], title: `Set up ${res.app.name}` });
+      setSetup({
+        spec: res.spec,
+        notes: res.notes ?? [],
+        title: `Set up ${res.app.name}`,
+        requires: res.app.requires,
+      });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -202,6 +207,7 @@ export default function AppsPage() {
           preset={setup.spec}
           notes={setup.notes}
           heading={setup.title}
+          requires={setup.requires}
           onClose={() => setSetup(null)}
           onSaved={(name) => {
             setSetup(null);
@@ -241,6 +247,7 @@ function AppCard({
       <p className="mt-3 line-clamp-3 flex-1 text-xs font-medium leading-relaxed text-ink-2">
         {app.overview || "No description."}
       </p>
+      {app.requires && <RequiresNotice text={app.requires} />}
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         {(app.categories ?? []).slice(0, 2).map((c) => (
           <span key={c} className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
@@ -256,6 +263,15 @@ function AppCard({
         <span className="ml-auto text-[10px] font-bold text-accent">{busy ? "Opening…" : "Set up"}</span>
       </div>
     </button>
+  );
+}
+
+function RequiresNotice({ text }: { text: string }) {
+  return (
+    <div className="mt-3 rounded-2xl border border-warn/40 bg-warn/15 px-3 py-2 text-xs font-medium leading-relaxed text-ink">
+      <span className="font-bold text-warn">This app needs: </span>
+      {text}
+    </div>
   );
 }
 

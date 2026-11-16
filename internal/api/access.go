@@ -1,357 +1,324 @@
 package api
 
 import (
-	"io"
+	"bufio"
+	"context"
+	"errors"
+	"net"
 	"net/http"
-	"os"
+	"strings"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/Herculade0/feldcore/internal/docker"
-	netname "github.com/Herculade0/feldcore/internal/names"
-	"github.com/Herculade0/feldcore/internal/proxy"
-	"github.com/Herculade0/feldcore/internal/remote"
-	"github.com/Herculade0/feldcore/internal/snapshots"
+	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/store"
 )
 
-func (s *Server) handleRemote(w http.ResponseWriter, r *http.Request) {
-	if s.remote == nil {
-		writeError(w, http.StatusNotFound, "Remote access is not available.")
-		return
-	}
-	writeJSON(w, http.StatusOK, s.remote.View(r.Context()))
+// principal is who the request authenticated as. A browser session is the
+// administrator and is not scoped. An agent token is.
+type principal struct {
+	ViaToken  bool
+	Username  string
+	TokenID   string
+	TokenName string
+	Scopes    []string
 }
 
-func (s *Server) handleRemoteSave(w http.ResponseWriter, r *http.Request) {
-	if s.remote == nil {
-		writeError(w, http.StatusNotFound, "Remote access is not available.")
-		return
-	}
-	var body struct {
-		Mode             string `json:"mode"`
-		APIToken         string `json:"apiToken"`
-		TunnelToken      string `json:"tunnelToken"`
-		ClearAPIToken    bool   `json:"clearApiToken"`
-		ClearTunnelToken bool   `json:"clearTunnelToken"`
-		AccountID        string `json:"accountId"`
-		TunnelName       string `json:"tunnelName"`
-		ExposeAdmin      bool   `json:"exposeAdmin"`
-		AdminHostname    string `json:"adminHostname"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	err := s.remote.Save(r.Context(), remote.SaveInput{
-		Mode: body.Mode, APIToken: body.APIToken, TunnelToken: body.TunnelToken,
-		ClearAPIToken: body.ClearAPIToken, ClearTunnelToken: body.ClearTunnelToken,
-		AccountID: body.AccountID, TunnelName: body.TunnelName,
-		ExposeAdmin: body.ExposeAdmin, AdminHostname: body.AdminHostname,
-	})
-	// Drop the tokens from this stack frame's view of the request as soon as
-	// they have been sealed. They are not logged.
-	body.APIToken, body.TunnelToken = "", ""
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, s.remote.View(r.Context()))
+type principalKey struct{}
+
+func withPrincipal(ctx context.Context, p principal) context.Context {
+	return context.WithValue(ctx, principalKey{}, p)
 }
 
-func (s *Server) handleRemoteInstall(w http.ResponseWriter, r *http.Request) {
-	if s.remote == nil {
-		writeError(w, http.StatusNotFound, "Remote access is not available.")
-		return
-	}
-	if err := s.remote.Install(r.Context()); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, s.remote.View(r.Context()))
+func principalFrom(ctx context.Context) (principal, bool) {
+	p, ok := ctx.Value(principalKey{}).(principal)
+	return p, ok && (p.ViaToken || p.Username != "")
 }
 
-func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
-	if s.proxy == nil {
-		writeError(w, http.StatusNotFound, "Web addresses are not available.")
-		return
+func bearerToken(h http.Header) (string, bool) {
+	v := strings.TrimSpace(h.Get("Authorization"))
+	const scheme = "bearer "
+	if len(v) < len(scheme) || !strings.EqualFold(v[:len(scheme)], scheme) {
+		return "", false
 	}
-	writeJSON(w, http.StatusOK, s.proxy.View(r.Context()))
+	tok := strings.TrimSpace(v[len(scheme):])
+	if tok == "" || strings.Contains(tok, " ") {
+		return "", false
+	}
+	return tok, true
 }
 
-func (s *Server) handleProxySave(w http.ResponseWriter, r *http.Request) {
-	if s.proxy == nil {
-		writeError(w, http.StatusNotFound, "Web addresses are not available.")
-		return
-	}
-	var body struct {
-		Email      string `json:"email"`
-		Domain     string `json:"domain"`
-		UIHostname string `json:"uiHostname"`
-		UIEnabled  bool   `json:"uiEnabled"`
-		UITLS      string `json:"uiTls"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	if err := s.proxy.Save(r.Context(), proxy.SaveInput{
-		Email: body.Email, Domain: body.Domain, UIHostname: body.UIHostname,
-		UIEnabled: body.UIEnabled, UITLS: body.UITLS,
-	}); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, s.proxy.View(r.Context()))
-}
-
-func (s *Server) handleProxyCA(w http.ResponseWriter, r *http.Request) {
-	if s.proxy == nil {
-		writeError(w, http.StatusNotFound, "Web addresses are not available.")
-		return
-	}
-	f, err := os.Open(s.proxy.CAFile())
-	if err != nil {
-		writeError(w, http.StatusNotFound, "The local certificate is not ready yet. Turn on a home-network hostname, apply it, then download the certificate once Caddy has created it.")
-		return
-	}
-	defer f.Close()
-	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-	w.Header().Set("Content-Disposition", `attachment; filename="feldcore-root.crt"`)
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.Copy(w, f)
-}
-
-func (s *Server) handleAddress(w http.ResponseWriter, r *http.Request) {
-	if s.docker == nil {
-		writeError(w, http.StatusNotFound, "Docker is not available.")
-		return
-	}
-	info, err := s.docker.Spec(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, s.addressView(r, info))
-}
-
-func (s *Server) handleAddressSave(w http.ResponseWriter, r *http.Request) {
-	if s.docker == nil {
-		writeError(w, http.StatusNotFound, "Docker is not available.")
-		return
-	}
-	info, err := s.docker.Spec(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	var body struct {
-		LanEnabled     bool   `json:"lanEnabled"`
-		LanHostname    string `json:"lanHostname"`
-		LanPort        int    `json:"lanPort"`
-		LanTLS         string `json:"lanTls"`
-		PublicEnabled  bool   `json:"publicEnabled"`
-		PublicHostname string `json:"publicHostname"`
-		PublicPort     int    `json:"publicPort"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	if info.Spec.Name == "" {
-		writeError(w, http.StatusBadRequest, "This container has no name, so it cannot have a hostname.")
-		return
-	}
-	if s.proxy != nil {
-		if err := s.proxy.SetRoute(proxy.RouteInput{
-			Container: info.Spec.Name, Hostname: body.LanHostname, Port: body.LanPort,
-			TLS: body.LanTLS, Enabled: body.LanEnabled,
-		}); err != nil {
-			s.fail(w, r, err)
+// requireAuth accepts a browser session or a bearer agent token.
+// A valid session wins when both are present, so the signed-in UI is never
+// narrowed by a token header.
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, ok := s.currentUser(r); ok {
+			next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: user})))
 			return
 		}
-		if err := s.proxy.Apply(r.Context()); err != nil {
-			s.fail(w, r, err)
-			return
-		}
-	} else if body.LanEnabled {
-		writeError(w, http.StatusNotFound, "Web addresses are not available.")
-		return
-	}
-	if s.remote != nil {
-		if err := s.remote.SetPublic(info.Spec.Name, body.PublicHostname, body.PublicPort, body.PublicEnabled); err != nil {
-			s.fail(w, r, err)
-			return
-		}
-		if err := s.remote.Sync(r.Context()); err != nil {
-			s.fail(w, r, err)
-			return
-		}
-	} else if body.PublicEnabled {
-		writeError(w, http.StatusNotFound, "Remote access is not available.")
-		return
-	}
-	resp := map[string]any{"status": "saved", "address": s.addressView(r, info)}
-	if body.PublicEnabled && s.remote != nil {
-		view := s.remote.View(r.Context())
-		if view.Mode == "off" || !view.APITokenSet {
-			resp["warning"] = "The public name is saved, but nothing is published yet. Turn on Remote access and add a Cloudflare API token. No ports are opened on your router."
-		}
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) addressView(r *http.Request, info docker.SpecInfo) map[string]any {
-	domain := "home.arpa"
-	if s.proxy != nil {
-		if d := s.proxy.View(r.Context()).Domain; d != "" {
-			domain = d
-		}
-	}
-	host, port, from := netname.Suggest(info.Spec.Name, info.Spec.WebUI, domain)
-	var ports []int
-	seen := map[int]bool{}
-	add := func(p int) {
-		if p > 0 && p <= 65535 && !seen[p] {
-			seen[p] = true
-			ports = append(ports, p)
-		}
-	}
-	add(port)
-	for _, c := range info.Spec.Configs {
-		if c.Type == docker.TypePort {
-			add(c.ContainerPort)
-		}
-	}
-	if port == 0 && len(ports) > 0 {
-		port = ports[0]
-	}
-	if ports == nil {
-		ports = []int{}
-	}
-	lan := map[string]any{"enabled": false, "hostname": host, "port": port, "tls": "internal"}
-	pub := map[string]any{"enabled": false, "hostname": "", "port": port}
-	if s.proxy != nil {
-		for _, route := range s.proxy.View(r.Context()).Routes {
-			if route.Container == info.Spec.Name && route.Enabled {
-				lan = map[string]any{"enabled": true, "hostname": route.Hostname, "port": route.Port, "tls": route.TLS}
+		if raw, ok := bearerToken(r.Header); ok {
+			if s.auth == nil {
+				writeError(w, http.StatusUnauthorized, "Sign in to continue.")
+				return
 			}
-		}
-	}
-	mode, apiSet := "off", false
-	if s.remote != nil {
-		view := s.remote.View(r.Context())
-		mode, apiSet = view.Mode, view.APITokenSet
-		for _, route := range view.Routes {
-			if route.Container == info.Spec.Name {
-				pub = map[string]any{"enabled": true, "hostname": route.Hostname, "port": route.Port}
+			tok, ok := s.auth.AuthenticateToken(raw)
+			if !ok {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="feldcore"`)
+				writeError(w, http.StatusUnauthorized, "That agent token is not valid.")
+				return
 			}
+			p := principal{ViaToken: true, TokenID: tok.ID, TokenName: tok.Name, Scopes: tok.Scopes}
+			next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), p)))
+			return
 		}
-	}
-	return map[string]any{
-		"container":   info.Spec.Name,
-		"suggestion":  map[string]any{"hostname": host, "port": port, "from": from},
-		"ports":       ports,
-		"lan":         lan,
-		"public":      pub,
-		"tunnelMode":  mode,
-		"apiTokenSet": apiSet,
-		"domain":      domain,
-	}
-}
-
-func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request) {
-	if s.snaps == nil {
-		writeError(w, http.StatusNotFound, "Snapshots are not available.")
-		return
-	}
-	items, err := s.snaps.List(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if items == nil {
-		items = []snapshots.Item{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"snapshots": items, "usage": s.snaps.Usage()})
-}
-
-func (s *Server) handleSnapshotCreate(w http.ResponseWriter, r *http.Request) {
-	if s.snaps == nil {
-		writeError(w, http.StatusNotFound, "Snapshots are not available.")
-		return
-	}
-	var body struct {
-		Note string `json:"note"`
-		Live bool   `json:"live"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	item, err := s.snaps.Take(r.Context(), snapshots.TakeOptions{
-		Ref: chi.URLParam(r, "id"), Note: body.Note, Live: body.Live,
+		writeError(w, http.StatusUnauthorized, "Sign in to continue.")
 	})
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"snapshot": item, "usage": s.snaps.Usage()})
 }
 
-func (s *Server) handleSnapshotRestore(w http.ResponseWriter, r *http.Request) {
-	if s.snaps == nil {
-		writeError(w, http.StatusNotFound, "Snapshots are not available.")
-		return
-	}
-	var body struct {
-		Confirm bool `json:"confirm"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	if !body.Confirm {
-		writeError(w, http.StatusBadRequest, "Restoring replaces this container and its mapped folders. Confirm to continue.")
-		return
-	}
-	if err := s.snaps.Restore(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "snap")); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+// requireBearer is the MCP gate. A session cookie is not enough: every MCP
+// request has to carry Authorization: Bearer, and the token needs scope.
+func (s *Server) requireBearer(scope string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, ok := bearerToken(r.Header)
+		if !ok || s.auth == nil {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="feldcore"`)
+			writeError(w, http.StatusUnauthorized, "Send Authorization: Bearer with an agent token.")
+			return
+		}
+		tok, ok := s.auth.AuthenticateToken(raw)
+		if !ok {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="feldcore"`)
+			writeError(w, http.StatusUnauthorized, "That agent token is not valid.")
+			return
+		}
+		p := principal{ViaToken: true, TokenID: tok.ID, TokenName: tok.Name, Scopes: tok.Scopes}
+		if !auth.Allows(p.Scopes, scope) {
+			s.record(p, "mcp", "", "denied")
+			writeError(w, http.StatusForbidden, "This token does not include the "+scope+" scope.")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), p)))
+	})
 }
 
-func (s *Server) handleSnapshotDelete(w http.ResponseWriter, r *http.Request) {
-	if s.snaps == nil {
-		writeError(w, http.StatusNotFound, "Snapshots are not available.")
-		return
-	}
-	if err := s.snaps.Delete(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "snap")); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "usage": s.snaps.Usage()})
+// enforceScope checks a token against the route it called, then records the
+// call. Browser sessions skip the check. Anything not listed as read or as a
+// container write requires admin, and a shell is refused to every token.
+func (s *Server) enforceScope(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFrom(r.Context())
+		if !ok || !p.ViaToken {
+			next.ServeHTTP(w, r)
+			return
+		}
+		need := scopeFor(r.Method, r.URL.Path)
+		action := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/api/v1")
+		target := targetFrom(r.URL.Path)
+		if !auth.Allows(p.Scopes, need) {
+			s.record(p, action, target, "denied")
+			msg := "This token does not include the " + need + " scope."
+			if need == "shell" {
+				msg = "Agent tokens cannot open a shell."
+			}
+			writeError(w, http.StatusForbidden, msg)
+			return
+		}
+		cw := &capture{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(cw, r)
+		s.record(p, action, target, resultOf(cw.status))
+	})
 }
 
-func (s *Server) handleSnapshotUsage(w http.ResponseWriter, r *http.Request) {
-	if s.snaps == nil {
-		writeError(w, http.StatusNotFound, "Snapshots are not available.")
+func (s *Server) record(p principal, action, target, result string) {
+	if s.auth == nil || !p.ViaToken {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.snaps.Usage())
+	if err := s.auth.Record(p.TokenID, store.AuditEvent{
+		TokenName: p.TokenName,
+		Action:    action,
+		Target:    clip(target, 200),
+		Result:    result,
+	}); err != nil && s.log != nil {
+		s.log.Warn("audit log write failed", "err", err)
+	}
 }
 
-func (s *Server) handleSnapshotSettings(w http.ResponseWriter, r *http.Request) {
-	if s.snaps == nil {
-		writeError(w, http.StatusNotFound, "Snapshots are not available.")
-		return
+func resultOf(status int) string {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return "denied"
+	case status >= 400:
+		return "error"
+	default:
+		return "ok"
 	}
-	var body struct {
-		KeepN    int    `json:"keepN"`
-		KeepDays int    `json:"keepDays"`
-		Dir      string `json:"dir"`
+}
+
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	if !readJSON(w, r, &body) {
-		return
+	return s[:n]
+}
+
+// scopeFor maps a method and URL path to the scope a token needs.
+// The default is admin, so a new route is closed to lesser tokens until it
+// is classified. "shell" is not a grantable scope.
+func scopeFor(method, path string) string {
+	p := path
+	if i := strings.Index(p, "/api/v1"); i >= 0 {
+		p = p[i+len("/api/v1"):]
 	}
-	if err := s.snaps.SetRetention(r.Context(), body.KeepN, body.KeepDays, body.Dir); err != nil {
-		s.fail(w, r, err)
-		return
+	if p == "" {
+		p = "/"
 	}
-	writeJSON(w, http.StatusOK, s.snaps.Usage())
+	if p == "/terminal" || strings.HasSuffix(p, "/terminal") {
+		return "shell"
+	}
+	if method == http.MethodGet || method == http.MethodHead {
+		if isReadPath(p) {
+			return auth.ScopeRead
+		}
+		return auth.ScopeAdmin
+	}
+	if isContainerWrite(method, p) {
+		return auth.ScopeContainers
+	}
+	if strings.HasPrefix(p, "/vms/") || p == "/vms" {
+		return auth.ScopeVMs
+	}
+	return auth.ScopeAdmin
+}
+
+func isReadPath(p string) bool {
+	switch p {
+	case "/system/info", "/system/stats", "/system/history", "/system/stream",
+		"/shares", "/fs/suggest", "/apps",
+		"/docker/status", "/docker/options", "/docker/containers", "/docker/images",
+		"/vms",
+		"/remote", "/proxy", "/proxy/ca", "/snapshots":
+		return true
+	}
+	if strings.HasPrefix(p, "/vms/") {
+		return true
+	}
+	if strings.HasPrefix(p, "/apps/") && !strings.Contains(strings.TrimPrefix(p, "/apps/"), "/") {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(p, "/docker/containers/"); ok && strings.Contains(rest, "/") {
+		return strings.HasSuffix(rest, "/spec") || strings.HasSuffix(rest, "/logs") ||
+			strings.HasSuffix(rest, "/address") || strings.HasSuffix(rest, "/snapshots")
+	}
+	return false
+}
+
+func isContainerWrite(method, p string) bool {
+	if p == "/docker/containers" && method == http.MethodPost {
+		return true
+	}
+	rest, ok := strings.CutPrefix(p, "/docker/containers/")
+	if !ok || rest == "" {
+		return false
+	}
+	if !strings.Contains(rest, "/") {
+		return method == http.MethodPut || method == http.MethodDelete
+	}
+	switch {
+	case strings.HasSuffix(rest, "/start"), strings.HasSuffix(rest, "/stop"), strings.HasSuffix(rest, "/restart"):
+		return method == http.MethodPost
+	case strings.HasSuffix(rest, "/snapshots"):
+		return method == http.MethodPost
+	case strings.Contains(rest, "/snapshots/"):
+		// Restore and delete a snapshot of this container. Publishing a
+		// hostname (PUT .../address) stays an admin action.
+		return method == http.MethodPost || method == http.MethodDelete
+	default:
+		return false
+	}
+}
+
+func targetFrom(path string) string {
+	p := path
+	if i := strings.Index(p, "/api/v1"); i >= 0 {
+		p = p[i+len("/api/v1"):]
+	}
+	switch {
+	case strings.Contains(p, "/docker/containers/"):
+		rest := strings.TrimPrefix(p, "/docker/containers/")
+		id, _, _ := strings.Cut(rest, "/")
+		return id
+	case strings.Contains(p, "/shares/users/"):
+		rest := strings.TrimPrefix(p, "/shares/users/")
+		name, _, _ := strings.Cut(rest, "/")
+		return name
+	case strings.HasPrefix(p, "/shares/services/"):
+		rest := strings.TrimPrefix(p, "/shares/services/")
+		name, _, _ := strings.Cut(rest, "/")
+		return name
+	case strings.HasPrefix(p, "/shares/") && p != "/shares":
+		name, _, _ := strings.Cut(strings.TrimPrefix(p, "/shares/"), "/")
+		if name == "users" {
+			return ""
+		}
+		return name
+	case strings.HasPrefix(p, "/apps/"):
+		return strings.TrimPrefix(p, "/apps/")
+	case strings.HasPrefix(p, "/agent/tokens/"):
+		id := strings.TrimPrefix(p, "/agent/tokens/")
+		if id == "revoke-all" {
+			return ""
+		}
+		return id
+	case strings.HasPrefix(p, "/vms/"):
+		id, _, _ := strings.Cut(strings.TrimPrefix(p, "/vms/"), "/")
+		return id
+	default:
+		return ""
+	}
+}
+
+// capture records the status code without hiding Hijack or Flush from the
+// websocket handlers a token is allowed to open (the stats stream).
+type capture struct {
+	http.ResponseWriter
+	status int
+	wrote  bool
+}
+
+func (c *capture) WriteHeader(code int) {
+	if !c.wrote {
+		c.status = code
+		c.wrote = true
+	}
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (c *capture) Write(b []byte) (int, error) {
+	if !c.wrote {
+		c.status = http.StatusOK
+		c.wrote = true
+	}
+	return c.ResponseWriter.Write(b)
+}
+
+func (c *capture) Unwrap() http.ResponseWriter { return c.ResponseWriter }
+
+func (c *capture) Flush() {
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (c *capture) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w := http.ResponseWriter(c.ResponseWriter)
+	for i := 0; i < 8; i++ {
+		if h, ok := w.(http.Hijacker); ok {
+			return h.Hijack()
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			break
+		}
+		w = u.Unwrap()
+	}
+	return nil, nil, errors.New("hijack is not supported")
 }

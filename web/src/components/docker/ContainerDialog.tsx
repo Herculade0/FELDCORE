@@ -75,6 +75,7 @@ export default function ContainerDialog({
   preset,
   notes,
   heading,
+  requires,
   onClose,
   onSaved,
 }: {
@@ -84,6 +85,8 @@ export default function ContainerDialog({
   preset?: Spec;
   notes?: string[];
   heading?: string;
+  /** Unraid Requires text, shown only when the form was opened from the App Store. */
+  requires?: string;
   onClose: () => void;
   onSaved: (name: string, edited: boolean) => void;
 }) {
@@ -208,6 +211,12 @@ export default function ContainerDialog({
 
         {spec && (
           <fieldset disabled={locked || busy} className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
+            {fromApp && requires && (
+              <div className="rounded-2xl border border-warn/40 bg-warn/15 px-3 py-2 text-sm font-medium leading-relaxed text-ink">
+                <span className="font-bold text-warn">This app needs: </span>
+                {requires}
+              </div>
+            )}
             {locked && <Alert tone="warn">{info?.reason}</Alert>}
             {editing && !locked && (
               <Alert tone="info">
