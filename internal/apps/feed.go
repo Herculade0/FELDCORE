@@ -35,6 +35,8 @@ type App struct {
 	Stars      int      `json:"stars,omitempty"`
 	Project    string   `json:"project,omitempty"`
 	Support    string   `json:"support,omitempty"`
+	// Requires is Unraid's free-text "this app needs" note, with markup removed.
+	Requires string `json:"requires,omitempty"`
 }
 
 // Category is a filter entry. ID matches App.Categories.
@@ -112,6 +114,7 @@ func parseFeed(data []byte) (*parsedFeed, error) {
 			Stars:      int(a.Stars),
 			Project:    strings.TrimSpace(a.Project),
 			Support:    strings.TrimSpace(a.Support),
+			Requires:   plainRequires(string(a.Requires)),
 		}
 		if _, taken := out.byID[rec.app.ID]; taken {
 			rec.app.ID = rec.app.ID + "-" + strconv.Itoa(len(out.apps))
@@ -213,6 +216,7 @@ type feedApp struct {
 	CABlacklist  flexBool    `json:"CABlacklist"`
 	Downloads    flexInt     `json:"downloads"`
 	Stars        flexInt     `json:"stars"`
+	Requires     flexText    `json:"Requires"`
 	Networking   struct {
 		Mode string `json:"Mode"`
 	} `json:"Networking"`
@@ -431,6 +435,60 @@ var (
 	bareURL    = regexp.MustCompile(`https?://[^\s)]+`)
 	emptyParen = regexp.MustCompile(`\(\s*\)`)
 )
+
+// flexText accepts a string or null. A non-string is ignored so one odd
+// template cannot reject the whole catalogue.
+type flexText string
+
+func (f *flexText) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	if data[0] != '"' {
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*f = flexText(s)
+	return nil
+}
+
+var (
+	bbURLNamed = regexp.MustCompile(`(?i)\[url=[^\]]+\]([\s\S]*?)\[/url\]`)
+	bbURLBare  = regexp.MustCompile(`(?i)\[url\]([\s\S]*?)\[/url\]`)
+	bbTag      = regexp.MustCompile(`(?i)\[/?[a-z][a-z0-9]*\]`)
+	htmlBreak  = regexp.MustCompile(`(?i)<br\s*/?>`)
+	htmlTag    = regexp.MustCompile(`(?i)<[^>]*>`)
+)
+
+// plainRequires turns a template Requires note into text. Authors paste HTML,
+// markdown, and phpBB-style [b] tags. Nothing is kept that could be a link
+// or markup; the UI shows the words only.
+func plainRequires(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.NewReplacer(
+		"&nbsp;", " ",
+		"&amp;", "&",
+		"&lt;", "<",
+		"&gt;", ">",
+		"&quot;", `"`,
+		"&#39;", "'",
+		"&apos;", "'",
+	).Replace(s)
+	s = htmlBreak.ReplaceAllString(s, " ")
+	s = bbURLNamed.ReplaceAllString(s, "$1")
+	s = bbURLBare.ReplaceAllString(s, "$1")
+	s = mdLink.ReplaceAllString(s, "$1")
+	s = bbTag.ReplaceAllString(s, "")
+	s = htmlTag.ReplaceAllString(s, "")
+	return truncate(s, 500)
+}
 
 // plainOverview turns catalogue blurbs into text. Many of them paste a
 // markdown link or a raw URL into the first sentence.

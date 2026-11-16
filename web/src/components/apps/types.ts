@@ -16,6 +16,7 @@ export interface AppSummary {
   stars?: number;
   project?: string;
   support?: string;
+  requires?: string;
 }
 
 export interface Category {
