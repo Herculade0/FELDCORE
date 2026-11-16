@@ -38,6 +38,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"updates":  map[string]any{"unattended": view.Unattended, "updateCheck": view.UpdateCheck},
 		"apps":     map[string]any{"feedURL": feed, "feedDefault": apps.FeedURL},
 		"defaults": map[string]any{"removeImage": view.RemoveImage},
+		"files":    map[string]any{"allowLANURLs": s.auth != nil && s.auth.AllowLANURLs()},
 	})
 }
 
@@ -81,6 +82,12 @@ func (s *Server) handleSettingsService(w http.ResponseWriter, r *http.Request) {
 		Enabled bool   `json:"enabled"`
 	}
 	if !readJSON(w, r, &body) || s.wiz == nil {
+		return
+	}
+	// Turning a service on may apt-install it. That runs as a job so the page
+	// can show progress and survive a refresh. Turning it off is a quick
+	// systemctl and stays on this request.
+	if body.Enabled && s.acceptInstall(w, r, body.Name) {
 		return
 	}
 	if err := s.wiz.SaveService(r.Context(), body.Name, body.Enabled); err != nil {

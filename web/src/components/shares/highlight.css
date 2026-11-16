@@ -1,0 +1,49 @@
+/* highlight.js, tinted with the page theme so light and dark both stay readable. */
+.hljs {
+  color: var(--ink);
+  background: transparent;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link,
+.hljs-meta .hljs-keyword {
+  color: var(--accent);
+}
+
+.hljs-string,
+.hljs-doctag,
+.hljs-regexp,
+.hljs-attr {
+  color: color-mix(in oklab, var(--ok) 78%, var(--ink));
+}
+
+.hljs-number,
+.hljs-built_in,
+.hljs-template-variable,
+.hljs-type,
+.hljs-meta {
+  color: color-mix(in oklab, var(--warn) 70%, var(--ink));
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-name {
+  color: color-mix(in oklab, var(--accent-2) 65%, var(--ink));
+}
+
+.hljs-variable,
+.hljs-params,
+.hljs-operator,
+.hljs-punctuation {
+  color: var(--ink-2);
+}

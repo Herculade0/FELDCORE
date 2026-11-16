@@ -216,6 +216,20 @@ func (a *Service) SessionHours() int {
 	return h
 }
 
+// AllowLANURLs reports whether a share may fetch a URL on a private network.
+// Loopback, link-local and metadata addresses stay blocked either way.
+func (a *Service) AllowLANURLs() bool {
+	return a.st.Snapshot().Prefs.AllowLANURLs
+}
+
+// SetAllowLANURLs stores the file browser's LAN download switch.
+func (a *Service) SetAllowLANURLs(on bool) error {
+	return a.st.Update(func(s *store.State) error {
+		s.Prefs.AllowLANURLs = on
+		return nil
+	})
+}
+
 // SetSessionHours stores how long new sign-ins last. Existing sessions keep
 // the expiry they were given.
 func (a *Service) SetSessionHours(h int) error {
