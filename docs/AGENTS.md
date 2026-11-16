@@ -23,10 +23,10 @@ address.
 | --- | --- |
 | `read` | Look at the host, shares, the App Store, containers, container logs, and VMs. Required for MCP. |
 | `containers` | Create, start, stop, restart and delete containers over the HTTP API. |
-| `vms` | Change virtual machines over the HTTP API, once that layer exists. Listing VMs is `read`. |
+| `vms` | Create, edit, start, stop and delete virtual machines over the HTTP API. Listing VMs is `read`. |
 | `admin` | Settings, shares, tokens and every other API call. Includes the three scopes above. |
 
-`admin` does not include a shell. The host terminal and container consoles stay on the signed-in browser session. An agent token that calls them is refused and the refusal is written to the audit log.
+`admin` does not include a shell. The host terminal, container consoles and a VM's VNC console stay on the signed-in browser session. An agent token that calls them is refused and the refusal is written to the audit log.
 
 Grant `read` together with `containers` when an agent should both look and change containers. A token with only `containers` cannot call MCP and cannot read system info.
 

@@ -65,9 +65,10 @@ embedded in the binary, so there is no separate web server to run.
   reviews it and applies; nothing is installed automatically. Unraid paths
   such as `/mnt/user/appdata` are rewritten onto this server's app-data folder.
 
-### VMs (later)
-- libvirt/KVM domains managed through the libvirt API; VNC/SPICE console in the
-  browser.
+### VMs
+- libvirt/KVM domains. FELDCORE writes the domain XML and applies it with
+  `virsh` (no cgo). The browser console is noVNC over an authenticated
+  WebSocket to a VNC server bound to localhost. See [VMS.md](VMS.md).
 
 ## Security model
 

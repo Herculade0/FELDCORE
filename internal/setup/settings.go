@@ -53,7 +53,7 @@ var managedServices = []svcDef{
 	{"samba", "Samba", "smbd", []string{"samba"}, false},
 	{"nfs", "NFS", "nfs-server", []string{"nfs-kernel-server"}, false},
 	{"docker", "Docker", "docker", []string{"docker.io"}, false},
-	{"libvirt", "libvirt / KVM", "libvirtd", []string{"qemu-kvm", "libvirt-daemon-system"}, true},
+	{"libvirt", "libvirt / KVM", "libvirtd", []string{"qemu-kvm", "libvirt-daemon-system", "libvirt-clients", "qemu-utils", "ovmf", "swtpm", "swtpm-tools"}, true},
 }
 
 // Settings reads the current host, network, services and saved choices.
@@ -165,9 +165,15 @@ func (s *Service) SaveService(ctx context.Context, name string, enable bool) err
 		}
 		return nil
 	}
-	if !s.installed(ctx, def.pkgs[0]) {
+	var missing []string
+	for _, pkg := range def.pkgs {
+		if !s.installed(ctx, pkg) {
+			missing = append(missing, pkg)
+		}
+	}
+	if len(missing) > 0 {
 		_, _ = s.cmd.Run(ctx, "apt-get", "update")
-		args := append([]string{"install", "-y"}, def.pkgs...)
+		args := append([]string{"install", "-y"}, missing...)
 		if _, err := s.cmd.Run(ctx, "apt-get", args...); err != nil {
 			return &OpError{"Could not install " + def.label + ": " + err.Error()}
 		}
