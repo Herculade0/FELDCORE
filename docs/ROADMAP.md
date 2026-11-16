@@ -82,9 +82,10 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 A locked cabinet of Markdown case files. Agents file a report when they change something, hit an error, or write up what they found. Design only: [INTERNAL-AFFAIRS.md](INTERNAL-AFFAIRS.md).
 - [ ] Locked share of Obsidian-compatible Markdown under the shares root. Agents append; they cannot rewrite or delete
 - [ ] Token scopes `ia:file` and `ia:read`, not included in `admin`
-- [ ] MCP and REST: file a report, append, search, get, list recent. Scrub secrets before saving
-- [ ] Internal Affairs page: timeline, filters, report viewer
-- Later: SMB reading room, withdrawing a report, git history, Proton Drive backup
+- [ ] MCP and REST: file a report, append, search, get, list recent. Scrub secrets before saving. Also file an incident stub when a token call errors
+- [ ] Internal Affairs page: timeline, filters, report viewer, and a note the administrator can file
+- [ ] Keep every report until Proton Drive backups exist. Pruning after that requires a backed-up copy; the age window is not chosen yet
+- Later: SMB reading room, withdrawing a report, git history, Proton Drive backup (the cabinet is in the first backup set)
 
 ## M3 — Settings
 - [ ] Users & authentication management
