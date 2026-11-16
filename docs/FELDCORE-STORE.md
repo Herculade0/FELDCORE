@@ -8,11 +8,12 @@ The private repository that holds the templates is separate from this one. Its l
 
 ## Decisions
 
-- FELDCORE-STORE is a second catalogue, merged after Community Apps. Community Apps stays the default source.
-- Authors write YAML in a private GitHub repository. The daemon downloads one signed JSON feed from a GitHub Release. It does not clone the repository or parse YAML.
-- The MVP login is a fine-grained personal access token with Contents: Read on that one repository. An OAuth device flow that asks for the `repo` scope is the wrong tool: that scope can read every private repository the account can read.
-- A saved token is encrypted, write-only, and never returned by the API.
-- An override replaces a Community Apps template as a whole. The card keeps its Community Apps identity, gains a FELDCORE badge, and the two are not both shown.
+- FELDCORE-STORE is a second catalogue. The App Store has two toggle buttons, Community Apps and FELDCORE Store, and Settings can turn Community Apps off so only the store remains.
+- The store repository is `Herculade0/feldcore-store` on the owner's own GitHub account, and it stays private.
+- Authors write YAML in that repository. The daemon downloads one signed JSON feed from a GitHub Release. It does not clone the repository or parse YAML.
+- There is one login for the whole feed, entered once in Settings. After that, every template installs with no further GitHub prompt. The login is a GitHub App installed only on that repository, using device flow. An OAuth app with the `repo` scope is rejected: that scope can read every private repository the account can read. Pasting a fine-grained token is the fallback, not the recommendation.
+- The saved credential is encrypted, write-only, and never returned by the API.
+- An override replaces a Community Apps template as a whole. The Community Apps toggle shows the fixed template in that app's slot, with a FELDCORE badge. The same template is listed in the FELDCORE Store. The broken template is not offered.
 - Containers still open the existing setup dialog. Nothing is created until the user applies. Bundles and VMs get a short confirm page that lists what will be created.
 - Game servers are one Games tab driven by fields in the YAML. Player count comes from a Steam A2S query or a log regex. There is no per-game code.
 - SDR apps are containers with a USB device claim, matched by serial. They are not a separate kind.
@@ -48,7 +49,7 @@ VMs are a nav item and are not built (M4). Image pull sends no registry credenti
 
 - Replacing Community Apps, rehosting its 4,400 templates, or becoming the editor of that feed.
 - A field-by-field patch language against CA XML. Overrides are wholesale. A patch format that tracks upstream XML is a later idea only if wholesale copies become painful to maintain.
-- Installing on card click, a background phone-home, or a second package manager. Docker and, later, libvirt remain the runtimes.
+- Installing on card click, telemetry, or a second package manager. Auto-refresh, when the owner leaves it on, only re-downloads the catalogues already configured. Docker and, later, libvirt remain the runtimes.
 - Per-game Go code, a general plugin API, or docker-compose import. Compose import is already a separate M2 follow-up. A bundle is an ordered list of FELDCORE templates, not a Compose file.
 - Shipping operating-system install media, product keys, or a macOS firmware recipe.
 - Multi-user token ownership. There is one administrator. Tokens belong to the host.
@@ -63,15 +64,15 @@ Sources are an ordered list. The built-in source `community-apps` is always pres
 3. Apply that source's entries in feed order: hides, then overrides, then new entries.
 4. A later source wins when two FELDCORE sources name the same template id or override the same Community Apps app.
 
-Disabling Community Apps leaves only the FELDCORE sources. The catalogue URL is not how that is done. The URL remains the address of the Community Apps source alone, so a mirror of `applicationFeed.json` still works and a private store URL cannot accidentally wipe the 4,400 apps.
+Settings has a switch, Community Apps, on by default. Turning it off stops that catalogue's download and leaves only the FELDCORE Store. The App Store then hides the Community Apps toggle. The catalogue URL is not how that is done. The URL remains the address of the Community Apps source alone, so a mirror of `applicationFeed.json` still works and a private store URL cannot wipe the 4,400 apps.
 
-The merged list is what `GET /api/v1/apps` returns, plus a `sources` array (id, name, status, updated time, stale, offline, message). The page still filters in the browser. Store entries are few next to the CA catalogue; the response stays one payload.
+`GET /api/v1/apps` returns both catalogues in one payload, plus a `sources` array (id, name, status, updated time, stale, offline, message). Each entry has `origin`. The page switches on that field. Store entries are few next to the CA catalogue.
 
 ### Overrides
 
 An override is a `container` or `game` entry with `replaces.communityApps`. The match is the image name without its tag. `name` is optional and, when set, is compared case-insensitively to the CA name. `feedbuild` fails the feed when the image alone hits more than one CA app and `name` is empty, so a shared base image cannot replace every template that uses it.
 
-The replacement is the whole template. The merged card keeps the Community Apps id, download count, and star count, and uses the FELDCORE name, overview, icon, `Requires`, and config. Support and project links in the YAML replace the CA links when they are set; when they are empty, the CA links stay. The setup dialog receives the FELDCORE template after the same path rewrite as any other template.
+The replacement is the whole template. It keeps the Community Apps id, download count, and star count, and uses the FELDCORE name, overview, icon, `Requires`, and config. Support and project links in the YAML replace the CA links when they are set; when they are empty, the CA links stay. On the Community Apps toggle the card sits in the original slot, so a search for that app finds the fixed template. On the FELDCORE Store toggle the same card is listed with the other store entries. Both open the FELDCORE template. The setup dialog receives it after the same path rewrite as any other template.
 
 Pinned versions are how a broken CA template stays fixed. The YAML sets `image` to the tag that works and may set `digest`. A later CA publish does not move the card, because the FELDCORE source is applied after CA on every refresh. The owner bumps the YAML when they want the new upstream.
 
@@ -81,13 +82,13 @@ Pinned versions are how a broken CA template stays fixed. The YAML sets `image` 
 
 Every card whose winning template came from a FELDCORE source gets `origin: feldcore` and a FELDCORE pill on the card. An override also gets `overrides: true` and the line "Replaces the Community Apps template". Community Apps cards have `origin: community-apps` and no pill.
 
-The lock badge is a property of the source, not of each card. It is drawn on the source in Settings and once in the App Store header.
+The lock badge is a property of the store login, not of each app. It is drawn once in Settings and on the FELDCORE Store toggle.
 
 ### Dedupe
 
 | Situation | Result |
 | --- | --- |
-| Explicit `replaces`, one CA match | One card. CA id. FELDCORE template. Badge. |
+| Explicit `replaces`, one CA match | One template. CA id. FELDCORE body. Badge. Shown in the Community Apps slot and in the FELDCORE Store. |
 | Explicit `replaces`, no CA match | A normal FELDCORE card. The feed is still valid. The UI does not mention an override. |
 | Same image-without-tag and same name as a CA app, no `replaces` | `feedbuild` fails and tells the author to add `replaces` or rename. The daemon, if handed an older feed that skipped that check, still collapses to one override rather than two cards. |
 | Two entries in one feed with the same `id` | `feedbuild` fails. |
@@ -101,7 +102,7 @@ CA's own duplicate handling (a suffix on a hash collision) is unchanged and runs
 
 ### Layout
 
-The private repository is the source of the feed. Suggested name: `feldcore-store`, owned by the owner's account, private.
+The private repository is the source of the feed. It is `Herculade0/feldcore-store`, on the owner's normal GitHub account, and it stays private.
 
 ```
 feldcore-store/
@@ -183,6 +184,20 @@ The Games tab is generic. A profile adds:
 - `updates.mode: image` — "Update" pulls the image ref currently in the feed and recreates the container with the rollback the Docker editor already uses. A digest does not move until the feed does. `manual` shows the version and leaves the pull to the user.
 
 The label `feldcore.template` is `<source-id>/<template-id>`. That is how the Games page finds which running containers it can query, and how a later "update available" check compares `feldcore.template.version` with the feed.
+
+### Suggested first game profiles
+
+"First batch" means the first game YAML files written when the Games phase starts. It is not a limit on the catalogue. The Games tab is generic, so a game that comes later is another YAML file and no new Go code.
+
+This list is a suggestion, because these are servers the owner runs or has mentioned. Swap any of them before the files are written.
+
+| Profile | Player count in the first YAML |
+| --- | --- |
+| Minecraft Java | The log regex already in the example below (`There are N of a max of M players online`). |
+| Valheim | `a2s` on the query port, which is the game port plus one (UDP 2457 when the game port is 2456). The template publishes that port and sets `query.port` to it. The player list from A2S is often empty; the count is the part worth showing. |
+| Necesse | `none` until a stable log line is chosen. Same rule: no query type the server does not actually answer. |
+
+RCON for these three is stored on the container (protocol, port, masked password variable) and is not connected yet. That connection is the phase after Games.
 
 ### VM profiles
 
@@ -933,7 +948,7 @@ The publish job moves a single Release named `feed` onto the commit it just buil
 
 `sha256sum feed.json` is printed in the Release notes for a human. The daemon does not trust that line. The signature already covers the file, and a sibling `.sha256` file would itself be unsigned.
 
-A private Release asset is downloaded with the GitHub API, which a fine-grained token with Contents: Read can do. The Contents API is a poor fit: it base64-encodes one file and limits each file to 1MB, and a browser cannot send the token to `raw.githubusercontent.com`. Release assets avoid both limits. Icons are not hotlinked.
+A private Release asset is downloaded with the GitHub API. The store login needs Contents: Read, which both the GitHub App and the fallback fine-grained token have. The Contents API is a poor fit: it base64-encodes one file and limits each file to 1MB, and a browser cannot send the token to `raw.githubusercontent.com`. Release assets avoid both limits. Icons are not hotlinked.
 
 ### Icons and other assets
 
@@ -945,32 +960,28 @@ Screenshots and other assets can use the same archive and the same hash list lat
 
 ## 4. Authentication
 
-### Fine-grained PAT, the MVP
+### One login for the whole feed
 
-Each private source has its own token. The token the MVP asks for is a fine-grained personal access token:
+The FELDCORE Store has one sign-in. The owner does it once, in Settings. After it succeeds, every template in the feed installs with no further GitHub prompt: containers, games, bundles, VM profiles, overrides, and SDR apps. A template has no token field. Set up and Apply do not ask for GitHub. Installing a second app does not ask again.
 
-- Resource owner: the account that owns the store repo.
-- Repository access: only that repository.
-- Permissions: Contents: Read. Metadata: Read is included by GitHub.
-- Expiration: 90 days is a reasonable default. The org may force a shorter lifetime.
+That sign-in is how the daemon reads the private feed. It is not a credential per app, and it is not a prompt the install dialog can raise.
 
-The Settings page links to GitHub's prefilled token form (`contents=read`, a name and description already filled). The form cannot select the repository for the user. The page says to pick only the store repo, then to paste the token once.
+The recommended sign-in is a GitHub App the owner creates on the Herculade0 account, installed only on `Herculade0/feldcore-store`, using device flow:
 
-The daemon sends the token as `Authorization: Bearer` to `api.github.com` only. It is never put in a query string, a log line, or the catalogue JSON. A test request is `GET /repos/{owner}/{repo}/releases/tags/feed` plus `GET /user`. The login name from `/user` is what Settings shows afterwards ("Saved for `octocat`"). When GitHub returns `GitHub-Authentication-Token-Expiration`, that time is stored and the row warns as it gets close.
+- Permissions: Contents: Read. Metadata: Read is included. Packages: Read as well, so a private `ghcr.io` image published for that repository is pulled with the same sign-in. The install dialog still asks for nothing.
+- Repository access: only the store repository. The App is not installed on any other repo.
+- Device flow is enabled. The owner clicks Sign in, the page shows an 8-character code and `https://github.com/login/device`, and the daemon polls `POST https://github.com/login/oauth/access_token` no faster than the interval GitHub returns. The owner never sees the access token and never pastes one.
+- The App's client id is public. It is saved once in Settings. It is not a secret, and it is not compiled into the binary, because the App belongs to this account. Device flow does not use the client secret.
+- A GitHub App user token expires in about 8 hours and comes with a refresh token that lasts about 6 months. The daemon refreshes it before a download. That refresh is silent. It is not a dialog, and it is not repeated per app. When the refresh token itself expires, Settings asks for the same one-time sign-in again.
+- Polling follows GitHub's rules: `authorization_pending` keeps waiting, `slow_down` uses the new interval, `access_denied` and expiry stop and say so.
 
-A fine-grained token cannot read GitHub Packages. It is not a registry password. That split is deliberate and is described under GHCR below.
+An OAuth app cannot do this job. Its device flow grants OAuth scopes, and the scope that reads a private repository is `repo`, which is every private repository the account can read. FELDCORE does not request `repo`.
 
-A token that is still waiting for organization approval can read public resources and will fail on the private Release. The source stays disabled and the message says the token is not accepted yet. The ciphertext stays; the user does not paste it again after approval, they hit Test.
+The fallback, if the owner would rather not register an App, is one fine-grained personal access token pasted once into the same Settings card: Contents: Read, repository access limited to `Herculade0/feldcore-store`. That is still one credential for the whole feed. It is the worse option. The owner has to copy a secret, a fine-grained token cannot pull GitHub Packages, and it expires on a date the owner has to remember. Build the device-flow sign-in. Keep the paste field for the fallback.
 
-### Device-flow OAuth
+Community Apps has no login. It stays the public unsigned feed.
 
-GitHub's device flow (`POST https://github.com/login/device/code`, the user enters an 8-character code at `https://github.com/login/device`, the daemon polls `POST https://github.com/login/oauth/access_token` no faster than the interval GitHub returns) needs a `client_id` and does not need a `client_secret`. That part fits a self-hosted UI.
-
-An OAuth app's device flow still grants OAuth scopes. The scope that can read a private repository is `repo`, and `repo` is every private repository the authorizing user can read, not the one store repo. A token stolen from `state.json`, or a bug that sends the token to the wrong host, would expose all of them. FELDCORE should not request `repo`.
-
-The flow that can be limited to one repository is a GitHub App with Contents: Read, device flow enabled, installed by the user on the store repo and no other. The App's `client_id` is public. Refresh of a device-flow token does not need the client secret. This is the right "connect GitHub" button, and it waits until the owner wants it. For a single private repo, pasting a fine-grained token is less machinery: there is no app registration, no 8-hour user-token expiry, and no refresh-token store.
-
-When that button is built, the `client_id` is a setting the owner fills in from their own GitHub App, not a secret compiled into the binary and not a service FELDCORE has to host. The resulting token goes through the same write-only storage as a PAT. The polling interval from GitHub is respected (`authorization_pending` keeps waiting, `slow_down` adds the extra delay GitHub returns, `access_denied` and expiry stop and say so).
+The daemon sends the credential as `Authorization: Bearer` to `api.github.com` only. It is never put in a query string, a log line, or the catalogue JSON. A test request is `GET /repos/Herculade0/feldcore-store/releases/tags/feed` plus `GET /user`. Settings then shows "Signed in as Herculade0" and the lock. When GitHub returns `GitHub-Authentication-Token-Expiration`, that time is stored and the row warns as it gets close. A fine-grained token that is still waiting for organization approval can read public resources and will fail on the private Release. The sign-in stays saved and the message says it is not accepted yet. The owner hits Test again after approval. They do not paste it a second time.
 
 ### Token storage
 
@@ -979,46 +990,44 @@ The token has to be recoverable, because the daemon must send it to GitHub. It i
 - A 32-byte key is created with `crypto/rand` the first time a secret is saved, written to `/var/lib/feldcore/secrets.key`, mode `0600`.
 - The token is encrypted with AES-256-GCM. The nonce is random per secret. `state.json` holds `enc:v1:` plus the nonce and ciphertext. `state.json` stays mode `0600`, as it is today.
 - A copy of `state.json` by itself cannot be decrypted. A backup that contains both the state file and `secrets.key` can. Exports and any future support bundle omit `secrets.key` and omit ciphertext.
-- Losing `secrets.key` makes the ciphertext unreadable. Settings says the token has to be pasted again and drops the ciphertext. There is no key escrow.
-- The API that reads settings returns `configured: true`, the GitHub login, the expiry, the repo, and the last status. It does not return the token, a suffix of the token, or the ciphertext. The text field loads empty. The hint is "A token is saved. Paste a new one to replace it."
-- Replace overwrites. Clear deletes the ciphertext and leaves the cached feed in place until the user removes the source. The cache contains templates, not the token.
-- Logs and errors from the GitHub client pass through a redactor that strips `Bearer` values and `github_pat_` / `ghp_` / `gho_` prefixes before they reach `slog`.
+- Losing `secrets.key` makes the ciphertext unreadable. Settings drops it and asks for the one-time sign-in again (or the fallback token, if that was what was saved). There is no key escrow.
+- The API that reads settings returns `configured: true`, the GitHub login, the expiry, the repo, and the last status. It does not return the access token, the refresh token, a suffix of either, or the ciphertext. The fallback paste field loads empty. The hint is "Signed in. Sign in again to replace it."
+- Sign out deletes the ciphertext and leaves the cached feed in place. The cache contains templates, not the credential.
+- Logs and errors from the GitHub client pass through a redactor that strips `Bearer` values and `github_pat_` / `ghp_` / `gho_` / `ghr_` prefixes before they reach `slog`.
 
-Registry passwords use the same key and the same write-only API.
+The same key and the same write-only rule cover the refresh token and, if used, the fallback personal access token. There is no second secret for installing an app.
 
-### Several sources, and the lock
+### The two catalogues, and the lock
 
-Settings → App Store becomes a list.
+Settings → App Store is the Community Apps switch, the auto-refresh switch, and one store sign-in.
 
-| Source | Auth | Address |
+| Catalogue | Auth | Address |
 | --- | --- | --- |
-| Community Apps, built in, cannot be removed | none | The catalogue URL. Blank is the public feed. |
-| Each source the user adds | its own token and its own minisign key | `owner/repo`, release tag, default `feed` |
+| Community Apps, on unless the switch is off | none | The catalogue URL. Blank is the public feed. |
+| FELDCORE Store | the one GitHub App sign-in, or the one fallback token | `Herculade0/feldcore-store`, release tag `feed` |
 
-A source is enabled only after Test has succeeded and a signing key has been pinned. Order in the list is the merge order. Each row has Enable, Refresh, Replace token, Replace signing key, and Remove. Remove deletes that source's cache directory.
+The store is used after Sign in has succeeded and the signing key has been pinned. The card has Sign in, Sign out, Replace signing key, and Test. A later extra catalogue, if one is ever added, would be another source with its own sign-in. It is not part of the MVP, and it would still be one login for that whole feed, not a token per app.
 
-The lock on a row, and the matching lock in the App Store header:
+The lock sits on the FELDCORE Store in Settings and on its toggle:
 
 | State | When |
 | --- | --- |
-| Locked | A token is stored and the last GitHub call returned 200 or 304. |
-| Rejected | The last call was 401 or 403. The token is kept. |
+| Locked | Signed in, and the last GitHub call returned 200 or 304. |
+| Rejected | The last call was 401 or 403. The sign-in is kept. |
 | Offline | The last call did not connect, or the signature failed. |
-| No lock | Community Apps, or a public source added with no token. |
+| No lock | Community Apps. That catalogue has no credential. |
 
-The header names the source once ("FELDCORE store · private · saved 16 Nov 14:02"), not on every card.
+The FELDCORE Store status line names the catalogue once ("FELDCORE Store · private · saved 16 Nov 14:02"). Cards do not repeat the lock.
 
-Owner and repo are `owner/repo` or a `github.com` URL, normalized. Each part is letters, digits, `.`, `_`, and `-`. The release tag is a single path segment, default `feed`. A source id is a slug FELDCORE assigns (`store`, `store-2`). It stays put when the GitHub repository is renamed, so container labels do not change.
+The store repo and the release tag are fixed for this catalogue (`Herculade0/feldcore-store`, tag `feed`). The source id is the slug `store`. It stays put if the GitHub repository is renamed, so container labels do not change.
 
-### Private images and GHCR
+### Images, including GHCR
 
-Registry logins are a second list, not a flag on the feed token. GitHub Packages, including `ghcr.io`, does not accept a fine-grained PAT. Pulling a private image needs a classic personal access token with the `read:packages` scope only. The classic-token form sometimes ticks `repo` as well when other package scopes are selected; `read:packages` on its own does not require `repo`, and the page tells the user to leave `repo` unticked. If the org uses SAML single sign-on, the token has to be authorized for that org or the pull returns 403.
+Public images pull anonymously, which is what the daemon does today. A private image on `ghcr.io` that the same GitHub App can read is pulled with that same sign-in: Docker's `X-Registry-Auth` header (base64 of the GitHub username, the access token, and `ghcr.io`) is sent on the pull. That header does not exist on the pull path today. The install dialog does not grow a password field for it.
 
-A row is a registry host (`ghcr.io`), a username, and a write-only token. Test runs a Docker login against that host. At pull time the daemon sends Docker's `X-Registry-Auth` header (base64 of username, password, and server address) for the host that matches the image. That header does not exist on the pull path today; it is added with this list. Public images keep pulling anonymously, which is what happens now.
+Packages: Read on the App is what makes this the same login. A fine-grained personal access token cannot read GitHub Packages, which is another reason it stays the fallback. There is no classic `read:packages` token and no separate registry list in the MVP. A registry that is not GitHub waits until a template actually needs one.
 
-MVP templates should use public images, so the first override does not wait on a classic token. A template that sets `container.image` on a host that has no saved login still opens the dialog, with the note "No login is saved for ghcr.io" before apply. The pull error from Docker remains the failure if the user applies anyway.
-
-A game image the owner publishes privately to GHCR is the case the registry list is for. The feed token is not offered as a shortcut for that login.
+If a pull fails because the image is private and the App was not granted Packages: Read, the error says so and points at Settings. The owner adds the permission on the App and signs in once more. Apps that are already installed are left as they are.
 
 ## 5. How FELDCORE consumes a source
 
@@ -1029,7 +1038,7 @@ A game image the owner publishes privately to GHCR is the case the registry list
   ca-feed.json              # Community Apps, unchanged
   ca-feed.time
   secrets.key
-  state.json                # ciphertext only, for tokens and registry passwords
+  state.json                # ciphertext only, for the one store sign-in
   store/
     <source-id>/
       feed.json             # last verified feed
@@ -1057,7 +1066,12 @@ For a GitHub source:
 
 The first time a source is enabled and has no cache, the App Store page refreshes once, which is what it already does when the CA catalogue is missing.
 
-A manual Refresh is the only trigger in the MVP. The 24-hour stale flag is computed the same way as for Community Apps (`staleAfter`) and is only a label. A daily refresh is a settings switch later, defaulting off, because the daemon does not phone out on its own today.
+Refresh has both of these, in the MVP:
+
+- A Refresh button on the App Store page. It refreshes every catalogue that is enabled. Community Apps is skipped when its switch is off. One catalogue failing leaves the other alone.
+- An auto-refresh option in Settings, on by default. While it is on, the daemon runs that same refresh every 24 hours, which is the existing stale window. While it is off, the only downloads are the button and the first visit to an empty cache. Turning it off does not delete a saved catalogue.
+
+The 24-hour stale flag is still computed (`staleAfter`) and shown when a catalogue is older than that, which is what the owner sees if auto-refresh is off or the last attempt failed. Auto-refresh fetches the catalogues the server is configured to show. It does not send a telemetry report.
 
 ### Offline, and a source that is down
 
@@ -1091,13 +1105,18 @@ The daemon's GitHub client uses the system trust store and adds no private CA. R
 
 ## 6. UI and UX
 
-The App Store page keeps its search box, category dropdown, Deprecated toggle, 48-at-a-time grid, and "Set up" action. Store entries join that grid. The page gains a type filter and a source line.
+The App Store page keeps its search box, category dropdown, Deprecated toggle, 48-at-a-time grid, Refresh button, and "Set up" action. Two toggle buttons under the title switch the grid between the catalogues.
 
 ### Browsing
 
-Under the title, one status line per source, using the lock states from section 4. A warning banner is per source and uses that source's message, so a dead private repo does not replace today's Community Apps offline text with a vaguer one.
+The toggles are **Community Apps** and **FELDCORE Store**, the same kind of pressed-state button as Deprecated. Exactly one is selected. They switch the list. They do not filter one mixed grid.
 
-Pills: All, Apps, Games, Bundles, VMs. A FELDCORE toggle, the same shape as Deprecated, limits the grid to `origin: feldcore`. SDR is a category inside Apps, fed by the template's `categories`, so it shows up in the dropdown with a count. Games are not also dumped into the 4,400-app grid; the Apps pill is `kind: container` only. All includes every kind.
+- Community Apps shows that catalogue after overrides and hides. An overridden app keeps its place in this list, wears the FELDCORE badge, and opens the fixed template.
+- FELDCORE Store shows only store entries: new apps, overrides, games, bundles, and VMs. Inside this view, pills narrow it further: Apps, Games, Bundles, VMs. SDR is a category in the Apps dropdown, from the template's `categories`. Games are not copied into the Community Apps grid.
+
+Search, category, and Deprecated apply to the catalogue that is selected. A status line under the toggles describes that catalogue, including the lock when FELDCORE Store is selected. A warning banner uses that catalogue's own message, so a dead private repo does not replace the Community Apps offline text.
+
+When the Settings switch for Community Apps is off, the Community Apps button is not shown and the page opens on FELDCORE Store. Refresh still updates every catalogue that remains enabled.
 
 A card is the card that exists today (icon, name, author or image, overview, `Requires`, category pills, Beta, Deprecated). Additions:
 
@@ -1113,11 +1132,11 @@ Search covers name, author, image, overview, and categories, as it does now, and
 
 Unchanged path. The card calls `GET /api/v1/apps/{id}`. An override id is the Community Apps id, so the client does not care which source won. The response is the same `{app, spec, notes}` the dialog already takes, with `requires` still on `app`. Notes still explain path rewrites. A claimed USB device adds a dropdown of matching serials in the device row; with one free match it is already selected. Apply creates the container and, when the spec came from a FELDCORE template, sets `feldcore.template` and `feldcore.template.version`.
 
-A missing registry login for the image host is a note at the top of the dialog, not a second wizard.
+Apply does not ask for GitHub. The store sign-in already covers the feed and, with Packages: Read, a private `ghcr.io` image. A public image pulls anonymously, as it does today.
 
 ### Installing a game
 
-The same dialog, with a Game section under the container fields: query (read-only, from the template), RCON port (read-only) and the masked password variable, and the save paths as ordinary path rows so the folder picker still works. After apply, the Games pill shows the running server. Player count is requested from `GET /api/v1/apps/games/status` while that view is open, about every 30 seconds, and only for containers with a `feldcore.template` label the feed still knows. A query that gets no answer shows "No answer" and does not restart anything. Update compares the label with the feed and, on confirm, recreates the container the way Edit already does, including the rollback if the new container does not start.
+The same dialog, with a Game section under the container fields: query (read-only, from the template), RCON port (read-only) and the masked password variable, and the save paths as ordinary path rows so the folder picker still works. After apply, the game shows under FELDCORE Store → Games. Player count is requested from `GET /api/v1/apps/games/status` while that view is open, about every 30 seconds, and only for containers with a `feldcore.template` label the feed still knows. A query that gets no answer shows "No answer" and does not restart anything. Update compares the label with the feed and, on confirm, recreates the container the way Edit already does, including the rollback if the new container does not start.
 
 ### Installing a bundle
 
@@ -1135,7 +1154,7 @@ Docker's manager does not create a user-defined network today. The bundle phase 
 
 ### Installing a VM
 
-This waits on M4: a libvirt domain, a disk, and a console. The feed can carry the templates before that. The VMs pill shows them, and Set up explains that VM install is not on this FELDCORE yet, with the hardware and the media line still visible so the catalogue is useful as documentation.
+This waits on M4: a libvirt domain, a disk, and a console. The feed can carry the templates before that. FELDCORE Store → VMs shows them, and Set up explains that VM install is not on this FELDCORE yet, with the hardware and the media line still visible so the catalogue is useful as documentation.
 
 When M4 is there, Set up is one confirm page, not the long wizard:
 
@@ -1149,7 +1168,7 @@ Apply creates the disk, the seed ISO when there is cloud-init, the domain with t
 
 ### Settings
 
-The current App Store card (catalogue URL, Save URL, Refresh catalogue) becomes the first row of the source list. The URL field and its validation stay. Under it: the added sources, the lock, Test, and the registry list. "Hidden by your store" lists hide entries by name and `hideReason`, with no install button. Replacing a token or a key never shows the previous value.
+The App Store card keeps the Community Apps catalogue URL and its validation. Beside it: the Community Apps switch (on by default; off leaves only the FELDCORE Store), the auto-refresh switch (on by default, every 24 hours), and the one store sign-in with its lock. "Hidden by your store" lists hide entries by name and `hideReason`, with no install button. Signing in again, or replacing the signing key, never shows the previous credential.
 
 ## 7. Roadmap, effort, risks, open questions
 
@@ -1157,13 +1176,11 @@ Each phase is shippable on its own. A later phase does not block browsing the te
 
 | Phase | What lands | Depends on | Size | Where the work is |
 | --- | --- | --- | --- | --- |
-| MVP | Sources, fine-grained PAT, encrypted secrets, minisign pin, merge, badge, hide list, container install through the current dialog, labels, the store repo with `feedbuild` and the Action, one override and one original container | The App Store (M2b) | Medium | `internal/apps` grows a source list and a merge. `internal/store` gains ciphertext and a state-version bump. Settings and the App Store page gain the source row and the pill. The Docker create path gains two labels. Pull, edit, and rollback stay as they are. |
-| Games | Games pill, log and A2S readers, save rows, version label compared to the feed, Update via the existing recreate | MVP | Medium | A status handler and a reader. The dialog gains a Game section. No new container runtime. RCON is the phase after this one, and only the Source protocol, using the password variable the MVP already stores. |
+| MVP | One GitHub App sign-in for the whole feed (device flow, installed only on `Herculade0/feldcore-store`), encrypted credential, minisign pin, the two catalogue toggles, the Community Apps switch, manual Refresh and 24-hour auto-refresh, merge, badge, hide list, container install through the current dialog, labels, the store repo with `feedbuild` and the Action, one override and one original container. A pasted fine-grained token is the fallback only. | The App Store (M2b), and the owner registering the GitHub App | Medium | `internal/apps` grows the two catalogues and the merge. `internal/store` gains ciphertext and a state-version bump. Settings gains the switches and the sign-in. The App Store page gains the two toggles. The Docker create path gains two labels. A private `ghcr.io` pull sends `X-Registry-Auth` from that same sign-in. Pull, edit, and rollback otherwise stay as they are. |
+| Games | Games pill inside FELDCORE Store, log and A2S readers, save rows, version label compared to the feed, Update via the existing recreate. Suggested first YAML: Minecraft Java, Valheim, Necesse. | MVP | Medium | A status handler and a reader. The dialog gains a Game section. No new container runtime. RCON is the phase after this one, and only the Source protocol, using the password variable the MVP already stores. |
 | Bundles | Confirm page, network create, ordered create, remove-this-attempt | MVP | Medium | Docker manager learns to create a network. New dialog. The feed format is already fixed in the MVP, so templates can be written early. |
 | SDR | USB inventory, serial claim, dropdown on a device row | MVP | Small | A sysfs read, a claim map in state, one control in the dialog. The five SDR templates are YAML. |
-| Registries | GHCR and other private registries | MVP, and a private image that needs it | Small | Write-only rows, `X-Registry-Auth` on pull. Skipped while every image is public. |
-| VMs | Confirm page, cloud-image download with checksum, BYO ISO picker, domain create | M4 | Large | Blocked on libvirt, disks, and a console. Templates and the pill can land earlier and show "not installed yet". Windows era profiles are rows in YAML once the wizard can apply machine, bus, and NIC. |
-| GitHub App | Device-flow connect for a user-owned GitHub App | The owner registering the app | Small | Settings only. Same ciphertext store. Not required for a single private repo. |
+| VMs | Confirm page, cloud-image download with checksum, BYO ISO picker, domain create | M4 | Large | Blocked on libvirt, disks, and a console. Templates can land on the VMs pill earlier and show "not installed yet". Windows era profiles are rows in YAML once the wizard can apply machine, bus, and NIC. |
 
 MVP tests, in the style of the current catalogue tests: merge and override against a fixture feed, a hide, a signature fixture with a test key, a refresh that fails and leaves the previous file in place, and a settings response that does not contain the token that was just saved.
 
@@ -1173,7 +1190,7 @@ MVP tests, in the style of the current catalogue tests: merge and override again
 - **CA outage during `feedbuild`.** The uniqueness check downloads CA. If that download fails, the Action fails closed and does not publish. The previous Release stays. The daemon is unaffected.
 - **Signing-key loss.** The offline copy is the recovery. Without it, the owner generates a new key, updates the Action secret and `keys/feed.pub`, and uses Replace signing key on each server. Old cached feeds keep working until that replacement, because they were signed by the key still pinned.
 - **Token in a root-owned file.** The daemon runs as root and there is one administrator. Encryption limits the damage of a `state.json` copy. It does not limit the damage of root on the box. That is the same trust the daemon already has.
-- **Classic PAT for GHCR.** `read:packages` is account-wide for packages that user can see. A dedicated machine user with access only to those packages is the way to narrow it. The feed token stays a fine-grained read of one repo either way.
+- **One GitHub App token.** It can read the store repo and, with Packages: Read, packages that App is allowed to see. It cannot read the rest of the account. The 8-hour access token is refreshed silently. Losing the refresh token means one sign-in, not a failure on each app. The fallback fine-grained token cannot pull GHCR at all.
 - **Legal exposure if a template grows a URL.** The schema rejects Windows and macOS downloads. `feedbuild` is what actually stops a pull request. Review of the private repo is the owner, which is fine while the repo stays private, and is not fine the moment it is public.
 - **Badge confusion.** An override that keeps the CA download count can look like an official CA update. The pill and the "Replaces the Community Apps template" line have to be on the card and on the dialog, not only in Settings.
 
@@ -1197,17 +1214,19 @@ Community Apps text is other people's work. A private override that the owner ru
 
 Making the store public is a different product from this design: review before a template is merged, takedown, trademarks (including Unraid and the Community Apps names), no Microsoft or Apple media, and a decision on whether a public entry is allowed to override a CA template other people will see. None of that is required for the private repo. The schema and the source list are enough to add a public URL later as another source, default off.
 
+### Settled with the owner
+
+- The store repo is on the owner's normal GitHub account, `Herculade0/feldcore-store`, and it stays private.
+- One sign-in covers the whole feed. Installing an app does not ask again. The sign-in to build is a GitHub App installed only on that repo, via device flow. A pasted fine-grained token is the fallback. The `repo` scope is not used.
+- The App Store has two toggle buttons, Community Apps and FELDCORE Store. Settings can disable Community Apps and leave only the store.
+- Refresh is a button on the page and an auto-refresh option in Settings. Auto-refresh defaults to on, every 24 hours.
+- The first game profiles to write are a suggestion, not a limit: Minecraft Java, Valheim, and Necesse. See [Suggested first game profiles](#suggested-first-game-profiles).
+
 ### Open questions
 
-1. **Where does the private repo live?** Which GitHub account or organization owns it, and does it stay private for the foreseeable future? The auth design assumes one private repo and a fine-grained token aimed at it.
-2. **Is the fine-grained PAT acceptable as the only login for now?** The alternative that is safe to add later is a GitHub App the owner registers, with device flow. An OAuth app with the `repo` scope is the one this design rejects.
-3. **Will any image be private?** If every MVP image is public, registry credentials wait. If a game image is on GHCR, the owner also needs a classic token with only `read:packages`, ideally on a machine user.
-4. **Who holds the minisign key?** The recommendation is an offline copy plus the Actions secret. Confirm that a passwordless key in the secret store is acceptable, or say if the publish step should stop and wait for a hardware-backed signature instead. Waiting makes the Action unable to publish unattended.
-5. **May Community Apps be switched off?** The source list includes a disable. The alternative is to keep CA always on, so the store can only add and override, never be the whole catalogue.
-6. **Windows.** Confirm the feed never contains Microsoft ISOs, keys, or download links, and that "put an ISO you already have in the isos share" is the whole of the Windows story.
-7. **macOS.** Leave it out entirely, or allow a private BYO stub with no installer and no firmware recipe? The recommendation is to leave it out until you decide in writing.
-8. **Which game servers are first?** The generic profile covers them. The first YAML batch still has to be chosen (for example a Steam server with A2S, plus one log-parsed server such as Minecraft). RCON in the MVP is stored and not connected.
-9. **SDR scope.** Is a USB serial claim enough for OpenWebRX+, readsb/tar1090, rtl_433, AIS-catcher, and SatDump, or do any of them need a SoapySDR device string or an rtl_tcp port as well? The schema can grow an optional string without a version bump. It should not grow it in the abstract.
-10. **Shared questions in bundles.** One folder applied to several members is the MVP. Is there a second kind of shared value (a timezone, a VPN port) that the first media stack needs?
-11. **Refresh.** Manual only, matching the daemon today, or a default-off daily switch in the MVP?
-12. **If this is ever public.** Who reviews templates, is a public override of a CA app allowed, and what is the contact for takedown? Worth answering before any template is written in a way that assumes a public audience. Not worth building for the private repo.
+1. **Who holds the minisign key?** The recommendation is an offline copy plus the Actions secret. Confirm that a passwordless key in the secret store is acceptable, or say if the publish step should stop and wait for a hardware-backed signature instead. Waiting makes the Action unable to publish unattended.
+2. **Windows.** Confirm the feed never contains Microsoft ISOs, keys, or download links, and that "put an ISO you already have in the isos share" is the whole of the Windows story.
+3. **macOS.** Leave it out entirely, or allow a private BYO stub with no installer and no firmware recipe? The recommendation is to leave it out until you decide in writing.
+4. **SDR scope.** Is a USB serial claim enough for OpenWebRX+, readsb/tar1090, rtl_433, AIS-catcher, and SatDump, or do any of them need a SoapySDR device string or an rtl_tcp port as well? The schema can grow an optional string without a version bump. It should not grow it in the abstract.
+5. **Shared questions in bundles.** One folder applied to several members is the MVP. Is there a second kind of shared value (a timezone, a VPN port) that the first media stack needs?
+6. **If this is ever public.** Who reviews templates, is a public override of a CA app allowed, and what is the contact for takedown? Worth answering before any template is written in a way that assumes a public audience. Not worth building for the private repo.
