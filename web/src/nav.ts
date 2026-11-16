@@ -3,12 +3,13 @@ import {
   FolderTree,
   LayoutDashboard,
   MonitorPlay,
+  ScrollText,
   Settings,
   Store,
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "settings";
+export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "audit" | "settings";
 
 export interface NavItem {
   key: NavKey;
@@ -53,6 +54,13 @@ export const NAV: NavItem[] = [
     label: "VMs",
     desc: "Virtual machines",
     icon: MonitorPlay,
+    ready: true,
+  },
+  {
+    key: "audit",
+    label: "Audit",
+    desc: "Agent calls",
+    icon: ScrollText,
     ready: true,
   },
   {

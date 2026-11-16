@@ -22,7 +22,7 @@ import { Alert, Button, IconButton, Modal } from "../form";
 import Allocations from "./Allocations";
 import ContainerDialog from "./ContainerDialog";
 import LogsDialog from "./LogsDialog";
-import { TerminalButton, TerminalModal } from "../Terminal";
+import { TerminalButton, useTerminal } from "../Terminal";
 import { stateStyle, type Container, type DockerStatus } from "./types";
 
 export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
@@ -36,7 +36,7 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
   const setCreating = (on: boolean) => setEditing(on ? "new" : null);
   const [logsFor, setLogsFor] = useState<Container | null>(null);
   const [removing, setRemoving] = useState<Container | null>(null);
-  const [consoleFor, setConsoleFor] = useState<Container | null>(null);
+  const { openContainer } = useTerminal();
 
   const load = useCallback(async () => {
     try {
@@ -131,7 +131,7 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
                   onAction={changed}
                   onError={setError}
                   onLogs={() => setLogsFor(c)}
-                  onConsole={() => setConsoleFor(c)}
+                  onConsole={() => openContainer({ id: c.id, name: c.name, icon: c.icon })}
                   onEdit={() => setEditing(c)}
                   onRemove={() => setRemoving(c)}
                 />
@@ -167,13 +167,6 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
         />
       )}
       {logsFor && <LogsDialog container={logsFor} onClose={() => setLogsFor(null)} />}
-      {consoleFor && (
-        <TerminalModal
-          title={`Console · ${consoleFor.name}`}
-          path={`/docker/containers/${encodeURIComponent(consoleFor.id)}/terminal`}
-          onClose={() => setConsoleFor(null)}
-        />
-      )}
       {removing && (
         <RemoveDialog
           container={removing}

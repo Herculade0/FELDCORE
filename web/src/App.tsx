@@ -8,6 +8,7 @@ import { LogoMark, Wordmark } from "./components/Logo";
 import { IconButton } from "./components/form";
 import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import AuditPage from "./components/AuditPage";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
@@ -15,6 +16,7 @@ import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
 import Wizard from "./components/setup/Wizard";
+import { TerminalProvider } from "./components/Terminal";
 
 export default function App() {
   return (
@@ -48,6 +50,7 @@ function Shell() {
   const { username } = useAuth();
 
   return (
+    <TerminalProvider>
     <div className="min-h-screen md:pl-[17.5rem]">
       {/* Desktop: floating glass rail */}
       <aside className="glass fixed inset-y-4 left-4 z-20 hidden w-60 flex-col rounded-3xl p-4 md:flex">
@@ -118,8 +121,10 @@ function Shell() {
             <AppsPage />
           ) : active === "vms" ? (
             <VMsPage />
+          ) : active === "audit" ? (
+            <AuditPage />
           ) : active === "settings" ? (
-            <SettingsPage />
+            <SettingsPage onOpenAudit={() => setActive("audit")} />
           ) : null}
         </ErrorBoundary>
       </main>
@@ -147,6 +152,7 @@ function Shell() {
         })}
       </nav>
     </div>
+    </TerminalProvider>
   );
 }
 
