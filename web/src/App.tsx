@@ -15,6 +15,7 @@ import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import Wizard from "./components/setup/Wizard";
+import { TerminalProvider } from "./components/Terminal";
 
 export default function App() {
   return (
@@ -48,6 +49,7 @@ function Shell() {
   const { username } = useAuth();
 
   return (
+    <TerminalProvider>
     <div className="min-h-screen md:pl-[17.5rem]">
       {/* Desktop: floating glass rail */}
       <aside className="glass fixed inset-y-4 left-4 z-20 hidden w-60 flex-col rounded-3xl p-4 md:flex">
@@ -147,6 +149,7 @@ function Shell() {
         })}
       </nav>
     </div>
+    </TerminalProvider>
   );
 }
 
