@@ -99,6 +99,14 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 - [ ] Create VM wizard (ISO, disk, CPU, RAM, virtio)
 - [ ] Browser console (VNC/SPICE)
 
+## FELDCORE-STORE
+
+A private catalogue merged on top of Community Apps: game profiles, VM templates, app bundles, SDR apps, and fixed versions of broken templates. It builds on the App Store (M2b). Design and scope: [FELDCORE-STORE.md](FELDCORE-STORE.md).
+
+- [ ] MVP — one sign-in for the private `Herculade0/feldcore-store` feed, Community Apps and FELDCORE Store toggles, manual and automatic refresh, merge and override, FELDCORE badge
+- [ ] Games, bundles, and SDR device claims
+- [ ] One-click VMs from store templates, after M4
+
 ## FELDCORE OS (the FELDCORE distro)
 
 Long-term, after the Debian package is the normal way to run FELDCORE. An Unraid-style immutable appliance, booting from a dedicated disk partition instead of a USB stick. This is a design note, not something the current daemon does.
