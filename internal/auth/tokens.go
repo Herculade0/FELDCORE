@@ -262,15 +262,28 @@ func (a *Service) Audit() []store.AuditEvent {
 
 func trimAudit(in []store.AuditEvent, now time.Time) []store.AuditEvent {
 	cutoff := now.Add(-AuditRetention)
-	i := 0
-	for i < len(in) && in[i].Time.Before(cutoff) {
-		i++
+	live := in[:0]
+	for _, ev := range in {
+		if !ev.Time.Before(cutoff) {
+			live = append(live, ev)
+		}
 	}
-	in = in[i:]
-	if len(in) > maxAudit {
-		in = append([]store.AuditEvent(nil), in[len(in)-maxAudit:]...)
+	// Copy so the caller's backing array is not aliased after the slice
+	// expression above when live is a prefix of in.
+	live = append([]store.AuditEvent(nil), live...)
+	for len(live) > maxAudit {
+		// Drop anonymous sign-in noise before any security event, so a
+		// flood of unknown usernames cannot flush the log.
+		drop := 0
+		for i, ev := range live {
+			if ev.Action == "sign-in noise" {
+				drop = i
+				break
+			}
+		}
+		live = append(live[:drop], live[drop+1:]...)
 	}
-	return in
+	return live
 }
 
 func normalizeScopes(in []string) ([]string, error) {

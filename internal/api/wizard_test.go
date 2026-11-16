@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/secrets"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/store"
@@ -140,6 +141,58 @@ func TestLoginAsksForAuthenticator(t *testing.T) {
 	}
 	if status["totpEnabled"] != true || status["authenticated"] != true {
 		t.Fatalf("status %+v", status)
+	}
+}
+
+// The wizard stores the administrator authenticator where Citizen ID reads it,
+// and a recovery code from that enrolment still signs the administrator in.
+func TestWizardAuthenticatorSignsInThroughCitizen(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := secrets.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts := auth.New(st)
+	accounts.UseSecrets(box)
+	const pass = "correct horse"
+	if err := accounts.Setup("admin", pass); err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := accounts.BeginEnrolment("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrolled := totpCode(t, secret, time.Now())
+	recovery, err := accounts.ConfirmEnrolment(enrolled)
+	if err != nil || len(recovery) == 0 {
+		t.Fatal(err)
+	}
+	if err := accounts.EnableTOTP(); err != nil {
+		t.Fatal(err)
+	}
+	g := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: accounts})
+	accounts.SetSecondFactor(g.AdminFactor)
+	srv := New(Deps{Auth: accounts, Citizen: g, System: system.NewCollector(), Log: slog.Default()})
+
+	rec := call(srv, http.MethodPost, "/api/v1/citizen/login", `{"username":"admin","password":"correct horse"}`, "", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"totpRequired":true`) {
+		t.Fatalf("prompt %d %s", rec.Code, rec.Body.String())
+	}
+	good := totpCode(t, secret, time.Now().Add(30*time.Second))
+	if good == enrolled {
+		good = totpCode(t, secret, time.Now().Add(60*time.Second))
+	}
+	rec = call(srv, http.MethodPost, "/api/v1/citizen/login", `{"username":"admin","password":"correct horse","totp":"`+good+`"}`, "", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"admin":true`) {
+		t.Fatalf("citizen totp %d %s", rec.Code, rec.Body.String())
+	}
+	rec = call(srv, http.MethodPost, "/api/v1/citizen/login", `{"username":"admin","password":"correct horse","totp":"`+recovery[0]+`"}`, "", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"admin":true`) {
+		t.Fatalf("recovery %d %s", rec.Code, rec.Body.String())
 	}
 }
 
