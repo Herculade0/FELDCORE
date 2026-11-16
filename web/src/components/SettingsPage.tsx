@@ -25,6 +25,7 @@ import MailNotifications from "./settings/MailSettings";
 import RemoteAccess from "./settings/RemoteAccess";
 import WebAddresses from "./settings/WebAddresses";
 import SnapshotSettings from "./settings/SnapshotSettings";
+import { InstallPanel, useInstall } from "./install/InstallPanel";
 import PublishingSettings from "./publish/ProtectionSettings";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
@@ -316,25 +317,59 @@ function ServicesCard({ services, onSaved }: { services: Svc[]; onSaved: () => v
 
 function ServiceRow({ svc, onSaved }: { svc: Svc; onSaved: () => void }) {
   const [on, setOn] = useState(svc.enabled);
+  const inst = useInstall(svc.name, onSaved);
+  useEffect(() => {
+    if (inst.active) setOn(true);
+  }, [inst.active]);
+  const turningOn = on && !svc.enabled;
+  const showPanel =
+    !!inst.job &&
+    (inst.active ||
+      (inst.job.state === "failed" && !svc.running) ||
+      (inst.job.state === "succeeded" && !svc.running));
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface-2 px-4 py-3 ${svc.available ? "" : "opacity-60"}`}>
-      <div className="min-w-0">
-        <p className="text-sm font-bold text-ink">{svc.label}</p>
-        <p className="text-xs font-medium text-ink-3">
-          {svc.available
-            ? `${svc.installed ? "Installed" : "Not installed"} · ${svc.running ? "running" : "stopped"}`
-            : "This CPU has no virtualisation."}
-        </p>
+    <div className={`rounded-2xl border border-line bg-surface-2 px-4 py-3 ${svc.available ? "" : "opacity-60"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-ink">{svc.label}</p>
+          <p className="text-xs font-medium text-ink-3">
+            {svc.available
+              ? `${svc.installed ? "Installed" : "Not installed"} · ${svc.running ? "running" : "stopped"}`
+              : "This CPU has no virtualisation."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Toggle checked={on || inst.active} onChange={setOn} label={svc.label} disabled={!svc.available || inst.active} />
+          {turningOn || inst.active ? (
+            <Button
+              variant="primary"
+              size="sm"
+              loading={inst.active || inst.starting}
+              disabled={!svc.available}
+              onClick={() => void inst.start().catch(() => {})}
+            >
+              {inst.active ? "Installing…" : "Turn on"}
+            </Button>
+          ) : (
+            <Save
+              label={on ? "Turn on" : "Turn off"}
+              disabled={!svc.available || on === svc.enabled}
+              onClick={() => api("/settings/services", { method: "PUT", body: { name: svc.name, enabled: on } })}
+              onSaved={onSaved}
+            />
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        <Toggle checked={on} onChange={setOn} label={svc.label} disabled={!svc.available} />
-        <Save
-          label={on ? "Turn on" : "Turn off"}
-          disabled={!svc.available || on === svc.enabled}
-          onClick={() => api("/settings/services", { method: "PUT", body: { name: svc.name, enabled: on } })}
-          onSaved={onSaved}
-        />
-      </div>
+      {inst.error && (
+        <div className="mt-3">
+          <Alert>{inst.error}</Alert>
+        </div>
+      )}
+      {showPanel && inst.job && (
+        <div className="mt-3">
+          <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
+        </div>
+      )}
     </div>
   );
 }
