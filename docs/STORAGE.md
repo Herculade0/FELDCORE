@@ -1,29 +1,48 @@
 # Storage
 
 FELDCORE's disk and pool control lives in `internal/storage`. The Storage page
-and the first-run wizard both call it. It does not format a disk unless
-`CreatePool`, `AddDisk` or `ReplaceDisk` is called, and each of those refuses
-until the typed confirmation matches the disk.
+and the first-run wizard both call `*storage.Service`. A pool is formatted only
+by `CreatePool`, `AddDisk` or `ReplaceDisk`, and each of those refuses until
+the typed confirmation matches the disk. The wizard can also format one empty
+disk as ext4, and only after the phrase `ERASE <name>` is typed.
 
 ## What was already there
 
 The dashboard reports usage of filesystems that are already mounted: mount
-point, device, filesystem type and bytes. The setup wizard lists those mounts
-and warns when the shares root sits on the operating-system disk. It does not
-create a pool or format anything.
+point, device, filesystem type and bytes. Before this package, nothing read
+SMART, serial, temperature or a by-id path, and nothing created a btrfs, ZFS
+or XFS layout, mounted a pool by UUID, scrubbed, balanced, trimmed, spun a
+disk down, or replaced a disk. Shares were directories under one shares root.
+Appdata was a path string. The job runner existed for package installs.
 
-Shares are directories under one shares root. There is no pool, and no
-share-to-pool map. Appdata is a path string, not a cache pool. Virtual machine
-disks are qcow2 files. Nothing reads SMART, serial, temperature or a by-id
-path, and nothing creates a btrfs, ZFS or XFS layout, mounts by UUID, scrubs,
-balances, trims, spins a disk down, or replaces a disk. The job runner exists
-for package installs.
+The setup wizard lists disks and can keep a folder, use a disk that is already
+mounted, or format one empty disk as ext4 after `ERASE <name>`. Naming a pool
+used to only record a folder. It still does that for a name that is not a pool
+yet. A name that already is a pool is mounted and used.
 
 ## Wizard interface
 
-`storage.Controller` is the surface the wizard should call. `*storage.Service`
-implements it (`var _ Controller = (*Service)(nil)`). Open the service with
-`storage.Open`. The daemon is the only caller that sets `PermitHostDisks`.
+`storage.Controller` is the pool surface. `storage.Volume` is the wizard
+step's surface (`Disks`, `Plan`, `Apply`). `*storage.Service` implements both.
+The daemon opens one service with `storage.Open` and passes it to the wizard
+with `UseVolume`. It is the only caller that sets `PermitHostDisks`.
+
+`Disks` is `Inventory`, mapped into the list the setup page already shows:
+model, size, mount, serial, by-id path, and what the disk is used for. `Plan`
+and `Apply` keep the wizard's three choices.
+
+- **keep** stores shares in a folder and formats nothing.
+- **disk** uses a filesystem that is already mounted, or formats that one disk
+  as ext4 after `ERASE <name>`. The command runs on the controller's executor,
+  which still refuses the operating-system disk. A disk that already belongs
+  to a pool is refused. When the daemon may change the system, fstab records
+  the filesystem by UUID.
+- **pool** mounts a pool the controller already has (`Mount`) and uses that
+  pool's folder as the shares root. A new name is only recorded. Assembling
+  disks stays on `CreatePool`, because that asks for every serial.
+
+`*storage.Linux` still implements `Volume` for tests that read a fake sysfs
+tree. The daemon does not use it.
 
 ```go
 type Controller interface {

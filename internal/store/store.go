@@ -1,9 +1,9 @@
 // Package store persists FELDCORE's own state as a single JSON file.
 //
-// The state is small (one admin account, sessions, agent tokens, share
-// definitions), so a file written atomically on every change is simpler and
-// more inspectable than a database, and keeps the binary free of native
-// dependencies.
+// The state is small (the administrator, Citizen ID accounts, sessions,
+// agent tokens, share definitions), so a file written atomically on every
+// change is simpler and more inspectable than a database, and keeps the
+// binary free of native dependencies.
 package store
 
 import (
@@ -24,10 +24,88 @@ const (
 	SMBPrivate  = "private"  // only the listed share users, read and write
 )
 
-// User is a FELDCORE login account.
+// User is the built-in administrator. Citizen ID accounts live in
+// State.Accounts so this login path stays as it is.
 type User struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"passwordHash"`
+	// TOTP is set once an authenticator is enrolled. The secret is in the
+	// secrets box. The administrator sign-in asks for the code when this is set.
+	// The setup wizard and Citizen ID share this flag.
+	TOTP bool `json:"totp,omitempty"`
+	// SessionVersion invalidates Citizen ID sessions when it changes.
+	// The original session cookie does not consult it.
+	SessionVersion int `json:"sessionVersion,omitempty"`
+	// WebAuthnID is the stable passkey user handle, base64url. Empty until
+	// the administrator registers a passkey.
+	WebAuthnID string `json:"webAuthnId,omitempty"`
+}
+
+// Account is a Citizen ID user other than the administrator.
+// PasswordHash is an argon2id PHC string. The TOTP secret is not here.
+type Account struct {
+	ID             string    `json:"id"`
+	Username       string    `json:"username"`
+	DisplayName    string    `json:"displayName,omitempty"`
+	PasswordHash   string    `json:"passwordHash"`
+	Disabled       bool      `json:"disabled,omitempty"`
+	GroupIDs       []string  `json:"groupIds,omitempty"`
+	TOTP           bool      `json:"totp,omitempty"`
+	SessionVersion int       `json:"sessionVersion,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+// Group is a named set of Citizen ID users. App access refers to these ids.
+type Group struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// AppGrant is who may open one published app. Container matches a web route.
+// Level is public, users, groups or admin. Empty means public.
+type AppGrant struct {
+	Container string   `json:"container"`
+	Level     string   `json:"level"`
+	GroupIDs  []string `json:"groupIds,omitempty"`
+}
+
+// Passkey is a WebAuthn credential. The public key is not a secret.
+// Credential is the JSON form of the library's credential record.
+type Passkey struct {
+	ID         string          `json:"id"`
+	UserID     string          `json:"userId"`
+	Name       string          `json:"name,omitempty"`
+	CreatedAt  time.Time       `json:"createdAt"`
+	Credential json.RawMessage `json:"credential"`
+}
+
+// CitizenSession is a gateway session kept by the session library.
+// TokenHash is a hash of the cookie value. Data is the encoded session.
+type CitizenSession struct {
+	TokenHash string    `json:"tokenHash"`
+	Data      string    `json:"data"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	UserID    string    `json:"userId,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitempty"`
+}
+
+// BrandLink is one footer link on a Citizen ID sign-in page.
+type BrandLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+// SignInBrand is the sign-in page for one published app, or the Citizen ID
+// default when no app supplies its own. Empty fields fall back to the default.
+type SignInBrand struct {
+	Title      string      `json:"title,omitempty"`
+	Welcome    string      `json:"welcome,omitempty"`
+	Logo       string      `json:"logo,omitempty"`
+	Accent     string      `json:"accent,omitempty"`
+	Background string      `json:"background,omitempty"`
+	Footer     string      `json:"footer,omitempty"`
+	Links      []BrandLink `json:"links,omitempty"`
 }
 
 // Session is a logged-in browser session. Only a hash of the token is stored.
@@ -147,6 +225,19 @@ type State struct {
 	VPN    VPN    `json:"vpn,omitempty"`
 	Backup Backup `json:"backup,omitempty"`
 	Notify Notify `json:"notify,omitempty"`
+	// Health holds the marks for the health page. Readings themselves are
+	// not stored here; they live in a ring file beside state.json.
+	Health HealthConfig `json:"health,omitempty"`
+	// Accounts, Groups and AppGrants are Citizen ID. The administrator
+	// stays in Admin. TOTP secrets stay in the secrets box.
+	Accounts        []Account        `json:"accounts,omitempty"`
+	Groups          []Group          `json:"groups,omitempty"`
+	AppGrants       []AppGrant       `json:"appGrants,omitempty"`
+	Passkeys        []Passkey        `json:"passkeys,omitempty"`
+	CitizenSessions []CitizenSession `json:"citizenSessions,omitempty"`
+	// CitizenBrand is the default Citizen ID sign-in page. A published app
+	// can replace it with its own Brand.
+	CitizenBrand SignInBrand `json:"citizenBrand,omitempty"`
 }
 
 // PublicRoute publishes one container through the Cloudflare Tunnel.
@@ -205,13 +296,14 @@ type Publish struct {
 // meaningful when Access is "groups". Citizen ID enforces Access; this
 // record only stores it.
 type PublishedApp struct {
-	Container string   `json:"container"`
-	Subdomain string   `json:"subdomain"`
-	Hostname  string   `json:"hostname"`
-	Port      int      `json:"port"`
-	Access    string   `json:"access"`
-	Groups    []string `json:"groups,omitempty"`
-	Enabled   bool     `json:"enabled"`
+	Container string      `json:"container"`
+	Subdomain string      `json:"subdomain"`
+	Hostname  string      `json:"hostname"`
+	Port      int         `json:"port"`
+	Access    string      `json:"access"`
+	Groups    []string    `json:"groups,omitempty"`
+	Enabled   bool        `json:"enabled"`
+	Brand     SignInBrand `json:"brand,omitempty"`
 }
 
 // ProtectPolicy is the per-request check in front of every published app.
@@ -343,6 +435,74 @@ type Notify struct {
 	OnUpdate        bool          `json:"onUpdate"`
 	NotifiedVersion string        `json:"notifiedVersion,omitempty"`
 	Events          []NotifyEvent `json:"events,omitempty"`
+	// Channels, routes, and quiet hours are the rest of the notification
+	// system. Webhook URLs and tokens are not stored here.
+	Channels      []NotifyChannel `json:"channels,omitempty"`
+	Routes        []NotifyRoute   `json:"routes,omitempty"`
+	Quiet         NotifyQuiet     `json:"quiet,omitempty"`
+	DedupeSeconds int             `json:"dedupeSeconds,omitempty"`
+	RatePerHour   int             `json:"ratePerHour,omitempty"`
+	InAppSet      bool            `json:"inAppSet,omitempty"`
+	InAppEnabled  bool            `json:"inAppEnabled,omitempty"`
+}
+
+// NotifyChannel is one delivery target other than the SMTP settings above.
+// Kind is ntfy, gotify, discord, slack, or webhook. A Discord or Slack
+// address is a secret and is not kept in this struct.
+type NotifyChannel struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Enabled   bool   `json:"enabled"`
+	URL       string `json:"url,omitempty"`
+	Topic     string `json:"topic,omitempty"`
+	HasSecret bool   `json:"hasSecret"`
+}
+
+// NotifyRoute sends matching events to the named channels. Event is an exact
+// name, "*" , or a prefix such as "backup.*".
+type NotifyRoute struct {
+	ID          string   `json:"id"`
+	Event       string   `json:"event"`
+	MinSeverity string   `json:"minSeverity"`
+	Channels    []string `json:"channels"`
+}
+
+// NotifyQuiet is a daily window during which info and warning are held.
+// Critical still sends when AllowCritical is set.
+type NotifyQuiet struct {
+	Enabled       bool   `json:"enabled"`
+	Start         string `json:"start,omitempty"`
+	End           string `json:"end,omitempty"`
+	AllowCritical bool   `json:"allowCritical"`
+}
+
+// HealthConfig is the administrator's health marks. Zero means the default.
+type HealthConfig struct {
+	Thresholds HealthThresholds `json:"thresholds,omitempty"`
+}
+
+// HealthThresholds is the stored form of those marks.
+type HealthThresholds struct {
+	CPUWarn          float64 `json:"cpuWarn,omitempty"`
+	CPUCrit          float64 `json:"cpuCrit,omitempty"`
+	MemWarn          float64 `json:"memWarn,omitempty"`
+	MemCrit          float64 `json:"memCrit,omitempty"`
+	LoadWarn         float64 `json:"loadWarn,omitempty"`
+	LoadCrit         float64 `json:"loadCrit,omitempty"`
+	DiskWarn         float64 `json:"diskWarn,omitempty"`
+	DiskCrit         float64 `json:"diskCrit,omitempty"`
+	CPUTempWarn      float64 `json:"cpuTempWarn,omitempty"`
+	CPUTempCrit      float64 `json:"cpuTempCrit,omitempty"`
+	DiskTempWarn     float64 `json:"diskTempWarn,omitempty"`
+	DiskTempCrit     float64 `json:"diskTempCrit,omitempty"`
+	GPUTempWarn      float64 `json:"gpuTempWarn,omitempty"`
+	GPUTempCrit      float64 `json:"gpuTempCrit,omitempty"`
+	CertWarnDays     int     `json:"certWarnDays,omitempty"`
+	CertCritDays     int     `json:"certCritDays,omitempty"`
+	RestartWarn      int     `json:"restartWarn,omitempty"`
+	RestartCrit      int     `json:"restartCrit,omitempty"`
+	RestartWindowMin int     `json:"restartWindowMin,omitempty"`
 }
 
 // NotifyEvent is one notification FELDCORE tried to send.
@@ -371,6 +531,35 @@ type Wizard struct {
 	Unattended  bool     `json:"unattended"`
 	Firewall    bool     `json:"firewall"`
 	UpdateCheck bool     `json:"updateCheck"`
+
+	// Locale is the LANG value chosen in setup, such as en_US.UTF-8.
+	Locale string `json:"locale,omitempty"`
+	// AdminUser is the name chosen for the administrator, once claimed.
+	AdminUser string `json:"adminUser,omitempty"`
+	// TOTP records that the administrator enrolled an authenticator.
+	TOTP bool `json:"totp,omitempty"`
+
+	// StorageMode is keep, disk, or pool. StorageDevice is the chosen
+	// /dev path when a disk was selected. Nothing here is a passphrase.
+	StorageMode   string `json:"storageMode,omitempty"`
+	StorageDevice string `json:"storageDevice,omitempty"`
+	StorageMount  string `json:"storageMount,omitempty"`
+	StoragePool   string `json:"storagePool,omitempty"`
+
+	// RemoteMode is none, cloudflare, or wireguard. Tokens are not stored.
+	RemoteMode string `json:"remoteMode,omitempty"`
+	// NotifyKind is none, email, or ntfy. NotifyTo is the mailbox or topic,
+	// never a password or token.
+	NotifyKind string `json:"notifyKind,omitempty"`
+	NotifyTo   string `json:"notifyTo,omitempty"`
+	NtfyURL    string `json:"ntfyUrl,omitempty"`
+	// BackupKind is none or proton. The Proton password is not stored.
+	BackupKind string `json:"backupKind,omitempty"`
+
+	// Rerun is a settings replay of the steps that do not erase a disk.
+	Rerun     bool     `json:"rerun,omitempty"`
+	RerunStep string   `json:"rerunStep,omitempty"`
+	Skipped   []string `json:"skipped,omitempty"`
 }
 
 func (s State) clone() State {
@@ -417,6 +606,7 @@ func (s State) clone() State {
 	if s.Wizard != nil {
 		w := *s.Wizard
 		w.ShareNames = append([]string(nil), s.Wizard.ShareNames...)
+		w.Skipped = append([]string(nil), s.Wizard.Skipped...)
 		c.Wizard = &w
 	}
 	if s.ContainerMeta != nil {
@@ -434,8 +624,10 @@ func (s State) clone() State {
 	c.Publish.Apps = make([]PublishedApp, len(s.Publish.Apps))
 	for i, app := range s.Publish.Apps {
 		app.Groups = append([]string(nil), app.Groups...)
+		app.Brand.Links = append([]BrandLink(nil), app.Brand.Links...)
 		c.Publish.Apps[i] = app
 	}
+	c.CitizenBrand.Links = append([]BrandLink(nil), s.CitizenBrand.Links...)
 	c.Publish.Protect.Countries = append([]string(nil), s.Publish.Protect.Countries...)
 	c.VPN.Tunnels = make([]VPNTunnel, len(s.VPN.Tunnels))
 	for i, t := range s.VPN.Tunnels {
@@ -443,6 +635,39 @@ func (s State) clone() State {
 		c.VPN.Tunnels[i] = t
 	}
 	c.Notify.Events = append([]NotifyEvent(nil), s.Notify.Events...)
+	c.Notify.Channels = append([]NotifyChannel(nil), s.Notify.Channels...)
+	if s.Notify.Routes != nil {
+		c.Notify.Routes = make([]NotifyRoute, len(s.Notify.Routes))
+		for i, r := range s.Notify.Routes {
+			r.Channels = append([]string(nil), r.Channels...)
+			c.Notify.Routes[i] = r
+		}
+	}
+	if s.Accounts != nil {
+		c.Accounts = make([]Account, len(s.Accounts))
+		for i, a := range s.Accounts {
+			a.GroupIDs = append([]string(nil), a.GroupIDs...)
+			c.Accounts[i] = a
+		}
+	}
+	c.Groups = append([]Group(nil), s.Groups...)
+	if s.AppGrants != nil {
+		c.AppGrants = make([]AppGrant, len(s.AppGrants))
+		for i, g := range s.AppGrants {
+			g.GroupIDs = append([]string(nil), g.GroupIDs...)
+			c.AppGrants[i] = g
+		}
+	}
+	if s.Passkeys != nil {
+		c.Passkeys = make([]Passkey, len(s.Passkeys))
+		for i, p := range s.Passkeys {
+			if p.Credential != nil {
+				p.Credential = append(json.RawMessage(nil), p.Credential...)
+			}
+			c.Passkeys[i] = p
+		}
+	}
+	c.CitizenSessions = append([]CitizenSession(nil), s.CitizenSessions...)
 	return c
 }
 
