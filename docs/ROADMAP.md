@@ -67,10 +67,12 @@ Follow-ups
 - [ ] Appearance (theme)
 - [ ] Self-update
 
-## M4 — VMs (later)
-- [ ] libvirt/KVM domain list + lifecycle
-- [ ] Create VM wizard (ISO, disk, CPU, RAM, virtio)
-- [ ] Browser console (VNC/SPICE)
+## M4 — VMs
+- [x] libvirt/KVM domain list + lifecycle (start, stop, pause, force stop, autostart)
+- [x] Create / edit form (CPU pinning, RAM, i440fx/Q35, SeaBIOS/OVMF, TPM, disks, ISO, VirtIO ISO, passthrough, networking)
+- [x] Browser console (noVNC over an authenticated WebSocket)
+- [x] Snapshots, optional cloud-init, virtio-fs, VirtIO driver ISO download
+- [ ] One-click OS templates (a later catalogue, not this daemon)
 
 ## FELDCORE OS (the FELDCORE distro)
 

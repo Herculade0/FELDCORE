@@ -250,9 +250,10 @@ func (s *Service) packagePlan(ctx context.Context, req Request) []string {
 	if req.Libvirt {
 		if !s.virt() {
 			lines = append(lines, "libvirt will not be installed: this CPU has no virtualisation.")
-		} else {
-			add(true, "qemu-kvm")
-			add(true, "libvirt-daemon-system")
+		} else if def, ok := lookupService("libvirt"); ok {
+			for _, pkg := range def.pkgs {
+				add(true, pkg)
+			}
 		}
 	}
 	if len(lines) == 0 {
@@ -300,7 +301,9 @@ func (s *Service) runPackages(ctx context.Context, w *store.Wizard, req Request)
 		pkgs = append(pkgs, "docker.io")
 	}
 	if req.Libvirt && s.virt() {
-		pkgs = append(pkgs, "qemu-kvm", "libvirt-daemon-system")
+		if def, ok := lookupService("libvirt"); ok {
+			pkgs = append(pkgs, def.pkgs...)
+		}
 	}
 	s.appendLog("Checking packages…")
 	var need []string

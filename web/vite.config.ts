@@ -19,6 +19,9 @@ export default defineConfig({
     },
   },
   build: {
+    // noVNC uses top-level await. Every browser that can run the console
+    // supports ES2022.
+    target: "es2022",
     outDir: "dist",
     emptyOutDir: true,
   },
