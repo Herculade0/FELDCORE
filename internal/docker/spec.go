@@ -19,9 +19,12 @@ const (
 	gpuGroupsLabel = "feldcore.gpu.groups" // group ids added for GPU access
 	webUILabel     = "feldcore.webui"      // Unraid-style WebUI template
 	iconLabel      = "feldcore.icon"
-	extraLabel     = "feldcore.extra" // extra parameters, so an edit can show them again
-	labelPrefix    = "feldcore."
-	composeLabel   = "com.docker.compose.project"
+	// unraidIconLabel is the label Unraid's own UI reads to draw a container's
+	// icon. FELDCORE writes it too, so an icon set here shows up the same way.
+	unraidIconLabel = "net.unraid.docker.icon"
+	extraLabel      = "feldcore.extra" // extra parameters, so an edit can show them again
+	labelPrefix     = "feldcore."
+	composeLabel    = "com.docker.compose.project"
 )
 
 var (
@@ -42,6 +45,10 @@ func normaliseSpec(s *Spec) error {
 	s.Image = strings.TrimSpace(s.Image)
 	if !imageRe.MatchString(s.Image) {
 		return invalid("Enter an image name, for example %q.", "nginx:latest")
+	}
+	s.Icon = strings.TrimSpace(s.Icon)
+	if s.Icon != "" && httpURL(s.Icon) == "" {
+		return invalid("The icon must be an http or https address.")
 	}
 	s.Network = strings.TrimSpace(s.Network)
 	if s.Network == "" || s.Network == "default" {
@@ -239,6 +246,11 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 		case TypeVariable:
 			env = append(env, c.Key+"="+c.Value)
 		case TypeLabel:
+			// The icon has its own field; keeping it here as well would
+			// show the same URL twice and fight the field on the next edit.
+			if c.Key == unraidIconLabel || c.Key == iconLabel {
+				continue
+			}
 			labels[c.Key] = c.Value
 		case TypeDevice:
 			devices = append(devices, deviceMapping{c.Host, c.Container, c.Mode})
@@ -267,7 +279,8 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 		labels[webUILabel] = strings.TrimSpace(s.WebUI)
 	}
 	if s.Icon != "" {
-		labels[iconLabel] = strings.TrimSpace(s.Icon)
+		labels[unraidIconLabel] = s.Icon
+		labels[iconLabel] = s.Icon
 	}
 	if s.ExtraParams != "" {
 		labels[extraLabel] = strings.TrimSpace(s.ExtraParams)
@@ -316,7 +329,7 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 		RestartPolicy: strOf(mapOf(host["RestartPolicy"])["Name"]),
 		GPU:           gpu,
 		WebUI:         labels[webUILabel],
-		Icon:          labels[iconLabel],
+		Icon:          containerIcon(labels),
 		ExtraParams:   labels[extraLabel],
 		Privileged:    host["Privileged"] == true,
 		Configs:       []Config{},
@@ -383,7 +396,7 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 	imageLabels := strMapOf(imageCfg["Labels"])
 	var keys []string
 	for k, v := range labels {
-		if strings.HasPrefix(k, labelPrefix) {
+		if strings.HasPrefix(k, labelPrefix) || k == unraidIconLabel {
 			continue
 		}
 		if iv, ok := imageLabels[k]; ok && iv == v {

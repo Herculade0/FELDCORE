@@ -221,6 +221,7 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		Managed: rc.Labels[ManagedLabel] == "true",
 		Compose: rc.Labels[composeLabel] != "",
 		GPU:     rc.Labels[GPULabel] == "true",
+		Icon:    containerIcon(rc.Labels),
 		IPs:     []string{},
 	}
 
@@ -420,6 +421,17 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// containerIcon returns the icon URL stored on a container, preferring the
+// label Unraid uses. Anything that is not an http(s) address is dropped so
+// the browser is only ever handed a real image URL.
+func containerIcon(labels map[string]string) string {
+	icon := labels[unraidIconLabel]
+	if icon == "" {
+		icon = labels[iconLabel]
+	}
+	return httpURL(icon)
 }
 
 // webUIPort matches Unraid's [PORT:32400] placeholder.

@@ -259,6 +259,60 @@ func TestResolveWebUI(t *testing.T) {
 	}
 }
 
+func TestIconLabelRoundTrip(t *testing.T) {
+	s := spec()
+	s.Icon = "https://example.com/icon.png"
+	if err := normaliseSpec(&s); err != nil {
+		t.Fatal(err)
+	}
+	cfg, host := map[string]any{}, map[string]any{}
+	applySpec(cfg, host, s, nil)
+	labels := cfg["Labels"].(map[string]string)
+	if labels[unraidIconLabel] != s.Icon || labels[iconLabel] != s.Icon {
+		t.Fatalf("icon labels = %+v", labels)
+	}
+
+	in := inspectFixture(t)
+	in.Config["Labels"].(map[string]any)[unraidIconLabel] = s.Icon
+	got := specFromInspect(in, imageFixture(t), nil)
+	if got.Icon != s.Icon {
+		t.Fatalf("icon from Unraid label = %q", got.Icon)
+	}
+	for _, c := range got.Configs {
+		if c.Key == unraidIconLabel || c.Key == iconLabel {
+			t.Fatalf("icon label shown as a setting: %+v", c)
+		}
+	}
+
+	// A container created before the Unraid label was written still has one.
+	delete(in.Config["Labels"].(map[string]any), unraidIconLabel)
+	in.Config["Labels"].(map[string]any)[iconLabel] = "https://example.com/older.png"
+	if got := specFromInspect(in, imageFixture(t), nil); got.Icon != "https://example.com/older.png" {
+		t.Fatalf("fallback icon = %q", got.Icon)
+	}
+
+	s.Icon = ""
+	applySpec(cfg, host, s, nil)
+	labels = cfg["Labels"].(map[string]string)
+	if _, ok := labels[unraidIconLabel]; ok {
+		t.Fatal("clearing the icon left the label in place")
+	}
+
+	bad := spec()
+	bad.Icon = "javascript:alert(1)"
+	if err := normaliseSpec(&bad); err == nil {
+		t.Fatal("a non-http icon was accepted")
+	}
+
+	rc := apiContainer{Labels: map[string]string{
+		unraidIconLabel: "https://example.com/a.png",
+		iconLabel:       "https://example.com/b.png",
+	}}
+	if icon := toContainer(rc, "").Icon; icon != "https://example.com/a.png" {
+		t.Fatalf("list icon = %q", icon)
+	}
+}
+
 func TestApplyExtraFromTemplate(t *testing.T) {
 	tmpl, err := ParseTemplateXML([]byte(plexXML))
 	if err != nil {
