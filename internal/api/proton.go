@@ -202,9 +202,11 @@ func (s *Server) handleNotificationsSave(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.mail.Save(r.Context(), body); err != nil {
+		s.auditFile(r, "notifications.mail", "", "error")
 		s.fail(w, r, err)
 		return
 	}
+	s.auditFile(r, "notifications.mail", "", "ok")
 	writeJSON(w, http.StatusOK, s.mail.View(r.Context()))
 }
 
@@ -214,9 +216,11 @@ func (s *Server) handleNotificationsTest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.mail.Test(r.Context()); err != nil {
+		s.auditFile(r, "notifications.test", "email", "error")
 		s.fail(w, r, err)
 		return
 	}
+	s.auditFile(r, "notifications.test", "email", "ok")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Test message sent."})
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/notify"
@@ -156,7 +157,6 @@ func main() {
 		Resolve: dockerMgr, Trust: dockerMgr.TrustedPeer,
 		DataDir: cfg.DataDir, GatewayPort: pubPort, Log: log, Audit: authSvc,
 	}
-	pubSvc.SetAuth(publish.AllowAll{})
 	pubSvc.OpenGeo()
 	snapSvc := snapshots.Open(st, dockerMgr, cfg.DataDir, func() string {
 		return filepath.Join(cfg.SharesRoot, "system", "snapshots")
@@ -165,6 +165,7 @@ func main() {
 	go vpnSvc.Restore(ctx)
 	go vpnSvc.KeepForwarded(ctx)
 	go backups.Loop(ctx)
+	healthSvc, alerts := wireMonitor(ctx, cfg, st, box, log, mail, dockerMgr, remoteSvc, vpnSvc)
 	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
 		cs, err := dockerMgr.Containers(ctx)
 		if err != nil {
@@ -194,10 +195,14 @@ func main() {
 		}
 	}()
 
+	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: authSvc, Log: log, Trust: dockerMgr.TrustedPeer})
+	authSvc.SetSecondFactor(cid.AdminFactor)
+	pubSvc.SetAuth(publish.CitizenAuth(cid))
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
 		Auth:    authSvc,
+		Citizen: cid,
 		Shares:  shareMgr,
 		Docker:  dockerMgr,
 		Apps: apps.New(apps.Deps{
@@ -234,6 +239,8 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		Health:     healthSvc,
+		Alerts:     alerts,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

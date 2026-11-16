@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/names"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/remote"
@@ -67,6 +68,7 @@ type SetInput struct {
 	Access    string
 	Groups    []string
 	Enabled   bool
+	Brand     store.SignInBrand
 }
 
 // SettingsInput is the protection form. An empty licence key keeps the
@@ -99,18 +101,19 @@ type Suggestion struct {
 
 // Form is the Publish section of a container.
 type Form struct {
-	Container  string     `json:"container"`
-	Domain     string     `json:"domain"`
-	Suggestion Suggestion `json:"suggestion"`
-	Ports      []int      `json:"ports"`
-	Enabled    bool       `json:"enabled"`
-	Subdomain  string     `json:"subdomain"`
-	Hostname   string     `json:"hostname"`
-	Port       int        `json:"port"`
-	Access     string     `json:"access"`
-	Groups     []string   `json:"groups"`
-	TunnelMode string     `json:"tunnelMode"`
-	From       string     `json:"from"`
+	Container  string            `json:"container"`
+	Domain     string            `json:"domain"`
+	Suggestion Suggestion        `json:"suggestion"`
+	Ports      []int             `json:"ports"`
+	Enabled    bool              `json:"enabled"`
+	Subdomain  string            `json:"subdomain"`
+	Hostname   string            `json:"hostname"`
+	Port       int               `json:"port"`
+	Access     string            `json:"access"`
+	Groups     []string          `json:"groups"`
+	TunnelMode string            `json:"tunnelMode"`
+	From       string            `json:"from"`
+	Brand      store.SignInBrand `json:"brand"`
 }
 
 // Item is one row of the Published apps overview.
@@ -307,6 +310,7 @@ func (s *Service) proxyTo(w http.ResponseWriter, r *http.Request, app App) {
 		// Keep the public name. Apps generate links from Host, and the
 		// dial address is an internal IP the browser should never see.
 		req.Host = r.Host
+		stripUpstream(req)
 		req.Header.Set("X-Forwarded-Host", r.Host)
 		if proto := r.Header.Get("X-Forwarded-Proto"); proto == "http" || proto == "https" {
 			req.Header.Set("X-Forwarded-Proto", proto)
@@ -469,9 +473,16 @@ func (s *Service) Form(ctx context.Context, container, webUI string, ports []int
 		if out.Groups == nil {
 			out.Groups = []string{}
 		}
+		out.Brand = app.Brand
+		if out.Brand.Links == nil {
+			out.Brand.Links = []store.BrandLink{}
+		}
 	}
 	if out.Ports == nil {
 		out.Ports = []int{}
+	}
+	if out.Brand.Links == nil {
+		out.Brand.Links = []store.BrandLink{}
 	}
 	return out
 }
@@ -668,6 +679,10 @@ func (s *Service) prepare(in SetInput) (store.PublishedApp, error) {
 	if container == "" {
 		return store.PublishedApp{}, input("Choose a container.")
 	}
+	brand, err := citizenid.CleanBrand(in.Brand)
+	if err != nil {
+		return store.PublishedApp{}, err
+	}
 	if !in.Enabled {
 		prev, _ := s.find(container)
 		prev.Container = container
@@ -678,6 +693,7 @@ func (s *Service) prepare(in SetInput) (store.PublishedApp, error) {
 				prev.Access, prev.Groups = access, groups
 			}
 		}
+		prev.Brand = brand
 		return prev, nil
 	}
 	sub, host, port, access, groups, err := s.fields(in)
@@ -689,7 +705,7 @@ func (s *Service) prepare(in SetInput) (store.PublishedApp, error) {
 	}
 	return store.PublishedApp{
 		Container: container, Subdomain: sub, Hostname: host, Port: port,
-		Access: access, Groups: groups, Enabled: true,
+		Access: access, Groups: groups, Enabled: true, Brand: brand,
 	}, nil
 }
 

@@ -406,7 +406,7 @@ func (s *Service) apply(ctx context.Context, w *store.Wizard, req Request) ([]st
 		}
 		if admin := s.st.Snapshot().Admin; admin != nil {
 			w.AdminUser = admin.Username
-			w.TOTP = admin.TOTPEnabled
+			w.TOTP = admin.TOTP
 		}
 		return recovery, grant, nil
 	case "signin":
@@ -415,7 +415,7 @@ func (s *Service) apply(ctx context.Context, w *store.Wizard, req Request) ([]st
 			return nil, nil, err
 		}
 		if admin := s.st.Snapshot().Admin; admin != nil {
-			w.TOTP = admin.TOTPEnabled
+			w.TOTP = admin.TOTP
 		}
 		return recovery, nil, nil
 	case "storage":

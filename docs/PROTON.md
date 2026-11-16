@@ -78,8 +78,9 @@ instead. One of those two has to be available.
 - GitHub has a newer FELDCORE release, and update checks are turned on in
   Settings
 
-There was no notification system before this; these two events are the ones
-it knows.
+Those two events, and later ones such as `backup.failed`, are published on
+the in-process bus described in [EVENTS.md](EVENTS.md). Proton delivery is
+unchanged: the same SMTP, Bridge, and SMTP-token paths send the mail.
 
 Three ways to send:
 

@@ -20,8 +20,10 @@ import (
 )
 
 const (
-	secretTOTP     = "admin-totp"
-	secretPending  = "admin-totp-pending"
+	// secretTOTP and secretPending use the same names as Citizen ID so an
+	// authenticator enrolled in the setup wizard is the one Citizen ID checks.
+	secretTOTP     = "totp-admin"
+	secretPending  = "totp-p-admin"
 	secretRecovery = "admin-totp-recovery"
 )
 
@@ -38,7 +40,7 @@ func (a *Service) UseSecrets(b SecretBox) { a.secrets = b }
 // TOTPEnabled reports whether sign-in must include an authenticator code.
 func (a *Service) TOTPEnabled() bool {
 	admin := a.st.Snapshot().Admin
-	return admin != nil && admin.TOTPEnabled
+	return admin != nil && admin.TOTP
 }
 
 // BeginEnrolment stores a new pending authenticator secret and returns the
@@ -114,7 +116,7 @@ func (a *Service) EnableTOTP() error {
 		if s.Admin == nil {
 			return ErrSetupDone
 		}
-		s.Admin.TOTPEnabled = true
+		s.Admin.TOTP = true
 		return nil
 	})
 }
@@ -149,7 +151,7 @@ func (a *Service) DisableTOTP(password, code string) error {
 		if s.Admin == nil {
 			return ErrSetupDone
 		}
-		s.Admin.TOTPEnabled = false
+		s.Admin.TOTP = false
 		return nil
 	}); err != nil {
 		return err
@@ -181,6 +183,20 @@ func (a *Service) codeMatches(code string) bool {
 	}
 	if totpMatch(secret, code, a.now()) {
 		return true
+	}
+	return a.consumeRecovery(code)
+}
+
+// RedeemRecovery accepts one setup-wizard recovery code for the administrator
+// and removes it. Citizen ID does not store these codes. A code that is not
+// one of them leaves the set unchanged.
+func (a *Service) RedeemRecovery(username, code string) bool {
+	admin := a.st.Snapshot().Admin
+	if admin == nil || !admin.TOTP {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(admin.Username), []byte(strings.TrimSpace(username))) != 1 {
+		return false
 	}
 	return a.consumeRecovery(code)
 }

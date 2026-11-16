@@ -41,6 +41,12 @@ var (
 	ErrRateLimited        = errors.New("too many failed attempts; wait a few minutes and try again")
 )
 
+// SecondFactor runs after the administrator password matches. Citizen ID
+// installs this so the authenticator it shares with the setup wizard is
+// checked here. A nil hook falls back to that same authenticator when the
+// wizard turned it on, and stays password-only until then.
+type SecondFactor func(username, code string) error
+
 // InputError is a validation failure whose message is safe to show the user.
 type InputError struct{ Msg string }
 
@@ -55,6 +61,7 @@ type Service struct {
 	secrets SecretBox
 
 	dummyOnce sync.Once
+	factor    SecondFactor
 	dummy     []byte
 }
 
@@ -99,15 +106,26 @@ func (a *Service) Setup(username, password string) error {
 	})
 }
 
+// SetSecondFactor installs the authenticator check used by Login.
+// The hook is nil until Citizen ID is wired in.
+func (a *Service) SetSecondFactor(fn SecondFactor) {
+	a.factor = fn
+}
+
 // Login checks credentials and, on success, returns a new session token.
 // clientKey identifies the caller for rate limiting (normally its IP).
 func (a *Service) Login(clientKey, username, password string) (token string, expires time.Time, err error) {
-	return a.LoginWithCode(clientKey, username, password, "")
+	return a.LoginCode(clientKey, username, password, "")
 }
 
-// LoginWithCode is Login plus an authenticator code. When two-factor is on,
-// an empty code returns ErrTOTPRequired and does not create a session.
+// LoginWithCode is the setup wizard's name for LoginCode.
 func (a *Service) LoginWithCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
+	return a.LoginCode(clientKey, username, password, code)
+}
+
+// LoginCode is Login with the authenticator code. An empty code is rejected
+// once an authenticator is enrolled.
+func (a *Service) LoginCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
 	now := a.now()
 	if a.lim.blocked(clientKey, now) {
 		return "", time.Time{}, ErrRateLimited
@@ -122,14 +140,25 @@ func (a *Service) LoginWithCode(clientKey, username, password, code string) (tok
 	if admin != nil && subtle.ConstantTimeCompare([]byte(admin.Username), []byte(username)) == 1 {
 		hash = []byte(admin.PasswordHash)
 		userOK = true
-		totpOn = admin.TOTPEnabled
+		totpOn = admin.TOTP
 	}
 	passOK := bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 	if !userOK || !passOK {
 		a.lim.fail(clientKey, now)
 		return "", time.Time{}, ErrInvalidCredentials
 	}
-	if totpOn {
+	if a.factor != nil {
+		if ferr := a.factor(username, code); ferr != nil {
+			if a.RedeemRecovery(username, code) {
+				a.lim.reset(clientKey)
+				return a.issue(username)
+			}
+			if !factorPending(ferr) {
+				a.lim.fail(clientKey, now)
+			}
+			return "", time.Time{}, ferr
+		}
+	} else if totpOn {
 		if strings.TrimSpace(code) == "" {
 			return "", time.Time{}, ErrTOTPRequired
 		}
@@ -140,6 +169,21 @@ func (a *Service) LoginWithCode(clientKey, username, password, code string) (tok
 	}
 	a.lim.reset(clientKey)
 	return a.issue(username)
+}
+
+// IssueSession starts an administrator session after Citizen ID has already
+// checked the password and the authenticator. It does not check them again.
+func (a *Service) IssueSession(username string) (string, time.Time, error) {
+	admin := a.st.Snapshot().Admin
+	if admin == nil || subtle.ConstantTimeCompare([]byte(admin.Username), []byte(username)) != 1 {
+		return "", time.Time{}, ErrInvalidCredentials
+	}
+	return a.issue(username)
+}
+
+func factorPending(err error) bool {
+	var p interface{ SecondFactorPending() bool }
+	return errors.As(err, &p) && p.SecondFactorPending()
 }
 
 // issue creates and stores a session for username.
@@ -275,6 +319,9 @@ func (a *Service) ChangePassword(current, next string) error {
 			return ErrSetupDone
 		}
 		s.Admin.PasswordHash = string(hash)
+		// Citizen ID sessions carry this number. The original session cookie
+		// does not, so this sign-in keeps working exactly as before.
+		s.Admin.SessionVersion++
 		return nil
 	})
 }

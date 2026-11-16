@@ -120,7 +120,7 @@ func TestWizardAdminSkipTOTPAndRerunRefusesFormat(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "setup-code")); !os.IsNotExist(err) {
 		t.Fatal("setup code was not consumed")
 	}
-	if s.st.Snapshot().Admin == nil || s.st.Snapshot().Admin.TOTPEnabled {
+	if s.st.Snapshot().Admin == nil || s.st.Snapshot().Admin.TOTP {
 		t.Fatal("account or totp flag")
 	}
 	// Disks are listed only after the account exists.

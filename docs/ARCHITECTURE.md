@@ -24,6 +24,12 @@ The whole product ships as one executable with the web UI embedded via
 - **`internal/config`** — flags/env resolution.
 - **`internal/system`** — live metrics via gopsutil; keeps minimal state
   (previous network counters) to derive per-second rates.
+- **`internal/events`** — in-process bus. Packages publish events such as
+  `backup.failed`; the notification dispatcher is the subscriber. See
+  [EVENTS.md](EVENTS.md).
+- **`internal/health`** — SMART, temperatures, space, load, containers, VMs,
+  failed systemd units, certificates, and tunnels. A JSON ring file keeps a
+  week of graph points. Thresholds live in state.json.
 - **`internal/api`** — chi router. `/api/v1/*` JSON endpoints plus a WebSocket
   stream, and a read-only MCP server at `/mcp`. All other paths serve the
   embedded SPA with an index.html fallback.
@@ -33,6 +39,8 @@ The whole product ships as one executable with the web UI embedded via
 - **`internal/apps`** — the App Store. It caches the public Community
   Applications feed (the same JSON Unraid's CA plugin downloads, which already
   contains each template) and turns a chosen template into a container spec.
+- **`internal/citizenid`** — Citizen ID. Users, groups, sign-in, and the
+  auth gateway for published apps. See [CITIZEN-ID.md](CITIZEN-ID.md).
 
 ### Web UI (React + TypeScript + Vite + Tailwind)
 A single-page app. Live data arrives over the `/api/v1/system/stream`
@@ -80,16 +88,19 @@ behind authentication:
   is closed and the setup wizard's host and network steps are gated by the
   one-time setup code; afterwards `/auth/setup` is refused. A fresh install
   should be set up promptly, since whoever has the setup code can claim it.
-- **Passwords** are hashed with bcrypt. The setup wizard asks for a strong
-  password. An optional authenticator (TOTP) can be turned on for the
-  administrator sign-in; the secret and recovery-code hashes live in the
-  secrets box, not in the state file. Failed sign-ins are rate limited per
-  client address.
+- **The administrator password** is hashed with bcrypt. The setup wizard asks
+  for a strong password. An optional authenticator (TOTP) can be turned on for
+  the administrator sign-in; the secret and recovery-code hashes live in the
+  secrets box, not in the state file. Citizen ID checks that same secret.
+  Failed sign-ins are rate limited per client address.
+- **Citizen ID** (`internal/citizenid`) adds users, groups, and per-app access
+  for published hostnames. New passwords are argon2id. Sessions use a separate
+  parent-domain cookie. See [CITIZEN-ID.md](CITIZEN-ID.md).
 - **Sessions** are random 256-bit tokens. Only a SHA-256 hash is stored, so a
   leaked state file does not yield usable sessions. The cookie is HttpOnly and
   SameSite=Strict, and Secure when served over TLS.
 - **Agent tokens** are a second credential, for the owner's own agents. Each
-  is named, scoped (`read`, `containers`, `vms`, `admin`), and optional
+  is named, scoped (`read`, `containers`, `vms`, `files:read`, `files:write`, `admin`), and optional
   expiry. The secret is shown once. Only a SHA-256 hash is stored. Callers
   send `Authorization: Bearer`. A session cookie is still the administrator
   and is not limited by scopes. A token is. Admin does not include a shell:
@@ -99,8 +110,10 @@ behind authentication:
   bearer token with the `read` scope (admin includes read). A session cookie
   is not accepted. Phase 1 tools are read-only. There is no shell or exec tool.
 - **Audit**: every call authenticated with a token is recorded (token name,
-  action, target, time, result). The newest 1,000 entries are kept, and
-  anything older than 90 days is dropped.
+  action, target, time, result), and so are Citizen ID sign-ins, failures,
+  and access denials. Failures for an unknown username are aggregated so they
+  cannot push security events out of the newest 1,000 entries. Anything older
+  than 90 days is dropped.
 - **Cross-site requests**: state-changing requests whose Origin does not match
   the Host are refused, and the WebSocket handshake enforces the same.
   Non-browser clients send no Origin and are unaffected.
@@ -113,6 +126,7 @@ a request cannot inject extra Samba or exports directives. Commands are run
 directly with argument lists, never through a shell, and passwords are passed
 on stdin rather than the command line.
 
-Not yet done: TLS termination (run behind a reverse proxy, or on a trusted
-LAN, for now), multiple users and roles, and an audit log of the changes
-FELDCORE itself makes to the system. Agent-token calls are already logged.
+The management UI is still served as plain HTTP on the LAN, or behind a
+reverse proxy the operator terminates. An audit log of the changes FELDCORE
+itself makes to the system is still to come. Agent-token calls and Citizen ID
+sign-ins are logged. Users, groups, and per-app access are Citizen ID.

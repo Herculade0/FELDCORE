@@ -384,6 +384,21 @@ func (s *Service) ensureTunnel(ctx context.Context) error {
 	})
 }
 
+// appOrigin is the publish listener every tunnel hostname dials. A
+// containerised connector uses host.docker.internal. A cloudflared binary
+// on this machine uses loopback. The port defaults to the publish listener.
+func (s *Service) appOrigin(ctx context.Context) string {
+	port := s.GatewayPort
+	if port <= 0 {
+		port = 8791
+	}
+	dial := "127.0.0.1"
+	if s.Engine != nil && s.Engine.Ready(ctx) {
+		dial = "host.docker.internal"
+	}
+	return fmt.Sprintf("http://%s:%d", dial, port)
+}
+
 func (s *Service) publish(ctx context.Context, apiToken string) error {
 	cfg := s.Store.Snapshot().Remote
 	if cfg.AccountID == "" || cfg.TunnelID == "" {
@@ -414,31 +429,22 @@ func (s *Service) publish(ctx context.Context, apiToken string) error {
 			return input(r.Hostname + " is already used by another container.")
 		}
 		seenHost[r.Hostname] = true
-		origin := fmt.Sprintf("http://%s:%d", r.Container, r.Port)
+		// The connector still joins the app to the proxy network so the
+		// publish listener can reach it. The hostname itself always dials
+		// that listener, never the container, so a gated app cannot skip
+		// Citizen ID from the internet.
 		if s.Engine != nil {
 			mode, err := s.Engine.NetworkMode(ctx, r.Container)
 			switch {
-			case err == nil && mode == "host":
-				origin = fmt.Sprintf("http://host.docker.internal:%d", r.Port)
 			case err == nil && mode == "none":
 				return input(r.Container + " has no network, so a public name cannot reach it.")
-			case err == nil:
+			case err == nil && mode != "host":
 				if err := s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, r.Container); err != nil && s.Log != nil {
 					s.Log.Warn("could not attach container to the tunnel network", "container", r.Container, "err", err)
 				}
 			}
 		}
-		// A published app is checked by feldcored before it reaches the
-		// container. The containerised connector uses host.docker.internal;
-		// a cloudflared binary on this machine uses loopback.
-		if r.Gateway && s.GatewayPort > 0 {
-			dial := "127.0.0.1"
-			if s.Engine != nil && s.Engine.Ready(ctx) {
-				dial = "host.docker.internal"
-			}
-			origin = fmt.Sprintf("http://%s:%d", dial, s.GatewayPort)
-		}
-		rules = append(rules, cfapi.Rule{Hostname: r.Hostname, Service: origin})
+		rules = append(rules, cfapi.Rule{Hostname: r.Hostname, Service: s.appOrigin(ctx)})
 		want = append(want, pub{host: r.Hostname, container: r.Container, port: r.Port, record: r.RecordID})
 	}
 	rules = append(rules, cfapi.Rule{Service: "http_status:404"})
