@@ -197,7 +197,8 @@ func isReadPath(p string) bool {
 	case "/system/info", "/system/stats", "/system/history", "/system/stream",
 		"/shares", "/fs/suggest", "/apps",
 		"/docker/status", "/docker/options", "/docker/containers", "/docker/images",
-		"/vms":
+		"/vms",
+		"/remote", "/proxy", "/proxy/ca", "/snapshots":
 		return true
 	}
 	if strings.HasPrefix(p, "/vms/") {
@@ -207,7 +208,8 @@ func isReadPath(p string) bool {
 		return true
 	}
 	if rest, ok := strings.CutPrefix(p, "/docker/containers/"); ok && strings.Contains(rest, "/") {
-		return strings.HasSuffix(rest, "/spec") || strings.HasSuffix(rest, "/logs")
+		return strings.HasSuffix(rest, "/spec") || strings.HasSuffix(rest, "/logs") ||
+			strings.HasSuffix(rest, "/address") || strings.HasSuffix(rest, "/snapshots")
 	}
 	return false
 }
@@ -226,6 +228,12 @@ func isContainerWrite(method, p string) bool {
 	switch {
 	case strings.HasSuffix(rest, "/start"), strings.HasSuffix(rest, "/stop"), strings.HasSuffix(rest, "/restart"):
 		return method == http.MethodPost
+	case strings.HasSuffix(rest, "/snapshots"):
+		return method == http.MethodPost
+	case strings.Contains(rest, "/snapshots/"):
+		// Restore and delete a snapshot of this container. Publishing a
+		// hostname (PUT .../address) stays an admin action.
+		return method == http.MethodPost || method == http.MethodDelete
 	default:
 		return false
 	}

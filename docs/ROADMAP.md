@@ -60,6 +60,15 @@ Follow-ups
 - [ ] Choose a specific GPU when a server has more than one
 - [ ] Warn when a chosen host port is already allocated, before applying
 
+### GPU selection
+Specified in [GPU-SELECTION.md](GPU-SELECTION.md). Containers first. A GPU
+assigned to a VM is locked to that VM (boot-time stub on the VM manager
+branch), and both sides use the same PCI address.
+- [ ] First slice: live inventory, a read-only Settings list (model, vendor,
+      driver, VRAM, assigned to), a container picker that starts with nothing
+      selected, and a Settings button to install the NVIDIA Container Toolkit
+- [ ] Dashboard usage, ARM boards, and the NVIDIA driver as a sysext on FELDCORE OS
+
 ## M2c — Agent access, phase 1 ✅
 The owner's own agents (Claude Code, a Grok assistant, or any MCP client) can read the server without a browser session.
 - [x] Named API tokens with scopes `read`, `containers`, `vms` and `admin`, optional expiry, last-used time, and revoke
@@ -78,6 +87,15 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 - [ ] The queue records who asked, which token, the exact action, and the decision in the audit log
 - [ ] A token still cannot open a shell on its own. If a shell is ever offered to an agent, that request waits for approval like the other destructive actions
 
+## M2e — Internal Affairs
+A locked cabinet of Markdown case files. Agents file a report when they change something, hit an error, or write up what they found. Design only: [INTERNAL-AFFAIRS.md](INTERNAL-AFFAIRS.md).
+- [ ] Locked share of Obsidian-compatible Markdown under the shares root. Agents append; they cannot rewrite or delete
+- [ ] Token scopes `ia:file` and `ia:read`, not included in `admin`
+- [ ] MCP and REST: file a report, append, search, get, list recent. Scrub secrets before saving. Also file an incident stub when a token call errors
+- [ ] Internal Affairs page: timeline, filters, report viewer, and a note the administrator can file
+- [ ] Keep every report until Proton Drive backups exist. Pruning after that requires a backed-up copy; the age window is not chosen yet
+- Later: SMB reading room, withdrawing a report, git history, Proton Drive backup (the cabinet is in the first backup set)
+
 ## M3 — Settings
 - [ ] Users & authentication management
 - [ ] Network overview / hostname
@@ -91,6 +109,14 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 - [x] Browser console (noVNC over an authenticated WebSocket)
 - [x] Snapshots, optional cloud-init, virtio-fs, VirtIO driver ISO download
 - [ ] One-click OS templates (a later catalogue, not this daemon)
+
+## FELDCORE-STORE
+
+A private catalogue merged on top of Community Apps: game profiles, VM templates, app bundles, SDR apps, and fixed versions of broken templates. It builds on the App Store (M2b). Design and scope: [FELDCORE-STORE.md](FELDCORE-STORE.md).
+
+- [ ] MVP — one sign-in for the private `Herculade0/feldcore-store` feed, Community Apps and FELDCORE Store toggles, manual and automatic refresh, merge and override, FELDCORE badge
+- [ ] Games, bundles, and SDR device claims
+- [ ] One-click VMs from store templates, after M4
 
 ## FELDCORE OS (the FELDCORE distro)
 

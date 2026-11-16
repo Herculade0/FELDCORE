@@ -125,6 +125,66 @@ type State struct {
 	Wizard *Wizard `json:"wizard,omitempty"`
 	// Prefs are choices made on the Settings page.
 	Prefs Prefs `json:"prefs,omitempty"`
+	// Remote is Cloudflare Tunnel. Tokens are not stored here.
+	Remote RemoteConfig `json:"remote,omitempty"`
+	// Web is the built-in name and HTTPS proxy.
+	Web WebConfig `json:"web,omitempty"`
+	// Snapshots is retention and where container copies are kept.
+	Snapshots SnapshotConfig `json:"snapshots,omitempty"`
+}
+
+// PublicRoute publishes one container through the Cloudflare Tunnel.
+// Nothing is published until Enabled is set.
+type PublicRoute struct {
+	Container string `json:"container"`
+	Hostname  string `json:"hostname"`
+	Port      int    `json:"port"`
+	Enabled   bool   `json:"enabled"`
+	RecordID  string `json:"recordId,omitempty"`
+}
+
+// RemoteConfig is the tunnel. Mode is "off", "token" or "api".
+// Off is the only default: no connector is started and no hostname is published.
+type RemoteConfig struct {
+	Mode          string        `json:"mode,omitempty"`
+	TunnelID      string        `json:"tunnelId,omitempty"`
+	TunnelName    string        `json:"tunnelName,omitempty"`
+	AccountID     string        `json:"accountId,omitempty"`
+	ExposeAdmin   bool          `json:"exposeAdmin,omitempty"`
+	AdminHostname string        `json:"adminHostname,omitempty"`
+	AdminRecordID string        `json:"adminRecordId,omitempty"`
+	Routes        []PublicRoute `json:"routes,omitempty"`
+}
+
+// WebRoute is a friendly name for a container, served by the built-in proxy.
+// TLS is "off" (plain HTTP), "internal" (the FELDCORE local CA) or "acme"
+// (Let's Encrypt via Cloudflare DNS-01).
+type WebRoute struct {
+	Container string `json:"container"`
+	Hostname  string `json:"hostname"`
+	Port      int    `json:"port"`
+	TLS       string `json:"tls"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// WebConfig is the reverse proxy. Disabled, with no routes, is the default.
+type WebConfig struct {
+	Enabled    bool       `json:"enabled,omitempty"`
+	Email      string     `json:"email,omitempty"`
+	Domain     string     `json:"domain,omitempty"`
+	UIHostname string     `json:"uiHostname,omitempty"`
+	UITLS      string     `json:"uiTls,omitempty"`
+	UIEnabled  bool       `json:"uiEnabled,omitempty"`
+	Routes     []WebRoute `json:"routes,omitempty"`
+}
+
+// SnapshotConfig is how many copies to keep. Zero values mean "not chosen
+// yet"; the service then uses its defaults (5 copies, 30 days).
+type SnapshotConfig struct {
+	Configured bool   `json:"configured,omitempty"`
+	KeepN      int    `json:"keepN"`
+	KeepDays   int    `json:"keepDays"`
+	Dir        string `json:"dir,omitempty"`
 }
 
 // Prefs holds Settings choices that are not part of a share or a container.
@@ -207,6 +267,8 @@ func (s State) clone() State {
 			c.ContainerMeta[name] = cp
 		}
 	}
+	c.Remote.Routes = append([]PublicRoute(nil), s.Remote.Routes...)
+	c.Web.Routes = append([]WebRoute(nil), s.Web.Routes...)
 	return c
 }
 
