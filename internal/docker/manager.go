@@ -222,6 +222,7 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		Managed: rc.Labels[ManagedLabel] == "true",
 		Compose: rc.Labels[composeLabel] != "",
 		GPU:     rc.Labels[GPULabel] == "true",
+		Role:    rc.Labels[RoleLabel],
 		Icon:    containerIcon(rc.Labels),
 		IPs:     []string{},
 	}

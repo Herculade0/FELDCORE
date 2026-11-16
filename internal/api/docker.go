@@ -19,6 +19,19 @@ func (s *Server) handleDockerContainers(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, r, err)
 		return
 	}
+	for i := range cs {
+		if s.proxy != nil {
+			if u := s.proxy.URLFor(cs[i].Name); u != "" {
+				cs[i].Hostname = u
+				cs[i].WebURL = u
+			}
+		}
+		if s.remote != nil {
+			if host := s.remote.PublicHost(cs[i].Name); host != "" {
+				cs[i].PublicHost = host
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"containers": cs})
 }
 
@@ -55,10 +68,18 @@ func (s *Server) handleDockerSpec(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDockerUpdate applies edited settings by recreating the container.
+// A snapshot is taken first so the previous image, settings and appdata can
+// be put back from the container's Snapshots panel.
 func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 	var spec docker.Spec
 	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
+	}
+	if s.snaps != nil {
+		if err := s.snaps.BeforeChange(r.Context(), chi.URLParam(r, "id"), "Automatic snapshot before the container was changed"); err != nil {
+			s.fail(w, r, err)
+			return
+		}
 	}
 	id, err := s.docker.Update(r.Context(), chi.URLParam(r, "id"), spec)
 	if err != nil {
