@@ -86,6 +86,30 @@ type State struct {
 	// Appdata is the host folder Unraid's /mnt/user/appdata paths are rewritten
 	// to. Empty means "a share named appdata, or <shares root>/appdata".
 	Appdata string `json:"appdata,omitempty"`
+	// SharesRoot is the wizard's chosen shares directory. Empty means the
+	// daemon flag/default is still in force.
+	SharesRoot string `json:"sharesRoot,omitempty"`
+	// Wizard is the first-start setup. Nil means this install predates the
+	// wizard (or it has not been claimed yet) and should not be forced through it.
+	Wizard *Wizard `json:"wizard,omitempty"`
+}
+
+// Wizard is how far first-start setup has got, and the choices made so far.
+type Wizard struct {
+	Done        bool     `json:"done"`
+	Step        string   `json:"step"`
+	Hostname    string   `json:"hostname,omitempty"`
+	Timezone    string   `json:"timezone,omitempty"`
+	NTP         string   `json:"ntp,omitempty"`
+	NetMode     string   `json:"netMode,omitempty"`
+	Samba       bool     `json:"samba"`
+	NFS         bool     `json:"nfs"`
+	Docker      bool     `json:"docker"`
+	Libvirt     bool     `json:"libvirt"`
+	ShareNames  []string `json:"shareNames,omitempty"`
+	Unattended  bool     `json:"unattended"`
+	Firewall    bool     `json:"firewall"`
+	UpdateCheck bool     `json:"updateCheck"`
 }
 
 func (s State) clone() State {
@@ -101,6 +125,11 @@ func (s State) clone() State {
 		c.Shares[i] = sh
 	}
 	c.ShareUsers = append([]string(nil), s.ShareUsers...)
+	if s.Wizard != nil {
+		w := *s.Wizard
+		w.ShareNames = append([]string(nil), s.Wizard.ShareNames...)
+		c.Wizard = &w
+	}
 	if s.ContainerMeta != nil {
 		c.ContainerMeta = make(map[string]map[string]ConfigMeta, len(s.ContainerMeta))
 		for name, items := range s.ContainerMeta {

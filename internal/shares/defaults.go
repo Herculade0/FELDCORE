@@ -26,6 +26,34 @@ var defaultShares = []defaultShare{
 	{"isos", "ISO images"},
 }
 
+// EnsureShares creates the named default shares (appdata, system, domains,
+// isos). Unknown names are ignored. The wizard uses this so the user can
+// untick some of them. Nil names is not used; pass defaultShares via
+// EnsureDefaults for the full set.
+func (m *Manager) EnsureShares(ctx context.Context, names []string) {
+	m.ensure(ctx, filterDefaults(names))
+}
+
+func filterDefaults(names []string) []defaultShare {
+	byName := map[string]defaultShare{}
+	for _, d := range defaultShares {
+		byName[d.Name] = d
+	}
+	var out []defaultShare
+	seen := map[string]bool{}
+	for _, n := range names {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if seen[n] {
+			continue
+		}
+		if d, ok := byName[n]; ok {
+			out = append(out, d)
+			seen[n] = true
+		}
+	}
+	return out
+}
+
 // EnsureDefaults creates Unraid's default shares when they are missing.
 //
 // It is idempotent. A share FELDCORE already has is left completely alone,
@@ -34,8 +62,15 @@ var defaultShares = []defaultShare{
 // Without root, or when the shares root cannot be created, it logs and
 // returns; the daemon keeps running.
 func (m *Manager) EnsureDefaults(ctx context.Context) {
+	m.ensure(ctx, defaultShares)
+}
+
+func (m *Manager) ensure(ctx context.Context, wanted []defaultShare) {
 	if m.asRoot == nil || !m.asRoot() {
 		m.log.Info("skipping default shares: FELDCORE is not running as root, so it cannot manage shares")
+		return
+	}
+	if len(wanted) == 0 {
 		return
 	}
 
@@ -44,7 +79,7 @@ func (m *Manager) EnsureDefaults(ctx context.Context) {
 
 	added := 0
 	err := m.st.Update(func(s *store.State) error {
-		for _, d := range defaultShares {
+		for _, d := range wanted {
 			if hasShare(s.Shares, d.Name) {
 				continue
 			}

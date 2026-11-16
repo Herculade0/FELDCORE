@@ -5,10 +5,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +21,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
@@ -42,6 +46,11 @@ func main() {
 			"dir", cfg.DataDir, "err", err)
 		os.Exit(1)
 	}
+	if !config.SharesRootForced() {
+		if root := strings.TrimSpace(st.Snapshot().SharesRoot); root != "" {
+			cfg.SharesRoot = root
+		}
+	}
 
 	// Graceful shutdown on SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -58,16 +67,32 @@ func main() {
 		SambaInclude: cfg.SambaInclude,
 		ExportsFile:  cfg.ExportsFile,
 	}, log)
-	// Default shares first, then render Samba/NFS from whatever is stored.
-	// EnsureDefaults no-ops without root and when -default-shares is off.
+	// The wizard asks which default shares to create. A headless install
+	// (-skip-wizard, or an install that already finished setup) still uses
+	// -default-shares.
+	snap := st.Snapshot()
+	wizardOwnsShares := !cfg.SkipWizard && (snap.Admin == nil || (snap.Wizard != nil && !snap.Wizard.Done))
 	go func() {
-		if cfg.DefaultShares {
+		if cfg.DefaultShares && !wizardOwnsShares {
 			shareMgr.EnsureDefaults(ctx)
+		} else if wizardOwnsShares {
+			log.Info("default shares will be chosen in the setup wizard")
 		} else {
 			log.Info("default shares disabled")
 		}
 		shareMgr.Apply(ctx)
 	}()
+
+	wiz := setup.New(setup.Deps{
+		Store: st, Shares: shareMgr, DataDir: cfg.DataDir,
+		ListenPort: listenPort(cfg.ListenAddr), Log: log,
+	})
+	if code, err := wiz.EnsureCode(); err != nil {
+		log.Error("could not prepare the setup code", "err", err)
+	} else if code != "" {
+		fmt.Fprintf(os.Stdout, "FELDCORE setup code: %s\n", setup.FormatCode(code))
+		log.Info("enter the setup code above on the first-start screen; it works once")
+	}
 
 	if os.Geteuid() != 0 {
 		log.Warn("not running as root: shares cannot be applied to the system")
@@ -93,8 +118,10 @@ func main() {
 				return out
 			},
 		}),
-		WebRoot: webRoot,
-		Log:     log,
+		Setup:      wiz,
+		SkipWizard: cfg.SkipWizard,
+		WebRoot:    webRoot,
+		Log:        log,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -117,4 +144,16 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
 	}
+}
+
+func listenPort(addr string) int {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 8787
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n == 0 {
+		return 8787
+	}
+	return n
 }

@@ -19,39 +19,45 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/system"
 )
 
 // Deps are the services the HTTP layer exposes.
 type Deps struct {
-	System  *system.Collector
-	Sampler *system.Sampler
-	Auth    *auth.Service
-	Shares  *shares.Manager
-	Docker  *docker.Manager
-	Apps    *apps.Service
-	WebRoot fs.FS
-	Log     *slog.Logger
+	System     *system.Collector
+	Sampler    *system.Sampler
+	Auth       *auth.Service
+	Shares     *shares.Manager
+	Docker     *docker.Manager
+	Apps       *apps.Service
+	Setup      *setup.Service
+	SkipWizard bool
+	WebRoot    fs.FS
+	Log        *slog.Logger
 }
 
 // Server holds the dependencies shared by HTTP handlers.
 type Server struct {
-	sys     *system.Collector
-	sampler *system.Sampler
-	auth    *auth.Service
-	shares  *shares.Manager
-	docker  *docker.Manager
-	apps    *apps.Service
-	webRoot fs.FS
-	log     *slog.Logger
+	sys        *system.Collector
+	sampler    *system.Sampler
+	auth       *auth.Service
+	shares     *shares.Manager
+	docker     *docker.Manager
+	apps       *apps.Service
+	wiz        *setup.Service
+	skipWizard bool
+	webRoot    fs.FS
+	log        *slog.Logger
 }
 
 // New returns a Server.
 func New(d Deps) *Server {
 	return &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
-		docker: d.Docker, apps: d.Apps, webRoot: d.WebRoot, log: d.Log,
+		docker: d.Docker, apps: d.Apps, wiz: d.Setup, skipWizard: d.SkipWizard,
+		webRoot: d.WebRoot, log: d.Log,
 	}
 }
 
@@ -74,6 +80,9 @@ func (s *Server) Router() http.Handler {
 			r.Get("/auth/status", s.handleAuthStatus)
 			r.Post("/auth/setup", s.handleAuthSetup)
 			r.Post("/auth/login", s.handleAuthLogin)
+			// The network confirm token is the credential. The login cookie
+			// belongs to the old address, so this stays open.
+			r.Post("/setup/network/confirm", s.handleNetConfirm)
 			r.Post("/auth/logout", s.handleAuthLogout)
 		})
 
@@ -91,6 +100,7 @@ func (s *Server) Router() http.Handler {
 			// The catalogue is about 20MB; a refresh must not sit under the
 			// short request timeout.
 			r.Post("/apps/refresh", s.handleAppsRefresh)
+			r.Post("/setup/wizard", s.handleWizard)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -108,6 +118,8 @@ func (s *Server) Router() http.Handler {
 				r.Delete("/shares/users/{name}", s.handleShareUserDelete)
 
 				r.Get("/fs/suggest", s.handleFSSuggest)
+
+				r.Get("/setup/wizard", s.handleWizardStatus)
 
 				r.Get("/apps", s.handleApps)
 				r.Get("/apps/settings", s.handleAppsSettings)
@@ -212,6 +224,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		dockerOp    *docker.OpError
 		appsInput   *apps.InputError
 		appsOp      *apps.OpError
+		setupInput  *setup.InputError
+		setupOp     *setup.OpError
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -222,6 +236,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, dockerInput.Msg)
 	case errors.As(err, &appsInput):
 		writeError(w, http.StatusBadRequest, appsInput.Msg)
+	case errors.As(err, &setupInput):
+		writeError(w, http.StatusBadRequest, setupInput.Msg)
 	case errors.As(err, &shareOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, shareOp.Msg)
@@ -231,6 +247,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &appsOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, appsOp.Msg)
+	case errors.As(err, &setupOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, setupOp.Msg)
 	case errors.Is(err, apps.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):
@@ -241,7 +260,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, "FELDCORE has already been set up. Sign in instead.")
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "Incorrect username or password.")
-	case errors.Is(err, auth.ErrRateLimited):
+	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)
