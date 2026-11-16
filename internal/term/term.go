@@ -30,12 +30,46 @@ func Shell() (string, []string) {
 
 // StartHost opens a PTY running the login shell.
 // The cleanup function kills the shell and must be called when the socket closes.
+// The shell is bash -l when bash exists. A one-shot hook then colours a stock
+// prompt (Campbell green/blue, red for root) without replacing a custom PS1.
 func StartHost() (io.ReadWriteCloser, func(rows, cols uint16) error, func(), error) {
+	return startHost(os.Environ())
+}
+
+func startHost(env []string) (io.ReadWriteCloser, func(rows, cols uint16) error, func(), error) {
 	path, args := Shell()
-	cmd := exec.Command(path, args...)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	// The daemon's own PS1 is not the user's. Their prompt lives in the shell
+	// startup files, which bash -l still reads.
+	env = stripEnv(env, "PS1", "PROMPT_COMMAND", "FELDCORE_PREV_PROMPT", "FELDCORE_INIT")
+	env = applyTermEnv(env)
+
+	var extra []func()
+	var cmd *exec.Cmd
+	if bashLogin(args) {
+		name, cleanupFile, err := writeTemp("feldcore-prompt-*.bash", hostHook())
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		extra = append(extra, cleanupFile)
+		env = append(env, "PROMPT_COMMAND="+". "+shellQuote(name))
+		cmd = exec.Command(path, "-l")
+	} else {
+		name, cleanupFile, err := writeTemp("feldcore-sh-*.sh", shHook())
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		extra = append(extra, cleanupFile)
+		env = stripEnv(env, "ENV")
+		env = append(env, "ENV="+name)
+		cmd = exec.Command(path)
+	}
+	cmd.Env = env
+
 	f, err := pty.Start(cmd)
 	if err != nil {
+		for _, fn := range extra {
+			fn()
+		}
 		return nil, nil, nil, err
 	}
 	resize := func(rows, cols uint16) error {
@@ -47,8 +81,34 @@ func StartHost() (io.ReadWriteCloser, func(rows, cols uint16) error, func(), err
 			_ = cmd.Process.Kill()
 			_, _ = cmd.Process.Wait()
 		}
+		for _, fn := range extra {
+			fn()
+		}
 	}
 	return f, resize, cleanup, nil
+}
+
+func bashLogin(args []string) bool {
+	return len(args) == 1 && args[0] == "-l"
+}
+
+func writeTemp(pattern, body string) (string, func(), error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", nil, err
+	}
+	name := f.Name()
+	cleanup := func() { _ = os.Remove(name) }
+	if _, err := io.WriteString(f, body); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", nil, err
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return name, cleanup, nil
 }
 
 type control struct {
