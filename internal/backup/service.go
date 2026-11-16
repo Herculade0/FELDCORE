@@ -281,9 +281,25 @@ func (s *Service) Loop(ctx context.Context) {
 }
 
 func (s *Service) sources() []Source {
-	b := s.Store.Snapshot().Backup
-	app := AppdataPath(s.Store.Snapshot().Appdata, s.SharesRoot)
-	return SelectSources(s.DataDir, app, b.IncludeSnapshots, b.IncludeAppdata, s.exists)
+	snap := s.Store.Snapshot()
+	b := snap.Backup
+	app := AppdataPath(snap.Appdata, s.SharesRoot)
+	out := SelectSources(s.DataDir, app, b.IncludeSnapshots, b.IncludeAppdata, s.exists)
+	if !b.IncludeSnapshots {
+		return out
+	}
+	// Container snapshots live under the shares root when that feature is
+	// installed, and under the data directory otherwise. Include whichever
+	// of those folders is actually there.
+	extra := snap.Snapshots.Dir
+	if extra == "" && s.SharesRoot != "" {
+		extra = filepath.Join(s.SharesRoot, "system", "snapshots")
+	}
+	dataSnap := filepath.Join(s.DataDir, "snapshots")
+	if extra != "" && extra != dataSnap && s.exists(extra) {
+		out = append(out, Source{Path: extra, Name: "system-snapshots"})
+	}
+	return out
 }
 
 func (s *Service) remote() string {

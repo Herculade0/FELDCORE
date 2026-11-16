@@ -10,6 +10,20 @@ import (
 	"strings"
 )
 
+type pullKey struct{}
+
+// SkipPull tells Create and Update not to contact a registry when the image
+// is already present. Snapshot restore uses it: the pinned tag exists only
+// on this machine.
+func SkipPull(ctx context.Context) context.Context {
+	return context.WithValue(ctx, pullKey{}, true)
+}
+
+func skipPull(ctx context.Context) bool {
+	v, _ := ctx.Value(pullKey{}).(bool)
+	return v
+}
+
 // Create pulls the image if needed, creates the container, and (when
 // requested) starts it. It returns the new container's short id.
 func (m *Manager) Create(ctx context.Context, s Spec) (string, error) {
@@ -22,9 +36,12 @@ func (m *Manager) Create(ctx context.Context, s Spec) (string, error) {
 	}
 
 	// Pull first so a missing image is reported clearly rather than as a
-	// cryptic create failure.
-	if err := m.Pull(ctx, s.Image); err != nil {
-		return "", err
+	// cryptic create failure. A restore of a snapshot image skips the pull
+	// when that image is already on this machine: the tag is local-only.
+	if !(skipPull(ctx) && m.imagePresent(ctx, s.Image)) {
+		if err := m.Pull(ctx, s.Image); err != nil {
+			return "", err
+		}
 	}
 
 	cfg, host := map[string]any{}, map[string]any{}

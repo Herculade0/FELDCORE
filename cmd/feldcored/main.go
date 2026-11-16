@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,10 +24,13 @@ import (
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/notify"
+	"github.com/Herculade0/feldcore/internal/proxy"
+	"github.com/Herculade0/feldcore/internal/remote"
 	"github.com/Herculade0/feldcore/internal/runtime"
 	"github.com/Herculade0/feldcore/internal/secrets"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
+	"github.com/Herculade0/feldcore/internal/snapshots"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/version"
@@ -36,13 +40,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-
-	box, err := secrets.Open(cfg.DataDir)
-	if err != nil {
-		slog.Error("cannot open the secrets store", "err", err)
-		os.Exit(1)
-	}
-	log := slog.New(secrets.NewRedactingHandler(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}), box))
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
 	webRoot, err := web.Dist()
@@ -62,6 +60,14 @@ func main() {
 			cfg.SharesRoot = root
 		}
 	}
+	box, err := secrets.Open(cfg.DataDir)
+	if err != nil {
+		log.Error("cannot open the secrets directory", "dir", cfg.DataDir, "err", err)
+		os.Exit(1)
+	}
+	// Every log line from here on is scrubbed of stored credentials.
+	log = slog.New(secrets.NewRedactingHandler(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}), box))
+	slog.SetDefault(log)
 
 	// Graceful shutdown on SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -109,20 +115,35 @@ func main() {
 		log.Warn("not running as root: shares cannot be applied to the system")
 	}
 
-	dock := docker.NewManager(cfg.DockerSocket, st, log)
-	rt := &runtime.Docker{M: dock}
+	dockerMgr := docker.NewManager(cfg.DockerSocket, st, log)
+	rt := &runtime.Docker{M: dockerMgr}
 	vpnSvc := &vpn.Service{Store: st, Secrets: box, RT: rt, Log: log}
-	dock.SetRouteGuard(vpnSvc.AllowStart)
+	dockerMgr.SetRouteGuard(vpnSvc.AllowStart)
 	backups := &backup.Service{Store: st, Secrets: box, DataDir: cfg.DataDir, SharesRoot: cfg.SharesRoot, Log: log}
 	mail := &notify.Service{
 		Store: st, Secrets: box, Bridge: runtime.Bridge{D: rt},
 		DataDir: cfg.DataDir, Version: version.Current, Log: log,
 	}
+	remoteSvc := &remote.Service{
+		Store: st, Secrets: box, Engine: dockerMgr,
+		Binary:     &remote.HostCloudflared{Dir: filepath.Join(cfg.DataDir, "bin")},
+		DataDir:    cfg.DataDir,
+		ListenPort: listenPort(cfg.ListenAddr),
+		Log:        log,
+	}
+	proxySvc := &proxy.Service{
+		Store: st, Secrets: box, Engine: dockerMgr,
+		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), Log: log,
+	}
+	snapSvc := snapshots.Open(st, dockerMgr, cfg.DataDir, func() string {
+		return filepath.Join(cfg.SharesRoot, "system", "snapshots")
+	})
+	snapSvc.Log = log
 	go vpnSvc.Restore(ctx)
 	go vpnSvc.KeepForwarded(ctx)
 	go backups.Loop(ctx)
 	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
-		cs, err := dock.Containers(ctx)
+		cs, err := dockerMgr.Containers(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -141,13 +162,21 @@ func main() {
 		}
 		return false
 	})
+	go func() {
+		if err := remoteSvc.Sync(ctx); err != nil {
+			log.Warn("remote access was not applied", "err", err)
+		}
+		if err := proxySvc.Apply(ctx); err != nil {
+			log.Warn("web proxy was not applied", "err", err)
+		}
+	}()
 
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
 		Auth:    auth.New(st),
 		Shares:  shareMgr,
-		Docker:  dock,
+		Docker:  dockerMgr,
 		Apps: apps.New(apps.Deps{
 			DataDir:    cfg.DataDir,
 			SharesRoot: cfg.SharesRoot,
@@ -162,6 +191,9 @@ func main() {
 			},
 		}),
 		Setup:      wiz,
+		Remote:     remoteSvc,
+		Proxy:      proxySvc,
+		Snaps:      snapSvc,
 		SkipWizard: cfg.SkipWizard,
 		WebRoot:    webRoot,
 		Log:        log,

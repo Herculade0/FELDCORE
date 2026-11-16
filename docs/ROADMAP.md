@@ -60,6 +60,15 @@ Follow-ups
 - [ ] Choose a specific GPU when a server has more than one
 - [ ] Warn when a chosen host port is already allocated, before applying
 
+### GPU selection
+Specified in [GPU-SELECTION.md](GPU-SELECTION.md). Containers first. A GPU
+assigned to a VM is locked to that VM (boot-time stub on the VM manager
+branch), and both sides use the same PCI address.
+- [ ] First slice: live inventory, a read-only Settings list (model, vendor,
+      driver, VRAM, assigned to), a container picker that starts with nothing
+      selected, and a Settings button to install the NVIDIA Container Toolkit
+- [ ] Dashboard usage, ARM boards, and the NVIDIA driver as a sysext on FELDCORE OS
+
 ## M2c — Agent access, phase 1 ✅
 The owner's own agents (Claude Code, a Grok assistant, or any MCP client) can read the server without a browser session.
 - [x] Named API tokens with scopes `read`, `containers`, `vms` and `admin`, optional expiry, last-used time, and revoke
@@ -89,6 +98,14 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 - [ ] libvirt/KVM domain list + lifecycle
 - [ ] Create VM wizard (ISO, disk, CPU, RAM, virtio)
 - [ ] Browser console (VNC/SPICE)
+
+## FELDCORE-STORE
+
+A private catalogue merged on top of Community Apps: game profiles, VM templates, app bundles, SDR apps, and fixed versions of broken templates. It builds on the App Store (M2b). Design and scope: [FELDCORE-STORE.md](FELDCORE-STORE.md).
+
+- [ ] MVP — one sign-in for the private `Herculade0/feldcore-store` feed, Community Apps and FELDCORE Store toggles, manual and automatic refresh, merge and override, FELDCORE badge
+- [ ] Games, bundles, and SDR device claims
+- [ ] One-click VMs from store templates, after M4
 
 ## FELDCORE OS (the FELDCORE distro)
 
