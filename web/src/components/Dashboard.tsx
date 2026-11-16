@@ -16,12 +16,14 @@ import { api } from "../lib/api";
 import { HISTORY_SIZE, useStatsStream } from "../lib/useStream";
 import { bytes, bytesPerSec, duration, greeting, shortCpu } from "../lib/format";
 import { Bar, Card, CardTitle, IconBadge, StatusPill } from "./ui";
+import { TerminalButton, useTerminal } from "./Terminal";
 import { Gauge } from "./Gauge";
 import { Sparkline } from "./Sparkline";
 
 export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => void }) {
   const { stats, history, status } = useStatsStream();
   const [info, setInfo] = useState<Info | null>(null);
+  const { openHost } = useTerminal();
 
   useEffect(() => {
     api<Info>("/system/info")
@@ -61,6 +63,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
         </div>
         <div className="flex items-center gap-3">
           <Clock />
+          <TerminalButton label="Host terminal" onClick={openHost} />
           <StatusPill status={status} />
         </div>
       </header>
@@ -224,7 +227,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
         <h2 className="mb-3 px-1 text-[11px] font-bold uppercase tracking-[0.2em] text-ink-3">
           Modules
         </h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {NAV.filter((n) => n.key !== "dashboard").map((item) => (
             <button
               key={item.key}

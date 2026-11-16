@@ -11,6 +11,7 @@ const sessionCookie = "feldcore_session"
 type credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Code     string `json:"code"`
 }
 
 // currentUser resolves the request's session cookie to a username.
@@ -20,17 +21,6 @@ func (s *Server) currentUser(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return s.auth.Authenticate(c.Value)
-}
-
-// requireAuth rejects requests without a valid session.
-func (s *Server) requireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.currentUser(r); !ok {
-			writeError(w, http.StatusUnauthorized, "Sign in to continue.")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
@@ -76,6 +66,9 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		resp["authenticated"] = true
 		resp["username"] = user
 	}
+	if s.wiz != nil {
+		resp["wizardPending"] = s.wiz.Pending()
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -84,12 +77,25 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
+	if s.wiz != nil {
+		if err := s.wiz.CheckCode(clientKey(r), in.Code); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	token, expires, err := s.auth.SetupAndLogin(in.Username, in.Password)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	s.log.Info("administrator account created", "user", in.Username)
+	if s.wiz != nil {
+		s.wiz.ConsumeCode()
+		if err := s.wiz.Begin(s.skipWizard); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	setSessionCookie(w, r, token, expires)
 	writeJSON(w, http.StatusOK, map[string]string{"username": in.Username})
 }

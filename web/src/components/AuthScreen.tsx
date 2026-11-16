@@ -34,6 +34,7 @@ export function LoadingScreen({ unreachable = false }: { unreachable?: boolean }
 /** First run: create the administrator account. */
 export function SetupScreen() {
   const { setup } = useAuth();
+  const [code, setCode] = useState("");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -51,7 +52,7 @@ export function SetupScreen() {
     setBusy(true);
     setError(null);
     try {
-      await setup(username.trim(), password);
+      await setup(username.trim(), password, code.trim());
     } catch (err) {
       setError(errorMessage(err));
       setBusy(false);
@@ -63,9 +64,22 @@ export function SetupScreen() {
       <form onSubmit={submit} className="glass w-full max-w-sm rounded-[2rem] p-7">
         <h1 className="text-xl font-extrabold tracking-tight text-ink">Welcome to FELDCORE</h1>
         <p className="mt-2 text-sm font-medium leading-relaxed text-ink-2">
-          Create the administrator account. You'll use it to sign in to this server from now on.
+          Enter the setup code printed in the server console, then create the administrator account.
+          The code works once, so someone else on the network cannot claim this server first.
         </p>
         <div className="mt-6 space-y-4">
+          <TextField
+            label="Setup code"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            placeholder="ABCD-EFGH"
+            hint="Printed as “FELDCORE setup code” when the server starts."
+            required
+            autoFocus
+          />
           <TextField
             label="Username"
             value={username}
@@ -84,7 +98,6 @@ export function SetupScreen() {
             hint="At least 8 characters."
             minLength={8}
             required
-            autoFocus
           />
           <TextField
             label="Confirm password"

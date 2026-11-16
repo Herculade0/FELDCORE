@@ -1,5 +1,6 @@
 // Package api wires FELDCORE's HTTP surface: a versioned JSON API under
-// /api/v1 plus the embedded single-page front-end served for everything else.
+// /api/v1, a read-only MCP server at /mcp, plus the embedded single-page
+// front-end served for everything else.
 package api
 
 import (
@@ -16,40 +17,63 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/proxy"
+	"github.com/Herculade0/feldcore/internal/remote"
+	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
+	"github.com/Herculade0/feldcore/internal/snapshots"
 	"github.com/Herculade0/feldcore/internal/system"
+	"github.com/Herculade0/feldcore/internal/vm"
 )
 
 // Deps are the services the HTTP layer exposes.
 type Deps struct {
-	System  *system.Collector
-	Sampler *system.Sampler
-	Auth    *auth.Service
-	Shares  *shares.Manager
-	Docker  *docker.Manager
-	WebRoot fs.FS
-	Log     *slog.Logger
+	System     *system.Collector
+	Sampler    *system.Sampler
+	Auth       *auth.Service
+	Shares     *shares.Manager
+	Docker     *docker.Manager
+	Apps       *apps.Service
+	Setup      *setup.Service
+	Remote     *remote.Service
+	Proxy      *proxy.Service
+	Snaps      *snapshots.Service
+	SkipWizard bool
+	WebRoot    fs.FS
+	Log        *slog.Logger
 }
 
 // Server holds the dependencies shared by HTTP handlers.
 type Server struct {
-	sys     *system.Collector
-	sampler *system.Sampler
-	auth    *auth.Service
-	shares  *shares.Manager
-	docker  *docker.Manager
-	webRoot fs.FS
-	log     *slog.Logger
+	sys        *system.Collector
+	sampler    *system.Sampler
+	auth       *auth.Service
+	shares     *shares.Manager
+	docker     *docker.Manager
+	apps       *apps.Service
+	wiz        *setup.Service
+	remote     *remote.Service
+	proxy      *proxy.Service
+	snaps      *snapshots.Service
+	skipWizard bool
+	webRoot    fs.FS
+	log        *slog.Logger
+	vmProbe    vm.Probe
+	mcpHTTP    http.Handler
 }
 
 // New returns a Server.
 func New(d Deps) *Server {
-	return &Server{
+	s := &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
-		docker: d.Docker, webRoot: d.WebRoot, log: d.Log,
+		docker: d.Docker, apps: d.Apps, wiz: d.Setup, remote: d.Remote, proxy: d.Proxy,
+		snaps: d.Snaps, skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 	}
+	s.initMCP()
+	return s
 }
 
 // Router builds the full chi router.
@@ -74,17 +98,33 @@ func (s *Server) Router() http.Handler {
 			r.Post("/auth/logout", s.handleAuthLogout)
 		})
 
-		// Everything else needs a signed-in session.
+		// Everything else needs a signed-in session or a scoped agent token.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
+			r.Use(s.enforceScope)
 
 			// Long-lived or slow endpoints sit outside the short timeout.
 			r.Get("/system/stream", s.handleSystemStream)
+			r.Get("/terminal", s.handleHostTerminal)
+			r.Get("/docker/containers/{id}/terminal", s.handleContainerTerminal)
 			r.Post("/shares/services/{service}/install", s.handleServiceInstall)
 			// Installing Docker and pulling images can take minutes.
 			r.Post("/docker/install", s.handleDockerInstall)
 			r.Post("/docker/containers", s.handleDockerCreate)
 			r.Put("/docker/containers/{id}", s.handleDockerUpdate)
+			// The catalogue is about 20MB; a refresh must not sit under the
+			// short request timeout.
+			r.Post("/apps/refresh", s.handleAppsRefresh)
+			r.Post("/setup/wizard", s.handleWizard)
+			r.Put("/settings/services", s.handleSettingsService)
+			r.Put("/settings/updates", s.handleSettingsUpdates)
+			r.Put("/remote", s.handleRemoteSave)
+			r.Post("/remote/install", s.handleRemoteInstall)
+			r.Put("/proxy", s.handleProxySave)
+			r.Put("/docker/containers/{id}/address", s.handleAddressSave)
+			r.Post("/docker/containers/{id}/snapshots", s.handleSnapshotCreate)
+			r.Post("/docker/containers/{id}/snapshots/{snap}/restore", s.handleSnapshotRestore)
+			r.Put("/snapshots", s.handleSnapshotSettings)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -103,12 +143,43 @@ func (s *Server) Router() http.Handler {
 
 				r.Get("/fs/suggest", s.handleFSSuggest)
 
+				r.Get("/setup/wizard", s.handleWizardStatus)
+
+				r.Get("/apps", s.handleApps)
+				r.Get("/apps/{id}", s.handleAppSpec)
+
+				r.Get("/settings", s.handleSettings)
+				r.Put("/settings/system", s.handleSettingsSystem)
+				r.Put("/settings/network", s.handleSettingsNetwork)
+				r.Put("/settings/firewall", s.handleSettingsFirewall)
+				r.Put("/settings/password", s.handleSettingsPassword)
+				r.Put("/settings/session", s.handleSettingsSession)
+				r.Put("/settings/feed", s.handleSettingsFeed)
+				r.Put("/settings/defaults", s.handleSettingsDefaults)
+				r.Post("/settings/shares", s.handleSettingsShares)
+
+				r.Get("/remote", s.handleRemote)
+				r.Get("/proxy", s.handleProxy)
+				r.Get("/proxy/ca", s.handleProxyCA)
+				r.Get("/snapshots", s.handleSnapshotUsage)
+
 				r.Get("/docker/status", s.handleDockerStatus)
 				r.Get("/docker/options", s.handleDockerOptions)
 				r.Get("/docker/containers", s.handleDockerContainers)
 				r.Get("/docker/containers/{id}/spec", s.handleDockerSpec)
+				r.Get("/docker/containers/{id}/address", s.handleAddress)
+				r.Get("/docker/containers/{id}/snapshots", s.handleSnapshots)
+				r.Delete("/docker/containers/{id}/snapshots/{snap}", s.handleSnapshotDelete)
 				r.Get("/docker/images", s.handleDockerImages)
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
+				r.Get("/vms", s.handleVMs)
+
+				r.Get("/audit", s.handleAudit)
+				r.Get("/agent/tokens", s.handleTokensList)
+				r.Post("/agent/tokens", s.handleTokenCreate)
+				r.Post("/agent/tokens/revoke-all", s.handleTokensRevokeAll)
+				r.Delete("/agent/tokens/{id}", s.handleTokenRevoke)
+
 				r.Post("/docker/containers/{id}/start", s.handleDockerStart)
 				r.Post("/docker/containers/{id}/stop", s.handleDockerStop)
 				r.Post("/docker/containers/{id}/restart", s.handleDockerRestart)
@@ -120,6 +191,13 @@ func (s *Server) Router() http.Handler {
 			writeError(w, http.StatusNotFound, "No such API endpoint.")
 		})
 	})
+
+	// Agents speak MCP here. Bearer token only; a browser session is not enough.
+	if s.mcpHTTP != nil {
+		mcpGate := s.requireBearer(auth.ScopeRead, s.mcpHTTP)
+		r.Handle("/mcp", mcpGate)
+		r.Handle("/mcp/", mcpGate)
+	}
 
 	// Everything else is the SPA (static assets, or index.html fallback).
 	r.NotFound(s.handleSPA)
@@ -170,10 +248,21 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 
 // readJSON decodes a small JSON request body into v.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	return readJSONLimit(w, r, v, 64<<10)
+}
+
+// readJSONLimit is readJSON with a caller-chosen cap. Container specs from a
+// large template are much bigger than the other request bodies.
+func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, max int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, max)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, http.StatusRequestEntityTooLarge, "That request is too large.")
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "The request was not valid JSON.")
 		return false
 	}
@@ -188,6 +277,16 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		shareOp     *shares.OpError
 		dockerInput *docker.InputError
 		dockerOp    *docker.OpError
+		appsInput   *apps.InputError
+		appsOp      *apps.OpError
+		setupInput  *setup.InputError
+		setupOp     *setup.OpError
+		remoteInput *remote.InputError
+		remoteOp    *remote.OpError
+		proxyInput  *proxy.InputError
+		proxyOp     *proxy.OpError
+		snapInput   *snapshots.InputError
+		snapOp      *snapshots.OpError
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -196,12 +295,39 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, shareInput.Msg)
 	case errors.As(err, &dockerInput):
 		writeError(w, http.StatusBadRequest, dockerInput.Msg)
+	case errors.As(err, &appsInput):
+		writeError(w, http.StatusBadRequest, appsInput.Msg)
+	case errors.As(err, &setupInput):
+		writeError(w, http.StatusBadRequest, setupInput.Msg)
+	case errors.As(err, &remoteInput):
+		writeError(w, http.StatusBadRequest, remoteInput.Msg)
+	case errors.As(err, &proxyInput):
+		writeError(w, http.StatusBadRequest, proxyInput.Msg)
+	case errors.As(err, &snapInput):
+		writeError(w, http.StatusBadRequest, snapInput.Msg)
 	case errors.As(err, &shareOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, shareOp.Msg)
 	case errors.As(err, &dockerOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, dockerOp.Msg)
+	case errors.As(err, &appsOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, appsOp.Msg)
+	case errors.As(err, &setupOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, setupOp.Msg)
+	case errors.As(err, &remoteOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, remoteOp.Msg)
+	case errors.As(err, &proxyOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, proxyOp.Msg)
+	case errors.As(err, &snapOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, snapOp.Msg)
+	case errors.Is(err, apps.ErrNotFound):
+		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):
 		writeError(w, http.StatusNotFound, "That container no longer exists.")
 	case errors.Is(err, shares.ErrNotFound):
@@ -210,7 +336,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, "FELDCORE has already been set up. Sign in instead.")
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "Incorrect username or password.")
-	case errors.Is(err, auth.ErrRateLimited):
+	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)

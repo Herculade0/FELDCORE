@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Container as ContainerIcon } from "lucide-react";
+import { IconBadge } from "../ui";
 import type { Container } from "./types";
 
 const KEY = "feldcore.docker.allocations";
@@ -60,7 +61,12 @@ export default function Allocations({ containers }: { containers: Container[] })
                 const ips = c.ips ?? [];
                 return (
                   <tr key={c.id} className="border-b border-line last:border-0">
-                    <td className="px-5 py-2.5 font-bold text-ink">{c.name}</td>
+                    <td className="px-5 py-2.5 font-bold text-ink">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <AllocIcon src={c.icon} />
+                        <span className="truncate">{c.name}</span>
+                      </span>
+                    </td>
                     <td className="px-3 py-2.5 font-medium text-ink-2">{c.network || "—"}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-ink-2">
                       {ips.length ? ips.join("  ") : "—"}
@@ -79,4 +85,20 @@ export default function Allocations({ containers }: { containers: Container[] })
       )}
     </section>
   );
+}
+
+function AllocIcon({ src }: { src?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className="h-6 w-6 shrink-0 rounded-md bg-surface-2 object-contain"
+      />
+    );
+  }
+  return <IconBadge icon={ContainerIcon} size={24} />;
 }

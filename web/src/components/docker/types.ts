@@ -18,11 +18,15 @@ export interface Container {
   compose: boolean;
   gpu: boolean;
   webUrl: string;
+  icon?: string;
   network: string;
   ips: string[];
   cpuPct: number;
   memUsed: number;
   memLimit: number;
+  role?: string;
+  hostname?: string;
+  publicHost?: string;
 }
 
 export interface Image {
@@ -58,6 +62,11 @@ export interface ConfigItem {
   hostIp: string;
   key: string;
   value: string;
+  /** "always", "advanced" or "hidden". Empty means always. */
+  display: string;
+  required: boolean;
+  /** When set, the value is a secret and the UI must not show it. */
+  mask: boolean;
 }
 
 export interface Spec {
@@ -68,6 +77,10 @@ export interface Spec {
   gpu: boolean;
   configs: ConfigItem[];
   autostart: boolean;
+  webUi: string;
+  icon: string;
+  extraParams: string;
+  privileged: boolean;
 }
 
 export interface SpecInfo {
@@ -112,6 +125,9 @@ export function blankConfig(type: ConfigType): ConfigItem {
     hostIp: "",
     key: "",
     value: "",
+    display: "always",
+    required: false,
+    mask: false,
   };
 }
 
@@ -127,7 +143,7 @@ export function configSummary(c: ConfigItem): { left: string; right: string } {
         right: `${c.containerPort}/${c.proto}`,
       };
     default:
-      return { left: c.key, right: c.value };
+      return { left: c.key, right: c.mask && c.value ? "••••••" : c.value };
   }
 }
 
