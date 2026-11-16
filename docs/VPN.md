@@ -1,7 +1,7 @@
 # VPN
 
 FELDCORE can run WireGuard tunnels and send chosen containers through them.
-Everything here is off until you turn it on under **Settings → VPN**.
+Everything here is off until you turn it on under **Settings → Network**, in the VPN card.
 
 ## Tunnels
 
