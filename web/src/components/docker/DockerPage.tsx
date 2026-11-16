@@ -255,6 +255,16 @@ function ContainerRow({
                 GPU
               </span>
             )}
+            {c.vpn && (
+              <span className="rounded-full bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
+                via VPN
+              </span>
+            )}
+            {c.vpnGateway && (
+              <span className="rounded-full bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
+                VPN gateway
+              </span>
+            )}
           </div>
           <p className="truncate text-xs font-medium text-ink-3">{c.image}</p>
           {(c.hostname || c.publicHost) && (
@@ -301,7 +311,7 @@ function ContainerRow({
         <IconButton label="View logs" onClick={onLogs}>
           <FileText size={16} />
         </IconButton>
-        {!c.role && (
+        {!c.role && !c.vpnGateway && (
           <>
             <IconButton label="Web address" onClick={onAddress}>
               <Globe size={16} />
@@ -311,7 +321,7 @@ function ContainerRow({
             </IconButton>
           </>
         )}
-        <IconButton label="Edit" onClick={onEdit} disabled={!!busy}>
+        <IconButton label={c.vpnGateway ? "Managed from Settings → VPN" : "Edit"} onClick={onEdit} disabled={!!busy || c.vpnGateway}>
           <Pencil size={16} />
         </IconButton>
         {running ? (

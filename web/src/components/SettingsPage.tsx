@@ -19,6 +19,9 @@ import { shortCpu } from "../lib/format";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, SelectField, TextField, Toggle } from "./form";
 import AgentAccessCard from "./AgentAccess";
+import VPNSettings from "./settings/VPNSettings";
+import DriveBackup from "./settings/DriveBackup";
+import MailNotifications from "./settings/MailSettings";
 import RemoteAccess from "./settings/RemoteAccess";
 import WebAddresses from "./settings/WebAddresses";
 import SnapshotSettings from "./settings/SnapshotSettings";
@@ -116,6 +119,9 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
         <>
           <NetworkCard settings={settings} onSaved={reload} />
           <WebAddresses />
+          <VPNSettings />
+          <DriveBackup />
+          <MailNotifications />
         </>
       )}
 

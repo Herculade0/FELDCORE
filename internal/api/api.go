@@ -19,7 +19,9 @@ import (
 
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/remote"
 	"github.com/Herculade0/feldcore/internal/setup"
@@ -27,6 +29,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/snapshots"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/vm"
+	"github.com/Herculade0/feldcore/internal/vpn"
 )
 
 // Deps are the services the HTTP layer exposes.
@@ -45,6 +48,9 @@ type Deps struct {
 	SkipWizard bool
 	WebRoot    fs.FS
 	Log        *slog.Logger
+	VPN        *vpn.Service
+	Backups    *backup.Service
+	Mail       *notify.Service
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -65,6 +71,9 @@ type Server struct {
 	log        *slog.Logger
 	vmProbe    vm.Probe
 	mcpHTTP    http.Handler
+	vpn        *vpn.Service
+	backups    *backup.Service
+	mail       *notify.Service
 }
 
 // New returns a Server.
@@ -74,6 +83,7 @@ func New(d Deps) *Server {
 		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup,
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
+		vpn: d.VPN, backups: d.Backups, mail: d.Mail,
 	}
 	s.initMCP()
 	return s
@@ -121,6 +131,13 @@ func (s *Server) Router() http.Handler {
 			r.Post("/setup/wizard", s.handleWizard)
 			r.Put("/settings/services", s.handleSettingsService)
 			r.Put("/settings/updates", s.handleSettingsUpdates)
+			r.Put("/vpn", s.handleVPNEnabled)
+			r.Post("/vpn/tunnels", s.handleVPNSave)
+			r.Put("/vpn/tunnels/{id}", s.handleVPNSave)
+			r.Post("/vpn/tunnels/{id}/enabled", s.handleVPNTunnelEnabled)
+			r.Post("/backups/test", s.handleBackupsTest)
+			r.Post("/backups/run", s.handleBackupsRun)
+			r.Post("/notifications/test", s.handleNotificationsTest)
 			// Defining a domain and the VNC console are not short requests.
 			r.Post("/vms", s.handleVMCreate)
 			r.Put("/vms/{name}", s.handleVMUpdate)
@@ -167,6 +184,14 @@ func (s *Server) Router() http.Handler {
 				r.Put("/settings/defaults", s.handleSettingsDefaults)
 				r.Post("/settings/shares", s.handleSettingsShares)
 
+				r.Get("/vpn", s.handleVPN)
+				r.Post("/vpn/parse", s.handleVPNParse)
+				r.Delete("/vpn/tunnels/{id}", s.handleVPNDelete)
+				r.Get("/vpn/tunnels/{id}/status", s.handleVPNStatus)
+				r.Get("/backups", s.handleBackups)
+				r.Put("/backups", s.handleBackupsSave)
+				r.Get("/notifications", s.handleNotifications)
+				r.Put("/notifications", s.handleNotificationsSave)
 				r.Get("/vms", s.handleVMs)
 				r.Get("/vms/host", s.handleVMHost)
 				r.Get("/vms/settings", s.handleVMSettings)
@@ -187,7 +212,6 @@ func (s *Server) Router() http.Handler {
 				r.Get("/vms/{name}/snapshots", s.handleVMSnapshots)
 				r.Post("/vms/{name}/snapshots", s.handleVMSnapshotCreate)
 				r.Delete("/vms/{name}/snapshots/{snap}", s.handleVMSnapshotDelete)
-
 				r.Get("/remote", s.handleRemote)
 				r.Get("/proxy", s.handleProxy)
 				r.Get("/proxy/ca", s.handleProxyCA)
@@ -312,6 +336,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		vmOp        *vm.OpError
 		setupInput  *setup.InputError
 		setupOp     *setup.OpError
+		vpnInput    *vpn.InputError
+		vpnOp       *vpn.OpError
+		backupInput *backup.InputError
+		backupOp    *backup.OpError
+		mailInput   *notify.InputError
+		mailOp      *notify.OpError
 		remoteInput *remote.InputError
 		remoteOp    *remote.OpError
 		proxyInput  *proxy.InputError
@@ -332,6 +362,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, vmInput.Msg)
 	case errors.As(err, &setupInput):
 		writeError(w, http.StatusBadRequest, setupInput.Msg)
+	case errors.As(err, &vpnInput):
+		writeError(w, http.StatusBadRequest, vpnInput.Msg)
+	case errors.As(err, &backupInput):
+		writeError(w, http.StatusBadRequest, backupInput.Msg)
+	case errors.As(err, &mailInput):
+		writeError(w, http.StatusBadRequest, mailInput.Msg)
 	case errors.As(err, &remoteInput):
 		writeError(w, http.StatusBadRequest, remoteInput.Msg)
 	case errors.As(err, &proxyInput):
@@ -353,6 +389,15 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &setupOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, setupOp.Msg)
+	case errors.As(err, &vpnOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, vpnOp.Msg)
+	case errors.As(err, &backupOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, backupOp.Msg)
+	case errors.As(err, &mailOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, mailOp.Msg)
 	case errors.As(err, &remoteOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, remoteOp.Msg)
