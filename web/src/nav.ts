@@ -1,4 +1,5 @@
 import {
+  CircleHelp,
   Container,
   FolderTree,
   LayoutDashboard,
@@ -9,7 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "audit" | "settings";
+export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "audit" | "settings" | "help";
 
 export interface NavItem {
   key: NavKey;
@@ -68,6 +69,13 @@ export const NAV: NavItem[] = [
     label: "Settings",
     desc: "Appearance & system",
     icon: Settings,
+    ready: true,
+  },
+  {
+    key: "help",
+    label: "Help",
+    desc: "Guides and reference",
+    icon: CircleHelp,
     ready: true,
   },
 ];

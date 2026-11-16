@@ -53,6 +53,7 @@ export default function SnapshotSettings() {
   const used = usage?.total ? Math.min(100, Math.round((1 - usage.free / usage.total) * 100)) : 0;
 
   return (
+    <div id="settings-snapshots">
     <Card>
       <CardTitle icon={HardDrive} title="Snapshots" hint={usage ? `${bytes(usage.bytes)} used` : ""} />
       <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
@@ -80,5 +81,6 @@ export default function SnapshotSettings() {
         {saved && <p className="text-xs font-semibold text-ok">Saved.</p>}
       </div>
     </Card>
+    </div>
   );
 }

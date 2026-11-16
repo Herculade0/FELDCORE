@@ -29,6 +29,7 @@ import { stateStyle, type Container, type DockerStatus } from "./types";
 import AddressDialog from "./AddressDialog";
 import SnapshotsDialog from "./SnapshotsDialog";
 import PublishedApps from "../publish/PublishedApps";
+import { PageHelp } from "../help/PageHelp";
 
 export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
@@ -80,7 +81,10 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Docker</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Docker</h1>
+            <PageHelp topic="docker" />
+          </div>
           <p className="mt-2 text-sm font-semibold text-ink-2">
             Run and manage containers on this server.
           </p>

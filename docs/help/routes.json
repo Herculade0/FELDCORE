@@ -1,0 +1,35 @@
+{
+  "dashboard": { "page": "dashboard", "available": true },
+  "shares": { "page": "shares", "available": true },
+  "docker": { "page": "docker", "available": true },
+  "apps": { "page": "apps", "available": true },
+  "vms": { "page": "vms", "available": true },
+  "vms.settings": { "page": "vms", "view": "settings", "available": true },
+  "audit": { "page": "audit", "available": true },
+  "settings": { "page": "settings", "tab": "general", "available": true },
+  "settings.agent": { "page": "settings", "tab": "general", "anchor": "settings-agent", "available": true },
+  "settings.security": { "page": "settings", "tab": "general", "anchor": "settings-security", "available": true },
+  "settings.services": { "page": "settings", "tab": "general", "anchor": "settings-services", "available": true },
+  "settings.updates": { "page": "settings", "tab": "general", "anchor": "settings-updates", "available": true },
+  "settings.snapshots": { "page": "settings", "tab": "general", "anchor": "settings-snapshots", "available": true },
+  "settings.network": { "page": "settings", "tab": "network", "anchor": "settings-network", "available": true },
+  "settings.web": { "page": "settings", "tab": "network", "anchor": "settings-web", "available": true },
+  "settings.vpn": { "page": "settings", "tab": "network", "anchor": "settings-vpn", "available": true },
+  "settings.drive": { "page": "settings", "tab": "network", "anchor": "settings-drive", "available": true },
+  "settings.mail": { "page": "settings", "tab": "network", "anchor": "settings-mail", "available": true },
+  "settings.remote": { "page": "settings", "tab": "remote", "anchor": "settings-remote", "available": true },
+  "settings.publishing": { "page": "settings", "tab": "publishing", "anchor": "published-apps", "available": true },
+  "settings.protection": { "page": "settings", "tab": "publishing", "anchor": "protection-settings", "available": true },
+  "internal-affairs": {
+    "page": "help",
+    "help": "internal-affairs",
+    "available": false,
+    "note": "Internal Affairs is not in the app yet."
+  },
+  "citizen-id": {
+    "page": "help",
+    "help": "citizen-id",
+    "available": false,
+    "note": "Citizen ID is not in the app yet."
+  }
+}

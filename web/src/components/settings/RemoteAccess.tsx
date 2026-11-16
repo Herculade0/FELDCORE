@@ -117,7 +117,7 @@ export default function RemoteAccess() {
   const tone = status?.state === "healthy" || status?.state === "up" ? "text-ok" : status?.state === "off" ? "text-ink-3" : status?.state === "starting" ? "text-warn" : "text-bad";
 
   return (
-    <div className="space-y-6">
+    <div id="settings-remote" className="space-y-6">
       <div>
         <h2 className="text-2xl font-extrabold tracking-tight text-ink">Remote access</h2>
         <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-ink-2">
