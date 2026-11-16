@@ -231,6 +231,9 @@ func scopeFor(method, path string) string {
 	if scope, ok := fileScope(method, p); ok {
 		return scope
 	}
+	if scope, ok := backupScope(method, p); ok {
+		return scope
+	}
 	if strings.HasPrefix(p, "/storage") {
 		if method == http.MethodGet || method == http.MethodHead {
 			return auth.ScopeRead
@@ -275,6 +278,18 @@ func fileScope(method, p string) (string, bool) {
 		return auth.ScopeFilesRead, true
 	}
 	return auth.ScopeFilesWrite, true
+}
+
+// backupScope is the versioned restic API. /backups (plural) is the older
+// Proton tar.gz settings card and stays on admin.
+func backupScope(method, p string) (string, bool) {
+	if p != "/backup" && !strings.HasPrefix(p, "/backup/") {
+		return "", false
+	}
+	if method == http.MethodGet || method == http.MethodHead {
+		return auth.ScopeBackupsRead, true
+	}
+	return auth.ScopeBackupsWrite, true
 }
 
 func isReadPath(p string) bool {

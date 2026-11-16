@@ -17,6 +17,7 @@ import StoragePage from "./components/storage/StoragePage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
+import BackupsPage from "./components/backups/BackupsPage";
 import HealthPage from "./components/health/HealthPage";
 import Launcher from "./components/Launcher";
 import Wizard from "./components/setup/Wizard";
@@ -133,6 +134,8 @@ function Shell() {
             <AppsPage />
           ) : page === "vms" ? (
             <VMsPage />
+          ) : page === "backups" ? (
+            <BackupsPage />
           ) : page === "health" ? (
             <HealthPage />
           ) : page === "audit" ? (

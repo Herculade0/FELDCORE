@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/store"
 )
@@ -62,6 +63,17 @@ func (s *Server) wireInstalls() {
 			Run: func(ctx context.Context, rep install.Reporter) error {
 				rep.Step("Installing Docker")
 				return wiz.SaveService(ctx, "docker", true)
+			},
+		})
+	}
+	if s.backups != nil {
+		dataDir := s.backups.DataDir
+		s.installs.Register("restic", install.Spec{
+			Label: "restic",
+			Apt:   true,
+			Run: func(ctx context.Context, rep install.Reporter) error {
+				rep.Step("Installing restic")
+				return backup.InstallRestic(ctx, dataDir)
 			},
 		})
 	}
