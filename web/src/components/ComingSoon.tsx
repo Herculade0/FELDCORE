@@ -1,13 +1,9 @@
 import { NAV, type NavKey } from "../nav";
 import { IconBadge } from "./ui";
 
-type Pending = Exclude<NavKey, "dashboard" | "shares" | "settings">;
+type Pending = Exclude<NavKey, "dashboard" | "shares" | "docker" | "settings">;
 
 const COPY: Record<Pending, { title: string; body: string }> = {
-  docker: {
-    title: "Docker",
-    body: "Run and manage containers, and install apps in one click from a store built on the Unraid Community Applications catalogue.",
-  },
   vms: {
     title: "Virtual Machines",
     body: "Create and control KVM virtual machines, with a console in the browser. Scheduled for a later phase.",

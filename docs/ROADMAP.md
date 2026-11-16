@@ -26,12 +26,26 @@ Follow-ups
 - [ ] HTTPS (the session cookie is only marked Secure when served over TLS)
 - [ ] Non-apt distributions: install support for dnf/pacman
 
-## M2 — Docker
-- [ ] Container list with state, stats, logs, start/stop/restart
-- [ ] Create container (image, ports, volumes, env)
-- [ ] App store: ingest Unraid Community Applications template catalog
+## M2 — Docker ✅ (container management)
+- [x] Detect Docker; install it (docker.io) from the UI
+- [x] Container list with state, live CPU/memory, ports, managed flag
+- [x] Lifecycle: start / stop / restart / remove (force when running)
+- [x] Logs viewer (demuxed stdout/stderr, auto-refresh)
+- [x] Create container (image pull, name, ports, volumes, env, restart policy)
+- [x] Engine API client over the unix socket (no heavy SDK dependency)
+
+### M2b — Docker app store 🔜
+- [ ] Ingest the Unraid Community Applications template catalogue
+- [ ] Browse / search apps, with icons and categories
 - [ ] One-click install from a template → running container
-- [ ] docker-compose stack import (stretch)
+- [ ] Update notifications for managed containers
+
+Follow-ups
+- [ ] Live log/stat streaming over WebSocket (today: polled)
+- [ ] Container detail view (full config, inspect)
+- [ ] Image management (remove unused, prune)
+- [ ] docker-compose stack import
+- [ ] Map a FELDCORE share into a container in one step
 
 ## M3 — Settings
 - [ ] Users & authentication management

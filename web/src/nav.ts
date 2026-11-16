@@ -38,7 +38,7 @@ export const NAV: NavItem[] = [
     label: "Docker",
     desc: "Containers & app store",
     icon: Container,
-    ready: false,
+    ready: true,
   },
   {
     key: "vms",

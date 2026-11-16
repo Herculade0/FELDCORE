@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/system"
 )
@@ -27,6 +28,7 @@ type Deps struct {
 	Sampler *system.Sampler
 	Auth    *auth.Service
 	Shares  *shares.Manager
+	Docker  *docker.Manager
 	WebRoot fs.FS
 	Log     *slog.Logger
 }
@@ -37,6 +39,7 @@ type Server struct {
 	sampler *system.Sampler
 	auth    *auth.Service
 	shares  *shares.Manager
+	docker  *docker.Manager
 	webRoot fs.FS
 	log     *slog.Logger
 }
@@ -45,7 +48,7 @@ type Server struct {
 func New(d Deps) *Server {
 	return &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
-		webRoot: d.WebRoot, log: d.Log,
+		docker: d.Docker, webRoot: d.WebRoot, log: d.Log,
 	}
 }
 
@@ -78,6 +81,9 @@ func (s *Server) Router() http.Handler {
 			// Long-lived or slow endpoints sit outside the short timeout.
 			r.Get("/system/stream", s.handleSystemStream)
 			r.Post("/shares/services/{service}/install", s.handleServiceInstall)
+			// Installing Docker and pulling images can take minutes.
+			r.Post("/docker/install", s.handleDockerInstall)
+			r.Post("/docker/containers", s.handleDockerCreate)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -93,6 +99,15 @@ func (s *Server) Router() http.Handler {
 				r.Post("/shares/users", s.handleShareUserCreate)
 				r.Put("/shares/users/{name}/password", s.handleShareUserPassword)
 				r.Delete("/shares/users/{name}", s.handleShareUserDelete)
+
+				r.Get("/docker/status", s.handleDockerStatus)
+				r.Get("/docker/containers", s.handleDockerContainers)
+				r.Get("/docker/images", s.handleDockerImages)
+				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
+				r.Post("/docker/containers/{id}/start", s.handleDockerStart)
+				r.Post("/docker/containers/{id}/stop", s.handleDockerStop)
+				r.Post("/docker/containers/{id}/restart", s.handleDockerRestart)
+				r.Delete("/docker/containers/{id}", s.handleDockerRemove)
 			})
 		})
 
@@ -163,18 +178,27 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 // fail maps a service error onto an HTTP response.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var (
-		authInput  *auth.InputError
-		shareInput *shares.InputError
-		shareOp    *shares.OpError
+		authInput   *auth.InputError
+		shareInput  *shares.InputError
+		shareOp     *shares.OpError
+		dockerInput *docker.InputError
+		dockerOp    *docker.OpError
 	)
 	switch {
 	case errors.As(err, &authInput):
 		writeError(w, http.StatusBadRequest, authInput.Msg)
 	case errors.As(err, &shareInput):
 		writeError(w, http.StatusBadRequest, shareInput.Msg)
+	case errors.As(err, &dockerInput):
+		writeError(w, http.StatusBadRequest, dockerInput.Msg)
 	case errors.As(err, &shareOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, shareOp.Msg)
+	case errors.As(err, &dockerOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, dockerOp.Msg)
+	case docker.NotFound(err):
+		writeError(w, http.StatusNotFound, "That container no longer exists.")
 	case errors.Is(err, shares.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That item no longer exists.")
 	case errors.Is(err, auth.ErrSetupDone):

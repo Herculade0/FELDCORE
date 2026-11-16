@@ -21,6 +21,9 @@ type Config struct {
 	SambaInclude string
 	// ExportsFile is the FELDCORE-owned NFS exports drop-in.
 	ExportsFile string
+
+	// DockerSocket is the Docker Engine API unix socket.
+	DockerSocket string
 }
 
 // envOr returns the value of the named env var, or def when unset/empty.
@@ -40,6 +43,7 @@ func Load() *Config {
 		SambaConf:    envOr("FELDCORE_SAMBA_CONF", "/etc/samba/smb.conf"),
 		SambaInclude: envOr("FELDCORE_SAMBA_INCLUDE", "/etc/samba/feldcore-shares.conf"),
 		ExportsFile:  envOr("FELDCORE_EXPORTS_FILE", "/etc/exports.d/feldcore.exports"),
+		DockerSocket: envOr("FELDCORE_DOCKER_SOCKET", "/var/run/docker.sock"),
 	}
 	flag.StringVar(&c.ListenAddr, "listen", envOr("FELDCORE_LISTEN", ":8787"),
 		"address to listen on (host:port)")

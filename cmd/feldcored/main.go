@@ -15,6 +15,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/api"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/config"
+	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
@@ -67,6 +68,7 @@ func main() {
 		Sampler: sampler,
 		Auth:    auth.New(st),
 		Shares:  shareMgr,
+		Docker:  docker.NewManager(cfg.DockerSocket, log),
 		WebRoot: webRoot,
 		Log:     log,
 	})

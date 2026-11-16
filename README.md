@@ -5,8 +5,9 @@ experience that are useful on *any* Linux box, minus the array/parity storage
 model. Drop one binary onto a Debian (or any systemd) machine and you get a
 clean web UI to manage the system, shares, Docker, and later VMs.
 
-> **Status: pre-alpha.** The dashboard, sign-in and Shares work. Docker and VM
-> management are next — see [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: pre-alpha.** The dashboard, sign-in, Shares and Docker work. The
+> Docker app store and VM management are next — see
+> [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why
 
@@ -32,7 +33,8 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **Dashboard** — live CPU, memory, load, uptime, per-mount storage, network throughput, per-core | ✅ working |
 | **Sign-in** — administrator account, sessions, everything behind a login | ✅ working |
 | **Shares** — create a folder, expose it over SMB (public, read-only or private with users) and NFS; installs Samba/NFS for you | ✅ working |
-| **Docker** — manage containers + an app store backed by Unraid Community Applications templates | 🔜 planned |
+| **Docker** — run and manage containers (state, live stats, logs, lifecycle), create from any image; installs Docker for you | ✅ working |
+| **Docker app store** — one-click installs from the Unraid Community Applications catalogue | 🔜 next |
 | **Settings** — users/auth, network, services, appearance | 🔜 planned |
 | **VMs** — KVM/libvirt management | 🧭 later |
 
@@ -85,6 +87,7 @@ make build        # builds web, embeds it, compiles ./bin/feldcored
 ```bash
 go test ./...                              # unit tests, safe anywhere
 sudo scripts/integration-shares.sh         # end-to-end against real Samba/NFS
+sudo scripts/integration-docker.sh         # end-to-end against real Docker
 ```
 
 The integration script installs packages and edits Samba configuration. Read
@@ -103,6 +106,10 @@ or a disposable VM.
 - Share users are unix accounts with no home and no login shell. FELDCORE only
   modifies or removes accounts it created.
 - Deleting a share never deletes files; only an empty folder is removed.
+- Docker is used over its unix socket (`/var/run/docker.sock`). The one-click
+  install adds your distribution's `docker.io` package. Containers FELDCORE
+  creates are tagged with a `feldcore.managed=true` label; it never alters
+  containers you started yourself.
 
 ## Layout
 
@@ -113,7 +120,7 @@ internal/api       HTTP/WebSocket surface + SPA serving
 internal/auth      administrator account + sessions
 internal/store     JSON state file (atomic writes)
 internal/shares    SMB/NFS share management
-internal/dockermgr container + app-store management (planned)
+internal/docker    Docker Engine API client + container management
 scripts/           integration tests
 web/               React front-end (Vite + Tailwind), embedded via go:embed
 deploy/            install.sh + systemd unit

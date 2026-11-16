@@ -7,10 +7,12 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import { LogoMark, Wordmark } from "./components/Logo";
 import { IconButton } from "./components/form";
 import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import ComingSoon from "./components/ComingSoon";
 import SharesPage from "./components/shares/SharesPage";
+import DockerPage from "./components/docker/DockerPage";
 
 export default function App() {
   return (
@@ -103,15 +105,19 @@ function Shell() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-10 md:pt-8">
-        {active === "dashboard" ? (
-          <Dashboard onNavigate={setActive} />
-        ) : active === "shares" ? (
-          <SharesPage />
-        ) : active === "settings" ? (
-          <SettingsPage />
-        ) : (
-          <ComingSoon nav={active} />
-        )}
+        <ErrorBoundary resetKey={active} area={NAV.find((n) => n.key === active)?.label}>
+          {active === "dashboard" ? (
+            <Dashboard onNavigate={setActive} />
+          ) : active === "shares" ? (
+            <SharesPage />
+          ) : active === "docker" ? (
+            <DockerPage />
+          ) : active === "settings" ? (
+            <SettingsPage />
+          ) : (
+            <ComingSoon nav={active} />
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* Mobile: bottom dock */}
