@@ -28,8 +28,8 @@ export default function UsersCard({
         </Button>
       </div>
       <p className="mt-3 text-xs font-medium leading-relaxed text-ink-3">
-        People who can open private SMB shares. These are separate from your FELDCORE sign-in and
-        can't log in to this server.
+        People who can open private SMB shares. These accounts are separate from Citizen ID and
+        cannot sign in to this server.
       </p>
 
       {!overview.services.smb.installed && (
