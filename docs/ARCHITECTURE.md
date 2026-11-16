@@ -24,6 +24,12 @@ The whole product ships as one executable with the web UI embedded via
 - **`internal/config`** — flags/env resolution.
 - **`internal/system`** — live metrics via gopsutil; keeps minimal state
   (previous network counters) to derive per-second rates.
+- **`internal/events`** — in-process bus. Packages publish events such as
+  `backup.failed`; the notification dispatcher is the subscriber. See
+  [EVENTS.md](EVENTS.md).
+- **`internal/health`** — SMART, temperatures, space, load, containers, VMs,
+  failed systemd units, certificates, and tunnels. A JSON ring file keeps a
+  week of graph points. Thresholds live in state.json.
 - **`internal/api`** — chi router. `/api/v1/*` JSON endpoints plus a WebSocket
   stream, and a read-only MCP server at `/mcp`. All other paths serve the
   embedded SPA with an index.html fallback.
@@ -91,7 +97,7 @@ behind authentication:
   leaked state file does not yield usable sessions. The cookie is HttpOnly and
   SameSite=Strict, and Secure when served over TLS.
 - **Agent tokens** are a second credential, for the owner's own agents. Each
-  is named, scoped (`read`, `containers`, `vms`, `admin`), and optional
+  is named, scoped (`read`, `containers`, `vms`, `files:read`, `files:write`, `admin`), and optional
   expiry. The secret is shown once. Only a SHA-256 hash is stored. Callers
   send `Authorization: Bearer`. A session cookie is still the administrator
   and is not limited by scopes. A token is. Admin does not include a shell:

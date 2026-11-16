@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { LogOut, Moon, Sun } from "lucide-react";
+import Bell from "./components/notify/Bell";
 import { NAV, type NavKey } from "./nav";
 import { VERSION } from "./version";
 import { ThemeProvider, useTheme } from "./lib/theme";
@@ -15,6 +16,7 @@ import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
+import HealthPage from "./components/health/HealthPage";
 import Launcher from "./components/Launcher";
 import Wizard from "./components/setup/Wizard";
 import { TerminalProvider } from "./components/Terminal";
@@ -91,6 +93,7 @@ function Shell() {
           })}
         </nav>
         <div className="flex items-center gap-1 border-t border-line px-1 pt-3">
+          {admin && <Bell />}
           <div className="min-w-0 flex-1 px-1">
             <div className="truncate text-xs font-bold text-ink">{username}</div>
             <div className="text-[10px] font-semibold tracking-wider text-ink-3">v{VERSION}</div>
@@ -107,6 +110,7 @@ function Shell() {
           <Wordmark />
         </div>
         <div className="flex">
+          {admin && <Bell />}
           <ThemeToggle />
           <SignOutButton />
         </div>
@@ -126,6 +130,8 @@ function Shell() {
             <AppsPage />
           ) : page === "vms" ? (
             <VMsPage />
+          ) : page === "health" ? (
+            <HealthPage />
           ) : page === "audit" ? (
             <AuditPage />
           ) : page === "settings" ? (
