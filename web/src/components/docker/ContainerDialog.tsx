@@ -3,6 +3,7 @@ import { Cpu, Loader2, Pencil, Plus, X } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { Alert, Button, IconButton, Modal, SelectField, TextField, Toggle, inputClass } from "../form";
 import ConfigDialog from "./ConfigDialog";
+import PublishForm from "../publish/PublishForm";
 import {
   blankConfig,
   configSummary,
@@ -212,6 +213,7 @@ export default function ContainerDialog({
         )}
 
         {spec && (
+          <>
           <fieldset disabled={locked || busy} className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
             {fromApp && requires && (
               <div className="rounded-2xl border border-warn/40 bg-warn/15 px-3 py-2 text-sm font-medium leading-relaxed text-ink">
@@ -390,6 +392,16 @@ export default function ContainerDialog({
 
             {error && <Alert>{error}</Alert>}
           </fieldset>
+          {container ? (
+            <div className="mt-5">
+              <PublishForm containerId={container.id} containerName={container.name} />
+            </div>
+          ) : (
+            <p className="mt-5 text-xs font-medium leading-relaxed text-ink-3">
+              Publish is available after the container exists. Create it, open it again, and turn on the switch.
+            </p>
+          )}
+          </>
         )}
       </Modal>
 

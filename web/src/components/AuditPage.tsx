@@ -11,6 +11,9 @@ interface Event {
   action: string;
   target?: string;
   result: string;
+  ip?: string;
+  host?: string;
+  detail?: Record<string, string>;
 }
 
 interface Log {
@@ -64,7 +67,7 @@ export default function AuditPage() {
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Audit</h1>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
-            Every API and MCP call made with an agent token.
+            Every API and MCP call made with an agent token, and every published request the protection layer blocked.
             {log
               ? ` The newest ${log.maxEvents.toLocaleString()} are kept, for ${log.retentionDays} days.`
               : ""}
@@ -102,6 +105,9 @@ export default function AuditPage() {
                     <div className="truncate text-xs font-medium text-ink-3">
                       {ev.tokenName}
                       {ev.target ? ` · ${ev.target}` : ""}
+                      {ev.detail?.reason ? ` · ${ev.detail.reason}` : ""}
+                      {ev.ip ? ` · ${ev.ip}` : ""}
+                      {ev.host ? ` · ${ev.host}` : ""}
                     </div>
                   </div>
                   <span className={`w-fit rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${tone.cls}`}>
