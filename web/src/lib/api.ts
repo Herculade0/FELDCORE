@@ -4,6 +4,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Parsed JSON body, when the server sent one. */
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -47,7 +49,7 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
       data && typeof data === "object" && "error" in data && typeof data.error === "string"
         ? data.error
         : `The request failed (${res.status}).`;
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, data);
   }
   return data as T;
 }

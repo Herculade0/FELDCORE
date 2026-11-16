@@ -21,6 +21,7 @@ type fakeEngine struct {
 	ports   []docker.PublishedPort
 	state   string
 	mode    string
+	joined  []string
 }
 
 func (f *fakeEngine) Ready(context.Context) bool { return f.ready }
@@ -36,8 +37,11 @@ func (f *fakeEngine) SystemState(context.Context, string) (string, error) {
 	}
 	return f.state, nil
 }
-func (f *fakeEngine) EnsureNetwork(context.Context, string) error          { return nil }
-func (f *fakeEngine) ConnectNetwork(context.Context, string, string) error { return nil }
+func (f *fakeEngine) EnsureNetwork(context.Context, string) error { return nil }
+func (f *fakeEngine) ConnectNetwork(_ context.Context, network, container string) error {
+	f.joined = append(f.joined, network+" "+container)
+	return nil
+}
 func (f *fakeEngine) NetworkMode(context.Context, string) (string, error) {
 	if f.mode == "" {
 		return "bridge", nil
@@ -182,5 +186,37 @@ func TestGatewayRoutePointsAtDaemon(t *testing.T) {
 	}
 	if !strings.Contains(text, "tls internal") {
 		t.Fatalf("caddyfile %s", text)
+	}
+}
+
+func TestAttachJoinsTheProxyNetwork(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := store.Open(dir)
+	box, _ := secrets.Open(dir)
+	eng := &fakeEngine{ready: true}
+	svc := &Service{Store: st, Secrets: box, Engine: eng, DataDir: dir, Listen: func() []int { return nil }}
+	if err := svc.SetRoute(RouteInput{Container: "plex", Hostname: "plex.home.arpa", Port: 32400, TLS: "internal", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.joined) != 1 || eng.joined[0] != docker.ProxyNetwork+" plex" {
+		t.Fatalf("joined %+v", eng.joined)
+	}
+
+	eng.mode = "container:feldcore-vpn-proton-nl"
+	eng.joined = nil
+	if err := svc.Attach(context.Background(), "plex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.joined) != 0 {
+		t.Fatalf("vpn workload was attached: %+v", eng.joined)
+	}
+	if err := svc.Attach(context.Background(), "other"); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.joined) != 0 {
+		t.Fatal("unrouted container was attached")
 	}
 }
