@@ -15,6 +15,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/disk"
 
+	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
@@ -23,11 +24,29 @@ func realRoot() bool { return os.Geteuid() == 0 }
 type realCmd struct{}
 
 func (realCmd) Run(ctx context.Context, name string, args ...string) (string, error) {
+	// apt can sit for several minutes on a first install. A short cap used to
+	// kill a libvirt install that was still making progress.
+	timeout := 3 * time.Minute
+	if name == "apt-get" || name == "apt" {
+		timeout = 20 * time.Minute
+	}
+	// An install job puts a log hook on ctx. Stream in that case so the page
+	// can show apt and dpkg while they run. Other callers keep one blob.
+	if install.WantsLines(ctx) {
+		text, err := install.Run(ctx, timeout, name, args...)
+		if err != nil {
+			if text == "" {
+				text = err.Error()
+			}
+			return text, fmt.Errorf("%s", text)
+		}
+		return text, nil
+	}
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return "", fmt.Errorf("%s is not installed", name)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "DEBIAN_FRONTEND=noninteractive")

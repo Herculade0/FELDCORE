@@ -21,6 +21,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/remote"
@@ -74,6 +75,7 @@ type Server struct {
 	vpn        *vpn.Service
 	backups    *backup.Service
 	mail       *notify.Service
+	installs   *install.Runner
 }
 
 // New returns a Server.
@@ -85,6 +87,7 @@ func New(d Deps) *Server {
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 		vpn: d.VPN, backups: d.Backups, mail: d.Mail,
 	}
+	s.wireInstalls()
 	s.initMCP()
 	return s
 }
@@ -226,6 +229,10 @@ func (s *Server) Router() http.Handler {
 				r.Delete("/docker/containers/{id}/snapshots/{snap}", s.handleSnapshotDelete)
 				r.Get("/docker/images", s.handleDockerImages)
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
+
+				r.Get("/installs", s.handleInstalls)
+				r.Get("/installs/{id}", s.handleInstall)
+				r.Post("/installs", s.handleInstallStart)
 
 				r.Get("/audit", s.handleAudit)
 				r.Get("/agent/tokens", s.handleTokensList)
