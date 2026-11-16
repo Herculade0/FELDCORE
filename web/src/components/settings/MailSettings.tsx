@@ -102,7 +102,8 @@ export default function MailNotifications() {
         <CardTitle icon={Mail} title="Notifications" hint="Off until you turn them on" />
         <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
           Email when a container stops unexpectedly, or when a FELDCORE update is published. Generic SMTP, Proton
-          Mail Bridge, or a Proton SMTP token for a custom domain.
+          Mail Bridge, or a Proton SMTP token for a custom domain. Other channels, quiet hours, and routing are in
+          the card below.
         </p>
         {error && (
           <div className="mt-3">

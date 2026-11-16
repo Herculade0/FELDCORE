@@ -21,6 +21,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/notify"
@@ -106,6 +107,7 @@ func main() {
 	wiz := setup.New(setup.Deps{
 		Store: st, Shares: shareMgr, DataDir: cfg.DataDir,
 		ListenPort: listenPort(cfg.ListenAddr), Log: log,
+		Skip: cfg.SkipWizard,
 	})
 	if code, err := wiz.EnsureCode(); err != nil {
 		log.Error("could not prepare the setup code", "err", err)
@@ -128,6 +130,12 @@ func main() {
 		DataDir: cfg.DataDir, Version: version.Current, Log: log,
 	}
 	authSvc := auth.New(st)
+	authSvc.UseSecrets(box)
+	wiz.UseAccounts(authSvc)
+	wiz.UseAudit(authSvc)
+	wiz.UseSecrets(box)
+	wiz.UseMail(mail)
+	wiz.UseDrive(backups)
 	pubPort := publishListenPort()
 	remoteSvc := &remote.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
@@ -137,6 +145,8 @@ func main() {
 		GatewayPort: pubPort,
 		Log:         log,
 	}
+	wiz.UseTunnel(remoteSvc)
+	wiz.UseVPN(vpnSvc)
 	proxySvc := &proxy.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
 		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), GatewayPort: pubPort, Log: log,
@@ -146,7 +156,6 @@ func main() {
 		Resolve: dockerMgr, Trust: dockerMgr.TrustedPeer,
 		DataDir: cfg.DataDir, GatewayPort: pubPort, Log: log, Audit: authSvc,
 	}
-	pubSvc.SetAuth(publish.AllowAll{})
 	pubSvc.OpenGeo()
 	snapSvc := snapshots.Open(st, dockerMgr, cfg.DataDir, func() string {
 		return filepath.Join(cfg.SharesRoot, "system", "snapshots")
@@ -155,6 +164,7 @@ func main() {
 	go vpnSvc.Restore(ctx)
 	go vpnSvc.KeepForwarded(ctx)
 	go backups.Loop(ctx)
+	healthSvc, alerts := wireMonitor(ctx, cfg, st, box, log, mail, dockerMgr, remoteSvc, vpnSvc)
 	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
 		cs, err := dockerMgr.Containers(ctx)
 		if err != nil {
@@ -201,11 +211,17 @@ func main() {
 		log.Error("cannot open storage", "err", err)
 		os.Exit(1)
 	}
+	// The wizard's storage step and the Storage page share this controller.
+	wiz.UseVolume(diskSvc)
 
+	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: authSvc, Log: log, Trust: dockerMgr.TrustedPeer})
+	authSvc.SetSecondFactor(cid.AdminFactor)
+	pubSvc.SetAuth(publish.CitizenAuth(cid))
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
 		Auth:    authSvc,
+		Citizen: cid,
 		Shares:  shareMgr,
 		Docker:  dockerMgr,
 		Apps: apps.New(apps.Deps{
@@ -243,6 +259,8 @@ func main() {
 		Mail:       mail,
 		Publish:    pubSvc,
 		Storage:    diskSvc,
+		Health:     healthSvc,
+		Alerts:     alerts,
 	})
 	go func() {
 		if err := diskSvc.Restore(ctx); err != nil {

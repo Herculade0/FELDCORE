@@ -1,6 +1,9 @@
 // Thin client for the daemon's JSON API.
 
 export class ApiError extends Error {
+  /** Set when sign-in needs an authenticator code. */
+  totpRequired: boolean;
+
   constructor(
     public status: number,
     message: string,
@@ -8,6 +11,11 @@ export class ApiError extends Error {
     public body?: unknown,
   ) {
     super(message);
+    this.totpRequired =
+      body !== null &&
+      typeof body === "object" &&
+      "totpRequired" in body &&
+      (body as { totpRequired?: unknown }).totpRequired === true;
   }
 }
 

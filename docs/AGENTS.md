@@ -21,13 +21,13 @@ address.
 
 | Scope | What it allows |
 | --- | --- |
-| `read` | Look at the host, shares, the App Store, containers, container logs, VMs, and the storage inventory. Required for MCP. |
+| `read` | Look at the host, shares, the App Store, containers, container logs, VMs, the storage inventory, health status and history, and the notification inbox. Required for MCP. |
 | `containers` | Create, start, stop, restart and delete containers over the HTTP API. |
 | `vms` | Create, edit, start, stop and delete virtual machines over the HTTP API. Listing VMs is `read`. |
 | `files:read` | List, preview and download files in a share. |
 | `files:write` | Upload, rename, move, copy and delete files in a share. Includes `files:read`. |
 | `storage` | Create and change pools, mount them by UUID, add or replace a disk, and run scrub, balance and trim. Looking at disks is `read`. |
-| `admin` | Settings, shares, tokens and every other API call. Includes the scopes above. |
+| `admin` | Settings, shares, tokens, health thresholds, notification channels, and every other API call. Includes the scopes above. |
 
 `admin` does not include a shell. The host terminal, container consoles and a VM's VNC console stay on the signed-in browser session. An agent token that calls them is refused and the refusal is written to the audit log.
 
@@ -91,12 +91,13 @@ All of them are read-only. There is no shell, exec, or terminal tool.
 | `container_logs` | The last lines of one container's logs (`id`, optional `tail`, capped at 500) |
 | `list_apps` | App Store apps, or a search (`query`, optional `limit`) |
 | `list_vms` | Virtual machines when virsh is installed. Otherwise it says the VM layer is not installed. Listing uses `virsh -r`, which cannot start or stop a domain. |
+| `health_report` | Latest health checks: SMART, temperatures, disk space, load, containers, VMs, failed units, certificates, and tunnels. |
 
 `list_apps` reads the catalogue already cached on the server. It does not download or install anything.
 
 ## Audit
 
-**Audit** in the sidebar lists every call authenticated with a token, every package install started from the UI, and every published request the protection layer blocked: token name (or `admin` for an install, `protection` for a block), action, target, time and result (`ok`, `denied` or `error`). An install writes `install started`, then `install finished` or `install failed`. A block writes `publish.block`. Browser sign-in is not listed. The log keeps the newest 1,000 entries, and drops anything older than 90 days.
+**Audit** in the sidebar lists every call authenticated with a token, every package install started from the UI, health checks started by hand, health-threshold and notification setting changes, every published request the protection layer blocked, and Citizen ID sign-ins, failures, and access denials. A row shows the name (or `admin` for an install or a browser setting change, `protection` for a block), action, target, time and result (`ok`, `denied` or `error`). An install writes `install started`, then `install finished` or `install failed`. A block writes `publish.block`. Anonymous sign-in noise is aggregated so it cannot push those entries out of the log. The log keeps the newest 1,000 entries, and drops anything older than 90 days.
 
 ## If a token leaks
 

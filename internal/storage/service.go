@@ -73,6 +73,9 @@ type Service struct {
 	run         Executor
 	now         func() time.Time
 	jobs        Jobs
+	// fstab is where a wizard ext4 disk is recorded. Empty means /etc/fstab,
+	// and it is written only when the daemon is allowed to change the system.
+	fstab string
 }
 
 // Open loads storage.json. It does not format, mount or spin down anything;
