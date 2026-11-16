@@ -18,6 +18,7 @@ import { ACCENTS, useTheme, type Mode } from "../lib/theme";
 import { shortCpu } from "../lib/format";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, SelectField, TextField, Toggle } from "./form";
+import AgentAccessCard from "./AgentAccess";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -51,7 +52,7 @@ interface Settings {
   defaults: { removeImage: boolean };
 }
 
-export default function SettingsPage() {
+export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void }) {
   const { mode, accent, setMode, setAccent } = useTheme();
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -77,7 +78,7 @@ export default function SettingsPage() {
       <header>
         <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Settings</h1>
         <p className="mt-2 text-sm font-semibold text-ink-2">
-          Appearance, this server, and the services FELDCORE runs.
+          Appearance, this server, the services FELDCORE runs, and agent access.
         </p>
       </header>
 
@@ -142,6 +143,7 @@ export default function SettingsPage() {
           <NetworkCard settings={settings} onSaved={reload} />
           <ServicesCard services={settings.services} onSaved={reload} />
           <SecurityCard settings={settings} onSaved={reload} />
+          <AgentAccessCard onOpenAudit={onOpenAudit} />
           <UpdatesCard settings={settings} onSaved={reload} />
           <AppsCard settings={settings} onSaved={reload} />
           <DefaultsCard settings={settings} onSaved={reload} />

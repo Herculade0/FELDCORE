@@ -60,6 +60,24 @@ Follow-ups
 - [ ] Choose a specific GPU when a server has more than one
 - [ ] Warn when a chosen host port is already allocated, before applying
 
+## M2c — Agent access, phase 1 ✅
+The owner's own agents (Claude Code, a Grok assistant, or any MCP client) can read the server without a browser session.
+- [x] Named API tokens with scopes `read`, `containers`, `vms` and `admin`, optional expiry, last-used time, and revoke
+- [x] The secret is shown once. Only a SHA-256 hash is stored
+- [x] Bearer auth on `/api/v1`, beside the session cookie, with scopes enforced on the server
+- [x] **Revoke all agent access**
+- [x] Read-only MCP server at `/mcp` (streamable HTTP, bearer token): system info and stats, shares, containers (status, ports, image), container logs, App Store list and search, VMs when that layer is installed
+- [x] No shell or exec tool. Agent tokens cannot open the host terminal or a container console
+- [x] Audit log of every token-authenticated API and MCP call, with a page in the UI. Newest 1,000 entries, 90 days
+- See [AGENTS.md](AGENTS.md)
+
+## M2d — Agent access, phase 2
+Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP server stay as they are.
+- [ ] MCP write tools: install an app from the catalogue, and start, stop and restart containers and VMs
+- [ ] An approval queue for destructive actions. Delete, network and firewall changes, and any shell are not applied by the agent. The request shows in the UI as **pending approval**, and the administrator approves or denies it
+- [ ] The queue records who asked, which token, the exact action, and the decision in the audit log
+- [ ] A token still cannot open a shell on its own. If a shell is ever offered to an agent, that request waits for approval like the other destructive actions
+
 ## M3 — Settings
 - [ ] Users & authentication management
 - [ ] Network overview / hostname
@@ -119,5 +137,6 @@ The machine you run is the booted image plus the config partition.
 ## Cross-cutting
 - [ ] Packaging: .deb, and a one-line curl installer
 - [ ] Config persistence (embedded db or on-disk state in /var/lib/feldcore)
+- [x] Audit log of calls made with an agent token (see M2c)
 - [ ] Audit log of changes FELDCORE makes to the system
 - [ ] Tests + CI
