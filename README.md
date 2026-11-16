@@ -5,8 +5,8 @@ experience that are useful on *any* Linux box, minus the array/parity storage
 model. Drop one binary onto a Debian (or any systemd) machine and you get a
 clean web UI to manage the system, shares, Docker, and later VMs.
 
-> **Status: pre-alpha.** The dashboard is real and live. Shares, Docker, and VM
-> management are in progress — see [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: pre-alpha.** The dashboard, sign-in and Shares work. Docker and VM
+> management are next — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why
 
@@ -30,7 +30,8 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | Area | Status |
 |------|--------|
 | **Dashboard** — live CPU, memory, load, uptime, per-mount storage, network throughput, per-core | ✅ working |
-| **Shares** — create a managed directory, toggle SMB/NFS per share | 🔜 next |
+| **Sign-in** — administrator account, sessions, everything behind a login | ✅ working |
+| **Shares** — create a folder, expose it over SMB (public, read-only or private with users) and NFS; installs Samba/NFS for you | ✅ working |
 | **Docker** — manage containers + an app store backed by Unraid Community Applications templates | 🔜 planned |
 | **Settings** — users/auth, network, services, appearance | 🔜 planned |
 | **VMs** — KVM/libvirt management | 🧭 later |
@@ -62,12 +63,16 @@ Requires Go 1.24+ and Node 20+.
 
 ```bash
 # Terminal 1 — back-end (serves API on :8787)
-go run ./cmd/feldcored
+go run ./cmd/feldcored -data-dir ./.data
 
 # Terminal 2 — front-end dev server with hot reload (proxies /api to :8787)
 npm --prefix web install
 npm --prefix web run dev
 ```
+
+Without root the daemon runs and the UI works, but it cannot change file
+sharing on the machine; the Shares page says so. To exercise shares for real,
+run the built binary as root (`sudo ./bin/feldcored`).
 
 Build the production single binary (UI embedded):
 
@@ -75,14 +80,41 @@ Build the production single binary (UI embedded):
 make build        # builds web, embeds it, compiles ./bin/feldcored
 ```
 
+### Tests
+
+```bash
+go test ./...                              # unit tests, safe anywhere
+sudo scripts/integration-shares.sh         # end-to-end against real Samba/NFS
+```
+
+The integration script installs packages and edits Samba configuration. Read
+the warning at the top of the file and run it only on a development machine
+or a disposable VM.
+
+## What FELDCORE changes on your system
+
+- State lives in `/var/lib/feldcore/state.json` (root-only).
+- Share folders are created under `/srv/feldcore` (`-shares-root` to change).
+- Samba: one line, `include = /etc/samba/feldcore-shares.conf`, is appended to
+  `/etc/samba/smb.conf` the first time a share needs it. The original is saved
+  as `smb.conf.feldcore-backup`. FELDCORE only ever rewrites its own included
+  file, and validates with `testparm` before reloading.
+- NFS: exports are written to `/etc/exports.d/feldcore.exports`.
+- Share users are unix accounts with no home and no login shell. FELDCORE only
+  modifies or removes accounts it created.
+- Deleting a share never deletes files; only an empty folder is removed.
+
 ## Layout
 
 ```
 cmd/feldcored      daemon entrypoint
 internal/system    live host metrics (gopsutil)
 internal/api       HTTP/WebSocket surface + SPA serving
-internal/shares    SMB/NFS share management        (wip)
-internal/dockermgr container + app-store management (wip)
+internal/auth      administrator account + sessions
+internal/store     JSON state file (atomic writes)
+internal/shares    SMB/NFS share management
+internal/dockermgr container + app-store management (planned)
+scripts/           integration tests
 web/               React front-end (Vite + Tailwind), embedded via go:embed
 deploy/            install.sh + systemd unit
 docs/              architecture & roadmap

@@ -14,3 +14,6 @@ web/dist/*
 *.log
 .idea/
 .vscode/
+
+# Local development state
+/.data/

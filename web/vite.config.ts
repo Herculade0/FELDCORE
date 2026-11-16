@@ -11,7 +11,9 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://localhost:8787",
-        changeOrigin: true,
+        // Keep the browser's Host header: the daemon checks that Origin
+        // matches Host on writes and on the WebSocket handshake.
+        changeOrigin: false,
         ws: true,
       },
     },

@@ -31,7 +31,7 @@ export const NAV: NavItem[] = [
     label: "Shares",
     desc: "SMB & NFS folders",
     icon: FolderTree,
-    ready: false,
+    ready: true,
   },
   {
     key: "docker",

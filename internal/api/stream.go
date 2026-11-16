@@ -17,10 +17,9 @@ const writeTimeout = 5 * time.Second
 // handleSystemStream replays the recent history window to a new client, then
 // pushes each live sample as the sampler produces it.
 func (s *Server) handleSystemStream(w http.ResponseWriter, r *http.Request) {
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// The Vite dev server runs on a different origin.
-		InsecureSkipVerify: true,
-	})
+	// Accept enforces that the Origin header matches the Host, so another
+	// site cannot open this stream with the visitor's session.
+	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}

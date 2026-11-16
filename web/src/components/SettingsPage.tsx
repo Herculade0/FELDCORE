@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check, Info as InfoIcon, Monitor, Moon, Palette, Sun, type LucideIcon } from "lucide-react";
 import type { Info } from "../types";
 import { VERSION } from "../version";
+import { api } from "../lib/api";
 import { ACCENTS, useTheme, type Mode } from "../lib/theme";
 import { shortCpu } from "../lib/format";
 import { Card, CardTitle } from "./ui";
@@ -17,8 +18,7 @@ export default function SettingsPage() {
   const [info, setInfo] = useState<Info | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/system/info")
-      .then((r) => (r.ok ? r.json() : null))
+    api<Info>("/system/info")
       .then(setInfo)
       .catch(() => setInfo(null));
   }, []);

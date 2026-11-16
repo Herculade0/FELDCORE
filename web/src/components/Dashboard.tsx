@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Info, Stats } from "../types";
 import { NAV, type NavKey } from "../nav";
+import { api } from "../lib/api";
 import { HISTORY_SIZE, useStatsStream } from "../lib/useStream";
 import { bytes, bytesPerSec, duration, greeting, shortCpu } from "../lib/format";
 import { Bar, Card, CardTitle, IconBadge, StatusPill } from "./ui";
@@ -23,8 +24,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
   const [info, setInfo] = useState<Info | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/system/info")
-      .then((r) => (r.ok ? r.json() : null))
+    api<Info>("/system/info")
       .then(setInfo)
       .catch(() => setInfo(null));
   }, []);

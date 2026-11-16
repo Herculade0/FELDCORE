@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Stats } from "../types";
+import { api } from "./api";
 
 export type StreamStatus = "connecting" | "live" | "offline";
 
@@ -51,6 +52,9 @@ export function useStatsStream(): {
       ws.onclose = () => {
         if (closed) return;
         setStatus("offline");
+        // If the stream dropped because the session ended, this request
+        // comes back 401 and the app returns to the sign-in screen.
+        api("/system/stats").catch(() => {});
         const delay = Math.min(1000 * 2 ** retry.current, 10000);
         retry.current += 1;
         timer = setTimeout(connect, delay);

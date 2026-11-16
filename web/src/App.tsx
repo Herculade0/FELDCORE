@@ -1,23 +1,47 @@
 import { useState } from "react";
-import { Moon, Sun } from "lucide-react";
+import { LogOut, Moon, Sun } from "lucide-react";
 import { NAV, type NavKey } from "./nav";
 import { VERSION } from "./version";
 import { ThemeProvider, useTheme } from "./lib/theme";
+import { AuthProvider, useAuth } from "./lib/auth";
 import { LogoMark, Wordmark } from "./components/Logo";
+import { IconButton } from "./components/form";
+import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import ComingSoon from "./components/ComingSoon";
+import SharesPage from "./components/shares/SharesPage";
 
 export default function App() {
   return (
     <ThemeProvider>
-      <Shell />
+      <AuthProvider>
+        <Gate />
+      </AuthProvider>
     </ThemeProvider>
   );
 }
 
+/** Nothing behind this renders until the visitor is signed in. */
+function Gate() {
+  const { phase } = useAuth();
+  switch (phase) {
+    case "ready":
+      return <Shell />;
+    case "setup":
+      return <SetupScreen />;
+    case "login":
+      return <LoginScreen />;
+    case "unreachable":
+      return <LoadingScreen unreachable />;
+    default:
+      return <LoadingScreen />;
+  }
+}
+
 function Shell() {
   const [active, setActive] = useState<NavKey>("dashboard");
+  const { username } = useAuth();
 
   return (
     <div className="min-h-screen md:pl-[17.5rem]">
@@ -56,11 +80,13 @@ function Shell() {
             );
           })}
         </nav>
-        <div className="flex items-center justify-between px-2">
-          <span className="text-[10px] font-semibold tracking-wider text-ink-3">
-            v{VERSION} · pre-alpha
-          </span>
+        <div className="flex items-center gap-1 border-t border-line px-1 pt-3">
+          <div className="min-w-0 flex-1 px-1">
+            <div className="truncate text-xs font-bold text-ink">{username}</div>
+            <div className="text-[10px] font-semibold tracking-wider text-ink-3">v{VERSION}</div>
+          </div>
           <ThemeToggle />
+          <SignOutButton />
         </div>
       </aside>
 
@@ -70,12 +96,17 @@ function Shell() {
           <LogoMark size={32} />
           <Wordmark />
         </div>
-        <ThemeToggle />
+        <div className="flex">
+          <ThemeToggle />
+          <SignOutButton />
+        </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-10 md:pt-8">
         {active === "dashboard" ? (
           <Dashboard onNavigate={setActive} />
+        ) : active === "shares" ? (
+          <SharesPage />
         ) : active === "settings" ? (
           <SettingsPage />
         ) : (
@@ -113,13 +144,17 @@ function ThemeToggle() {
   const { resolved, setMode } = useTheme();
   const next = resolved === "dark" ? "light" : "dark";
   return (
-    <button
-      onClick={() => setMode(next)}
-      aria-label={`Switch to ${next} theme`}
-      title={`Switch to ${next} theme`}
-      className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-2 transition-colors hover:bg-accent/10 hover:text-accent"
-    >
+    <IconButton label={`Switch to ${next} theme`} onClick={() => setMode(next)}>
       {resolved === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-    </button>
+    </IconButton>
+  );
+}
+
+function SignOutButton() {
+  const { signOut } = useAuth();
+  return (
+    <IconButton label="Sign out" onClick={() => void signOut()}>
+      <LogOut size={17} />
+    </IconButton>
   );
 }

@@ -51,6 +51,7 @@
 :root {
   color-scheme: light;
   --bg: #f4f7fd;
+  --panel: #ffffff;
   --surface: rgba(255, 255, 255, 0.78);
   --surface-2: rgba(255, 255, 255, 0.6);
   --line: rgba(11, 40, 110, 0.1);
@@ -70,6 +71,7 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --bg: #050a18;
+  --panel: #0b1428;
   --surface: rgba(120, 160, 255, 0.07);
   --surface-2: rgba(120, 160, 255, 0.05);
   --line: rgba(140, 175, 255, 0.13);
@@ -136,6 +138,13 @@ body::before {
     -webkit-backdrop-filter: blur(24px) saturate(150%);
     backdrop-filter: blur(24px) saturate(150%);
     box-shadow: var(--shadow);
+  }
+
+  /* Opaque surface for dialogs, where text must stay readable over anything. */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.55);
   }
 
   .accent-gradient {

@@ -65,9 +65,30 @@ embedded in the binary, so there is no separate web server to run.
 - libvirt/KVM domains managed through the libvirt API; VNC/SPICE console in the
   browser.
 
-## Security model (to design)
+## Security model
 
-Privileged operations (editing system config, controlling services) require the
-daemon to run as root or with targeted capabilities. Access to the UI will be
-gated by authentication before any write features ship. This is tracked as a
-prerequisite for the Shares milestone.
+The daemon runs as root because its job is to edit system configuration,
+control services and create accounts. Everything it exposes is therefore
+behind authentication:
+
+- **One administrator account**, created on first run. Until it exists the API
+  only offers the setup endpoint; afterwards setup is refused. A fresh install
+  should be set up promptly, since whoever reaches it first claims it.
+- **Passwords** are hashed with bcrypt. Failed sign-ins are rate limited per
+  client address.
+- **Sessions** are random 256-bit tokens. Only a SHA-256 hash is stored, so a
+  leaked state file does not yield usable sessions. The cookie is HttpOnly and
+  SameSite=Strict, and Secure when served over TLS.
+- **Cross-site requests**: state-changing requests whose Origin does not match
+  the Host are refused, and the WebSocket handshake enforces the same.
+- **Every `/api/v1` route except health and the login flow requires a
+  session**, including read-only metrics.
+
+Input that ends up in system configuration is validated against strict
+patterns (share names, user names, NFS clients) and free text is sanitised, so
+a request cannot inject extra Samba or exports directives. Commands are run
+directly with argument lists, never through a shell, and passwords are passed
+on stdin rather than the command line.
+
+Not yet done: TLS termination (run behind a reverse proxy, or on a trusted
+LAN, for now), multiple users and roles, and an audit log.
