@@ -140,7 +140,8 @@ func (d *Docker) ApplyBridge(ctx context.Context, dataDir string) error {
 	}
 	spec := docker.Spec{
 		Name: notify.BridgeName, Image: notify.BridgeImage,
-		Network: "bridge", RestartPolicy: "unless-stopped", Autostart: true,
+		Network: "bridge", Isolate: docker.IsolateShared,
+		RestartPolicy: "unless-stopped", Autostart: true,
 		Configs: []docker.Config{
 			{Type: docker.TypePort, HostIP: "127.0.0.1", HostPort: notify.BridgePort, ContainerPort: 25, Proto: "tcp"},
 			{Type: docker.TypePath, Host: dataDir + "/proton-bridge", Container: "/root", Mode: "rw"},
@@ -231,7 +232,7 @@ func (b Bridge) Running(ctx context.Context, name string) (bool, error) {
 
 func gatewaySpec(g vpn.Gateway) docker.Spec {
 	spec := docker.Spec{
-		Name: g.Name, Image: g.Image, Network: "bridge",
+		Name: g.Name, Image: g.Image, Network: "bridge", Isolate: docker.IsolateShared,
 		RestartPolicy: "unless-stopped", Autostart: g.Start, Gateway: true,
 		ExtraParams: "--cap-add=NET_ADMIN",
 	}

@@ -268,6 +268,9 @@ type Prefs struct {
 	// Empty means the domains and isos shares under the shares root.
 	VMDomains string `json:"vmDomains,omitempty"`
 	VMISOs    string `json:"vmISOs,omitempty"`
+	// AllowLANURLs lets a URL download reach private network addresses.
+	// Localhost, link-local and cloud metadata addresses stay blocked.
+	AllowLANURLs bool `json:"allowLANURLs,omitempty"`
 }
 
 // VPN is the WireGuard feature. Enabled is the master switch and defaults off.

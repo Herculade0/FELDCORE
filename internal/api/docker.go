@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -49,16 +50,68 @@ func (s *Server) handleDockerCreate(w http.ResponseWriter, r *http.Request) {
 	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
+	if !s.allowRisk(w, &spec) {
+		return
+	}
 	if err := s.syncVPN(r, spec); err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	id, err := s.docker.Create(r.Context(), spec)
+	if id != "" {
+		s.attachProxy(r.Context(), id, spec.Name)
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+// handleDockerReview reports risky settings and, when asked, applies the
+// trivial safer edit. It does not create or change a container.
+func (s *Server) handleDockerReview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Spec  docker.Spec `json:"spec"`
+		Apply []string    `json:"apply"`
+	}
+	if !readJSONLimit(w, r, &req, 1<<20) {
+		return
+	}
+	spec := docker.ApplySafer(req.Spec, req.Apply)
+	findings := docker.Review(spec)
+	writeJSON(w, http.StatusOK, map[string]any{"spec": spec, "findings": findings})
+}
+
+// allowRisk rejects a high-risk spec until the caller sets deployAnyway.
+func (s *Server) allowRisk(w http.ResponseWriter, spec *docker.Spec) bool {
+	findings := docker.Review(*spec)
+	if docker.NeedsAck(findings) && !spec.DeployAnyway {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":    "This setup has high-risk settings. Read the warnings, apply a safer setting, or choose Deploy anyway.",
+			"findings": findings,
+		})
+		return false
+	}
+	spec.DeployAnyway = false
+	return true
+}
+
+// attachProxy puts the container on the proxy network when a hostname
+// already points at it. Recreating a container drops that extra network.
+func (s *Server) attachProxy(ctx context.Context, id, name string) {
+	if s.proxy == nil {
+		return
+	}
+	if name == "" && s.docker != nil {
+		if info, err := s.docker.Spec(ctx, id); err == nil {
+			name = info.Spec.Name
+		}
+	}
+	if name == "" {
+		return
+	}
+	_ = s.proxy.Attach(ctx, name)
 }
 
 // handleDockerSpec returns a container's current settings for the edit dialog.
@@ -72,8 +125,9 @@ func (s *Server) handleDockerSpec(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDockerUpdate applies edited settings by recreating the container.
-// A snapshot is taken first so the previous image, settings and appdata can
-// be put back from the container's Snapshots panel.
+// High-risk settings are refused before anything is changed. A snapshot is
+// then taken so the previous image, settings and appdata can be put back
+// from the container's Snapshots panel.
 func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 	var spec docker.Spec
 	if !readJSONLimit(w, r, &spec, 1<<20) {
@@ -82,6 +136,9 @@ func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 	s.quietName(r, chi.URLParam(r, "id"))
 	if spec.Name != "" {
 		s.quietName(r, spec.Name)
+	}
+	if !s.allowRisk(w, &spec) {
+		return
 	}
 	if s.snaps != nil {
 		if err := s.snaps.BeforeChange(r.Context(), chi.URLParam(r, "id"), "Automatic snapshot before the container was changed"); err != nil {
@@ -94,6 +151,9 @@ func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := s.docker.Update(r.Context(), chi.URLParam(r, "id"), spec)
+	if id != "" {
+		s.attachProxy(r.Context(), id, spec.Name)
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -181,6 +241,9 @@ func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerInstall(w http.ResponseWriter, r *http.Request) {
+	if s.acceptInstall(w, r, "docker") {
+		return
+	}
 	if err := s.docker.Install(r.Context()); err != nil {
 		s.fail(w, r, err)
 		return

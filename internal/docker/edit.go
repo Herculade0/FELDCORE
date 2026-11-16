@@ -68,6 +68,16 @@ func (m *Manager) Update(ctx context.Context, id string, s Spec) (string, error)
 	if err := normaliseSpec(&s); err != nil {
 		return "", err
 	}
+	prevMode := strOf(in.HostConfig["NetworkMode"])
+	if prevMode == "" || prevMode == "default" {
+		prevMode = "bridge"
+	}
+	prevLinks := splitLinks(strMapOf(in.Config["Labels"])[linksLabel])
+	plan, err := m.prepareNetwork(ctx, s, false, oldName, prevMode, prevLinks)
+	if err != nil {
+		return "", err
+	}
+	s = plan.Spec
 	grant, err := m.grantFor(s)
 	if err != nil {
 		return "", err
@@ -137,6 +147,9 @@ func (m *Manager) Update(ctx context.Context, id string, s Spec) (string, error)
 		if err := m.meta.SetContainerMeta(s.Name, metaOf(s)); err != nil {
 			m.log.Warn("could not save container setting names", "name", s.Name, "err", err)
 		}
+	}
+	if err := m.applyLinks(ctx, s.Name, plan, prevLinks); err != nil {
+		return shortID(newID), err
 	}
 	m.log.Info("container recreated", "name", s.Name, "image", s.Image, "id", shortID(newID))
 	return shortID(newID), nil

@@ -62,6 +62,9 @@ func (s *Server) handleRemoteInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Remote access is not available.")
 		return
 	}
+	if s.acceptInstall(w, r, "cloudflared") {
+		return
+	}
 	if err := s.remote.Install(r.Context()); err != nil {
 		s.fail(w, r, err)
 		return

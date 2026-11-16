@@ -11,6 +11,7 @@ import {
   Play,
   Plus,
   RotateCw,
+  Shield,
   Square,
   Store,
   Trash2,
@@ -28,6 +29,7 @@ import { TerminalButton, useTerminal } from "../Terminal";
 import { stateStyle, type Container, type DockerStatus } from "./types";
 import AddressDialog from "./AddressDialog";
 import SnapshotsDialog from "./SnapshotsDialog";
+import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 import PublishedApps from "../publish/PublishedApps";
 
 export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
@@ -38,7 +40,19 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
   const [notice, setNotice] = useState<string | null>(null);
   // The container open in the dialog, "new" to create one, or null when closed.
   const [editing, setEditing] = useState<Container | "new" | null>(null);
-  const setCreating = (on: boolean) => setEditing(on ? "new" : null);
+  const [isolateOnOpen, setIsolateOnOpen] = useState(false);
+  const openNew = () => {
+    setIsolateOnOpen(false);
+    setEditing("new");
+  };
+  const openEdit = (c: Container, isolate = false) => {
+    setIsolateOnOpen(isolate);
+    setEditing(c);
+  };
+  const closeEdit = () => {
+    setIsolateOnOpen(false);
+    setEditing(null);
+  };
   const [logsFor, setLogsFor] = useState<Container | null>(null);
   const [removing, setRemoving] = useState<Container | null>(null);
   const [addressFor, setAddressFor] = useState<Container | null>(null);
@@ -93,7 +107,7 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
                 App Store
               </Button>
             )}
-            <Button variant="primary" onClick={() => setCreating(true)}>
+            <Button variant="primary" onClick={openNew}>
               <Plus size={16} strokeWidth={2.75} />
               Run container
             </Button>
@@ -141,7 +155,8 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
                   onError={setError}
                   onLogs={() => setLogsFor(c)}
                   onConsole={() => openContainer({ id: c.id, name: c.name, icon: c.icon })}
-                  onEdit={() => setEditing(c)}
+                  onEdit={() => openEdit(c)}
+                  onIsolate={() => openEdit(c, true)}
                   onAddress={() => setAddressFor(c)}
                   onSnapshots={() => setSnapsFor(c)}
                   onRemove={() => setRemoving(c)}
@@ -156,7 +171,7 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
                 Run your first container from any Docker image. FELDCORE pulls the image and starts
                 it for you.
               </p>
-              <Button variant="primary" className="mt-6" onClick={() => setCreating(true)}>
+              <Button variant="primary" className="mt-6" onClick={openNew}>
                 <Plus size={16} strokeWidth={2.75} />
                 Run a container
               </Button>
@@ -170,9 +185,10 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
       {editing && (
         <ContainerDialog
           container={editing === "new" ? undefined : editing}
-          onClose={() => setEditing(null)}
+          preferIsolate={isolateOnOpen && editing !== "new"}
+          onClose={closeEdit}
           onSaved={(name, edited) => {
-            setEditing(null);
+            closeEdit();
             changed(edited ? `${name} was updated.` : `${name} was created.`);
           }}
         />
@@ -194,6 +210,13 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
   );
 }
 
+function canIsolate(c: Container): boolean {
+  if (c.isolated || c.vpn || c.vpnGateway || c.role || c.compose) return false;
+  const network = c.network || "";
+  if (network === "host" || network === "none" || network.startsWith("container:")) return false;
+  return true;
+}
+
 function ContainerRow({
   c,
   host,
@@ -202,6 +225,7 @@ function ContainerRow({
   onLogs,
   onConsole,
   onEdit,
+  onIsolate,
   onAddress,
   onSnapshots,
   onRemove,
@@ -213,6 +237,7 @@ function ContainerRow({
   onLogs: () => void;
   onConsole: () => void;
   onEdit: () => void;
+  onIsolate: () => void;
   onAddress: () => void;
   onSnapshots: () => void;
   onRemove: () => void;
@@ -256,6 +281,11 @@ function ContainerRow({
             {c.gpu && (
               <span className="rounded-full bg-ok/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ok">
                 GPU
+              </span>
+            )}
+            {c.isolated && (
+              <span className="rounded-full bg-ok/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ok">
+                Private
               </span>
             )}
             {c.vpn && (
@@ -324,6 +354,11 @@ function ContainerRow({
             </IconButton>
           </>
         )}
+        {canIsolate(c) && (
+          <IconButton label="Isolate" onClick={onIsolate} disabled={!!busy}>
+            <Shield size={16} />
+          </IconButton>
+        )}
         <IconButton label={c.vpnGateway ? "Managed from Settings → VPN" : "Edit"} onClick={onEdit} disabled={!!busy || c.vpnGateway}>
           <Pencil size={16} />
         </IconButton>
@@ -372,21 +407,7 @@ function DockerUnavailable({
   status: DockerStatus;
   onInstalled: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const install = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api("/docker/install", { method: "POST" });
-      onInstalled();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const inst = useInstall("docker", onInstalled);
 
   return (
     <Card className="flex flex-col items-center px-6 py-12 text-center">
@@ -399,9 +420,14 @@ function DockerUnavailable({
           "Install Docker to run containers from this page. FELDCORE installs your distribution's Docker package and starts it."}
       </p>
       {status.canInstall ? (
-        <Button variant="primary" className="mt-6" onClick={install} loading={busy}>
-          {!busy && <Download size={15} strokeWidth={2.75} />}
-          {busy ? "Installing Docker…" : "Install Docker"}
+        <Button
+          variant="primary"
+          className="mt-6"
+          onClick={() => void inst.start().catch(() => {})}
+          loading={inst.active || inst.starting}
+        >
+          {!(inst.active || inst.starting) && <Download size={15} strokeWidth={2.75} />}
+          {inst.active ? "Installing Docker…" : "Install Docker"}
         </Button>
       ) : (
         !status.installed && (
@@ -410,14 +436,14 @@ function DockerUnavailable({
           </p>
         )
       )}
-      {busy && (
-        <p className="mt-3 text-xs font-medium text-ink-3">
-          This downloads a few hundred MB and can take a couple of minutes.
-        </p>
-      )}
-      {error && (
+      {inst.error && (
         <div className="mt-4 w-full max-w-md">
-          <Alert>{error}</Alert>
+          <Alert>{inst.error}</Alert>
+        </div>
+      )}
+      {showInstall(inst.job, !status.installed) && inst.job && (
+        <div className="mt-4 w-full max-w-xl text-left">
+          <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
         </div>
       )}
     </Card>

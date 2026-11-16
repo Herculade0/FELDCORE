@@ -30,6 +30,11 @@ func (m *Manager) Create(ctx context.Context, s Spec) (string, error) {
 	if err := normaliseSpec(&s); err != nil {
 		return "", err
 	}
+	plan, err := m.prepareNetwork(ctx, s, true, "", "", nil)
+	if err != nil {
+		return "", err
+	}
+	s = plan.Spec
 	grant, err := m.grantFor(s)
 	if err != nil {
 		return "", err
@@ -52,6 +57,9 @@ func (m *Manager) Create(ctx context.Context, s Spec) (string, error) {
 	id, err := m.createContainer(ctx, s.Name, body)
 	if err != nil {
 		return "", err
+	}
+	if err := m.applyLinks(ctx, s.Name, plan, nil); err != nil {
+		return shortID(id), err
 	}
 	m.log.Info("container created", "name", s.Name, "image", s.Image, "id", shortID(id))
 	m.saveMeta(ctx, id, s)
