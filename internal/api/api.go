@@ -19,11 +19,14 @@ import (
 
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/vm"
+	"github.com/Herculade0/feldcore/internal/vpn"
 )
 
 // Deps are the services the HTTP layer exposes.
@@ -38,6 +41,9 @@ type Deps struct {
 	SkipWizard bool
 	WebRoot    fs.FS
 	Log        *slog.Logger
+	VPN        *vpn.Service
+	Backups    *backup.Service
+	Mail       *notify.Service
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -54,6 +60,9 @@ type Server struct {
 	log        *slog.Logger
 	vmProbe    vm.Probe
 	mcpHTTP    http.Handler
+	vpn        *vpn.Service
+	backups    *backup.Service
+	mail       *notify.Service
 }
 
 // New returns a Server.
@@ -61,7 +70,7 @@ func New(d Deps) *Server {
 	s := &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
 		docker: d.Docker, apps: d.Apps, wiz: d.Setup, skipWizard: d.SkipWizard,
-		webRoot: d.WebRoot, log: d.Log,
+		webRoot: d.WebRoot, log: d.Log, vpn: d.VPN, backups: d.Backups, mail: d.Mail,
 	}
 	s.initMCP()
 	return s
@@ -109,6 +118,13 @@ func (s *Server) Router() http.Handler {
 			r.Post("/setup/wizard", s.handleWizard)
 			r.Put("/settings/services", s.handleSettingsService)
 			r.Put("/settings/updates", s.handleSettingsUpdates)
+			r.Put("/vpn", s.handleVPNEnabled)
+			r.Post("/vpn/tunnels", s.handleVPNSave)
+			r.Put("/vpn/tunnels/{id}", s.handleVPNSave)
+			r.Post("/vpn/tunnels/{id}/enabled", s.handleVPNTunnelEnabled)
+			r.Post("/backups/test", s.handleBackupsTest)
+			r.Post("/backups/run", s.handleBackupsRun)
+			r.Post("/notifications/test", s.handleNotificationsTest)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -141,6 +157,15 @@ func (s *Server) Router() http.Handler {
 				r.Put("/settings/feed", s.handleSettingsFeed)
 				r.Put("/settings/defaults", s.handleSettingsDefaults)
 				r.Post("/settings/shares", s.handleSettingsShares)
+
+				r.Get("/vpn", s.handleVPN)
+				r.Post("/vpn/parse", s.handleVPNParse)
+				r.Delete("/vpn/tunnels/{id}", s.handleVPNDelete)
+				r.Get("/vpn/tunnels/{id}/status", s.handleVPNStatus)
+				r.Get("/backups", s.handleBackups)
+				r.Put("/backups", s.handleBackupsSave)
+				r.Get("/notifications", s.handleNotifications)
+				r.Put("/notifications", s.handleNotificationsSave)
 
 				r.Get("/docker/status", s.handleDockerStatus)
 				r.Get("/docker/options", s.handleDockerOptions)
@@ -257,6 +282,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		appsOp      *apps.OpError
 		setupInput  *setup.InputError
 		setupOp     *setup.OpError
+		vpnInput    *vpn.InputError
+		vpnOp       *vpn.OpError
+		backupInput *backup.InputError
+		backupOp    *backup.OpError
+		mailInput   *notify.InputError
+		mailOp      *notify.OpError
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -269,6 +300,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, appsInput.Msg)
 	case errors.As(err, &setupInput):
 		writeError(w, http.StatusBadRequest, setupInput.Msg)
+	case errors.As(err, &vpnInput):
+		writeError(w, http.StatusBadRequest, vpnInput.Msg)
+	case errors.As(err, &backupInput):
+		writeError(w, http.StatusBadRequest, backupInput.Msg)
+	case errors.As(err, &mailInput):
+		writeError(w, http.StatusBadRequest, mailInput.Msg)
 	case errors.As(err, &shareOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, shareOp.Msg)
@@ -281,6 +318,15 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &setupOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, setupOp.Msg)
+	case errors.As(err, &vpnOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, vpnOp.Msg)
+	case errors.As(err, &backupOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, backupOp.Msg)
+	case errors.As(err, &mailOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, mailOp.Msg)
 	case errors.Is(err, apps.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):

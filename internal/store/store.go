@@ -125,6 +125,12 @@ type State struct {
 	Wizard *Wizard `json:"wizard,omitempty"`
 	// Prefs are choices made on the Settings page.
 	Prefs Prefs `json:"prefs,omitempty"`
+	// VPN, Backup and Notify stay off until an administrator turns them on.
+	// Passwords and keys for them are not stored here; they live in the
+	// secrets box, encrypted.
+	VPN    VPN    `json:"vpn,omitempty"`
+	Backup Backup `json:"backup,omitempty"`
+	Notify Notify `json:"notify,omitempty"`
 }
 
 // Prefs holds Settings choices that are not part of a share or a container.
@@ -139,6 +145,90 @@ type Prefs struct {
 	// Touched is set once Settings has saved update or firewall choices, so
 	// those win over the values the wizard stored.
 	Touched bool `json:"touched,omitempty"`
+}
+
+// VPN is the WireGuard feature. Enabled is the master switch and defaults off.
+type VPN struct {
+	Enabled bool        `json:"enabled"`
+	Tunnels []VPNTunnel `json:"tunnels,omitempty"`
+}
+
+// VPNTunnel is one WireGuard tunnel, without its private key.
+type VPNTunnel struct {
+	ID         string       `json:"id"`
+	Name       string       `json:"name"`
+	Provider   string       `json:"provider"` // wireguard or proton
+	Enabled    bool         `json:"enabled"`
+	Address    string       `json:"address,omitempty"`
+	DNS        string       `json:"dns,omitempty"`
+	MTU        int          `json:"mtu,omitempty"`
+	PeerKey    string       `json:"peerKey,omitempty"`
+	Endpoint   string       `json:"endpoint,omitempty"`
+	AllowedIPs string       `json:"allowedIPs,omitempty"`
+	Keepalive  int          `json:"keepalive,omitempty"`
+	Server     string       `json:"server,omitempty"`
+	Country    string       `json:"country,omitempty"`
+	NATPMP     bool         `json:"natpmp,omitempty"`
+	HasKey     bool         `json:"hasKey"`
+	HasPSK     bool         `json:"hasPsk"`
+	Forwards   []VPNForward `json:"forwards,omitempty"`
+}
+
+// VPNForward is a host port published on the VPN gateway for one container.
+type VPNForward struct {
+	Container     string `json:"container"`
+	HostIP        string `json:"hostIp,omitempty"`
+	HostPort      int    `json:"hostPort"`
+	ContainerPort int    `json:"containerPort"`
+	Proto         string `json:"proto"`
+}
+
+// Backup is the Proton Drive backup target. Credentials are not stored here.
+type Backup struct {
+	Enabled          bool      `json:"enabled"`
+	RemotePath       string    `json:"remotePath,omitempty"`
+	Schedule         string    `json:"schedule,omitempty"` // daily "HH:MM", empty is manual only
+	Retention        int       `json:"retention,omitempty"`
+	IncludeSnapshots bool      `json:"includeSnapshots"`
+	IncludeAppdata   bool      `json:"includeAppdata"`
+	Username         string    `json:"username,omitempty"`
+	HasPassword      bool      `json:"hasPassword"`
+	HasMailbox       bool      `json:"hasMailbox"`
+	HasTwoFA         bool      `json:"hasTwoFA"`
+	LastRun          time.Time `json:"lastRun,omitempty"`
+	LastOK           bool      `json:"lastOk"`
+	LastError        string    `json:"lastError,omitempty"`
+	LastName         string    `json:"lastName,omitempty"`
+}
+
+// Notify is the email notification target. The SMTP secret is not stored here.
+type Notify struct {
+	Enabled         bool          `json:"enabled"`
+	Mode            string        `json:"mode,omitempty"` // smtp, proton-bridge, proton-token
+	Host            string        `json:"host,omitempty"`
+	Port            int           `json:"port,omitempty"`
+	Username        string        `json:"username,omitempty"`
+	From            string        `json:"from,omitempty"`
+	To              string        `json:"to,omitempty"`
+	TLS             string        `json:"tls,omitempty"` // starttls, tls, none
+	BridgeManaged   bool          `json:"bridgeManaged"`
+	BridgeHost      string        `json:"bridgeHost,omitempty"`
+	BridgePort      int           `json:"bridgePort,omitempty"`
+	HasPassword     bool          `json:"hasPassword"`
+	OnContainerStop bool          `json:"onContainerStop"`
+	OnUpdate        bool          `json:"onUpdate"`
+	NotifiedVersion string        `json:"notifiedVersion,omitempty"`
+	Events          []NotifyEvent `json:"events,omitempty"`
+}
+
+// NotifyEvent is one notification FELDCORE tried to send.
+type NotifyEvent struct {
+	Kind  string    `json:"kind"`
+	Title string    `json:"title"`
+	Body  string    `json:"body"`
+	At    time.Time `json:"at"`
+	Sent  bool      `json:"sent"`
+	Error string    `json:"error,omitempty"`
 }
 
 // Wizard is how far first-start setup has got, and the choices made so far.
@@ -203,6 +293,12 @@ func (s State) clone() State {
 			c.ContainerMeta[name] = cp
 		}
 	}
+	c.VPN.Tunnels = make([]VPNTunnel, len(s.VPN.Tunnels))
+	for i, t := range s.VPN.Tunnels {
+		t.Forwards = append([]VPNForward(nil), t.Forwards...)
+		c.VPN.Tunnels[i] = t
+	}
+	c.Notify.Events = append([]NotifyEvent(nil), s.Notify.Events...)
 	return c
 }
 

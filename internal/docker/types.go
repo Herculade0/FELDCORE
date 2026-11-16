@@ -76,23 +76,25 @@ type Port struct {
 
 // Container is a container in a shape the UI can render directly.
 type Container struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Image    string   `json:"image"`
-	State    string   `json:"state"`  // running, exited, paused, created, ...
-	Status   string   `json:"status"` // human text, e.g. "Up 3 hours"
-	Created  int64    `json:"created"`
-	Ports    []Port   `json:"ports"`
-	Managed  bool     `json:"managed"`        // created by FELDCORE
-	Compose  bool     `json:"compose"`        // owned by Docker Compose
-	GPU      bool     `json:"gpu"`            // has GPU access granted by FELDCORE
-	WebURL   string   `json:"webUrl"`         // best guess at a browser URL, if any
-	Icon     string   `json:"icon,omitempty"` // http(s) icon, when the container has one
-	Network  string   `json:"network"`        // network name(s)
-	IPs      []string `json:"ips"`            // address(es) the container answers on
-	CPUPct   float64  `json:"cpuPct"`         // live, 0 when not running
-	MemUsed  int64    `json:"memUsed"`
-	MemLimit int64    `json:"memLimit"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Image      string   `json:"image"`
+	State      string   `json:"state"`  // running, exited, paused, created, ...
+	Status     string   `json:"status"` // human text, e.g. "Up 3 hours"
+	Created    int64    `json:"created"`
+	Ports      []Port   `json:"ports"`
+	Managed    bool     `json:"managed"`        // created by FELDCORE
+	Compose    bool     `json:"compose"`        // owned by Docker Compose
+	GPU        bool     `json:"gpu"`            // has GPU access granted by FELDCORE
+	WebURL     string   `json:"webUrl"`         // best guess at a browser URL, if any
+	Icon       string   `json:"icon,omitempty"` // http(s) icon, when the container has one
+	Network    string   `json:"network"`        // network name(s)
+	IPs        []string `json:"ips"`            // address(es) the container answers on
+	VPN        string   `json:"vpn,omitempty"`
+	VPNGateway bool     `json:"vpnGateway,omitempty"`
+	CPUPct     float64  `json:"cpuPct"` // live, 0 when not running
+	MemUsed    int64    `json:"memUsed"`
+	MemLimit   int64    `json:"memLimit"`
 }
 
 // Image is an available local image.
@@ -170,6 +172,12 @@ type Spec struct {
 	Icon        string `json:"icon,omitempty"`
 	ExtraParams string `json:"extraParams,omitempty"`
 	Privileged  bool   `json:"privileged,omitempty"`
+
+	// VPN is the tunnel id this container is routed through. Empty keeps the
+	// container on Network. Gateway marks a tunnel's own gateway container
+	// and is not accepted from the HTTP API.
+	VPN     string `json:"vpn,omitempty"`
+	Gateway bool   `json:"-"`
 }
 
 // SpecInfo is a container's current Spec plus whether it may be edited.
@@ -190,9 +198,21 @@ type GPU struct {
 
 // Options are the choices the container dialog offers.
 type Options struct {
-	Networks     []string `json:"networks"`
-	GPUs         []GPU    `json:"gpus"`
-	GPUAvailable bool     `json:"gpuAvailable"`
+	Networks     []string    `json:"networks"`
+	GPUs         []GPU       `json:"gpus"`
+	GPUAvailable bool        `json:"gpuAvailable"`
+	VPNs         []VPNChoice `json:"vpns"`
+}
+
+// VPNChoice is one tunnel the container form can route through. The API
+// fills it; Docker itself does not know about tunnels.
+type VPNChoice struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Server   string `json:"server,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // --- Wire types for creating a container (POST /containers/create). ---
