@@ -1,6 +1,7 @@
 import {
   Container,
   FolderTree,
+  HardDrive,
   LayoutDashboard,
   MonitorPlay,
   ScrollText,
@@ -9,7 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "audit" | "settings";
+export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "audit" | "updates" | "settings";
 
 export interface NavItem {
   key: NavKey;
@@ -61,6 +62,13 @@ export const NAV: NavItem[] = [
     label: "Audit",
     desc: "Agent calls",
     icon: ScrollText,
+    ready: true,
+  },
+  {
+    key: "updates",
+    label: "Updates",
+    desc: "OS image and extensions",
+    icon: HardDrive,
     ready: true,
   },
   {

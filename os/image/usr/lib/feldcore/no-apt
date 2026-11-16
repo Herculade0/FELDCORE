@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "FELDCORE OS has no apt. The system changes only when an image is swapped." >&2
+exit 1

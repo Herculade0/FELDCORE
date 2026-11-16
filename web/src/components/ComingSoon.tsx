@@ -1,7 +1,7 @@
 import { NAV, type NavKey } from "../nav";
 import { IconBadge } from "./ui";
 
-type Pending = Exclude<NavKey, "dashboard" | "shares" | "docker" | "apps" | "settings" | "audit">;
+type Pending = Exclude<NavKey, "dashboard" | "shares" | "docker" | "apps" | "settings" | "audit" | "updates">;
 
 const COPY: Record<Pending, { title: string; body: string }> = {
   vms: {
