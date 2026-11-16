@@ -16,6 +16,7 @@ import type { Info } from "../../types";
 import { api, errorMessage } from "../../lib/api";
 import { Card, IconBadge } from "../ui";
 import { Alert, Button, IconButton, Modal } from "../form";
+import { PageHelp } from "../help/PageHelp";
 import ShareDialog from "./ShareDialog";
 import UsersCard from "./UsersCard";
 import { ACCESS_LABEL, type Overview, type ProtoStatus, type ServiceStatus, type Share } from "./types";
@@ -59,7 +60,10 @@ export default function SharesPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Shares</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Shares</h1>
+            <PageHelp topic="shares" />
+          </div>
           <p className="mt-2 text-sm font-semibold text-ink-2">
             Folders on this server that other computers on your network can open.
           </p>

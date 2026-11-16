@@ -4,6 +4,7 @@ import { api, errorMessage } from "../../lib/api";
 import { Card } from "../ui";
 import { Alert, Button, inputClass } from "../form";
 import ContainerDialog from "../docker/ContainerDialog";
+import { PageHelp } from "../help/PageHelp";
 import type { Spec } from "../docker/types";
 import type { AppSpec, AppSummary, Catalogue } from "./types";
 
@@ -106,7 +107,10 @@ export default function AppsPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">App Store</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">App Store</h1>
+            <PageHelp topic="app-store" />
+          </div>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
             Browse the Unraid Community Applications catalogue. Choosing an app opens the container
             setup with its template filled in — nothing is installed until you apply.

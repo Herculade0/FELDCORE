@@ -1,9 +1,10 @@
-import { useState } from "react";
 import { LogOut, Moon, Sun } from "lucide-react";
-import { NAV, type NavKey } from "./nav";
+import { NAV } from "./nav";
 import { VERSION } from "./version";
 import { ThemeProvider, useTheme } from "./lib/theme";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { AppNavProvider, useAppNav } from "./lib/appnav";
+import HelpPage from "./components/help/HelpPage";
 import { LogoMark, Wordmark } from "./components/Logo";
 import { IconButton } from "./components/form";
 import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
@@ -46,11 +47,21 @@ function Gate() {
 }
 
 function Shell() {
-  const [active, setActive] = useState<NavKey>("dashboard");
+  return (
+    <AppNavProvider>
+      <TerminalProvider>
+        <ShellFrame />
+      </TerminalProvider>
+    </AppNavProvider>
+  );
+}
+
+function ShellFrame() {
   const { username } = useAuth();
+  const { dest, go } = useAppNav();
+  const active = dest.page;
 
   return (
-    <TerminalProvider>
     <div className="min-h-screen md:pl-[17.5rem]">
       {/* Desktop: floating glass rail */}
       <aside className="glass fixed inset-y-4 left-4 z-20 hidden w-60 flex-col rounded-3xl p-4 md:flex">
@@ -64,7 +75,7 @@ function Shell() {
             return (
               <button
                 key={key}
-                onClick={() => setActive(key)}
+                onClick={() => go(key)}
                 aria-current={on ? "page" : undefined}
                 className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm font-semibold transition-colors ${
                   on
@@ -112,26 +123,31 @@ function Shell() {
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-10 md:pt-8">
         <ErrorBoundary resetKey={active} area={NAV.find((n) => n.key === active)?.label}>
           {active === "dashboard" ? (
-            <Dashboard onNavigate={setActive} />
+            <Dashboard onNavigate={go} />
           ) : active === "shares" ? (
             <SharesPage />
           ) : active === "docker" ? (
-            <DockerPage onOpenApps={() => setActive("apps")} />
+            <DockerPage onOpenApps={() => go("apps")} />
           ) : active === "apps" ? (
             <AppsPage />
           ) : active === "vms" ? (
-            <VMsPage />
+            <VMsPage focus={{ view: dest.view, nonce: dest.nonce }} />
           ) : active === "audit" ? (
             <AuditPage />
           ) : active === "settings" ? (
-            <SettingsPage onOpenAudit={() => setActive("audit")} />
+            <SettingsPage
+              onOpenAudit={() => go("audit")}
+              focus={{ tab: dest.tab, anchor: dest.anchor, nonce: dest.nonce }}
+            />
+          ) : active === "help" ? (
+            <HelpPage />
           ) : null}
         </ErrorBoundary>
       </main>
 
       {/* Mobile: bottom dock */}
       <nav
-        className="glass fixed inset-x-3 bottom-3 z-20 flex justify-around rounded-3xl p-1.5 md:hidden"
+        className="glass fixed inset-x-3 bottom-3 z-20 flex gap-0.5 overflow-x-auto rounded-3xl p-1.5 md:hidden"
         aria-label="Main"
       >
         {NAV.map(({ key, label, icon: Icon }) => {
@@ -139,9 +155,9 @@ function Shell() {
           return (
             <button
               key={key}
-              onClick={() => setActive(key)}
+              onClick={() => go(key)}
               aria-current={on ? "page" : undefined}
-              className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold transition-colors ${
+              className={`flex min-w-[3.4rem] flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold transition-colors ${
                 on ? "accent-gradient text-white" : "text-ink-3"
               }`}
             >
@@ -152,7 +168,6 @@ function Shell() {
         })}
       </nav>
     </div>
-    </TerminalProvider>
   );
 }
 

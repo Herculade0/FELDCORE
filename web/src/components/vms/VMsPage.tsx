@@ -19,6 +19,7 @@ import Console from "./Console";
 import VMForm from "./VMForm";
 import VMSettings from "./VMSettings";
 import { emptySpec, type Host, type Snapshot, type Spec, type VM } from "./types";
+import { PageHelp } from "../help/PageHelp";
 
 type View = "list" | "form" | "settings";
 
@@ -26,7 +27,7 @@ interface SnapList {
   snapshots: Snapshot[];
 }
 
-export default function VMsPage() {
+export default function VMsPage({ focus }: { focus?: { view?: string; nonce: number } }) {
   const [view, setView] = useState<View>("list");
   const [host, setHost] = useState<Host | null>(null);
   const [vms, setVMs] = useState<VM[]>([]);
@@ -55,6 +56,12 @@ export default function VMsPage() {
       setError(errorMessage(e));
     }
   }, []);
+
+  useEffect(() => {
+    if (!focus?.nonce) return;
+    if (focus.view === "settings") setView("settings");
+    else setView("list");
+  }, [focus?.nonce, focus?.view]);
 
   useEffect(() => {
     void load();
@@ -131,7 +138,10 @@ export default function VMsPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Virtual machines</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Virtual machines</h1>
+            <PageHelp topic="vms" />
+          </div>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
             KVM guests on this server. Start and stop them here, and open the console in the browser.
           </p>

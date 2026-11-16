@@ -235,6 +235,7 @@ func (s *Server) Router() http.Handler {
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
 
 				r.Get("/audit", s.handleAudit)
+				r.Get("/help", s.handleHelp)
 				r.Get("/agent/tokens", s.handleTokensList)
 				r.Post("/agent/tokens", s.handleTokenCreate)
 				r.Post("/agent/tokens/revoke-all", s.handleTokensRevokeAll)
