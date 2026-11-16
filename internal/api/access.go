@@ -46,6 +46,19 @@ func bearerToken(h http.Header) (string, bool) {
 	return tok, true
 }
 
+// wizardAccess serves the guided setup before an administrator exists.
+// Afterwards it requires a session or an admin-scoped agent token.
+func (s *Server) wizardAccess(next http.Handler) http.Handler {
+	authed := s.requireAuth(s.enforceScope(next))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.auth != nil && s.auth.SetupRequired() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		authed.ServeHTTP(w, r)
+	})
+}
+
 // requireAuth accepts a browser session or a bearer agent token.
 // A valid session wins when both are present, so the signed-in UI is never
 // narrowed by a token header.

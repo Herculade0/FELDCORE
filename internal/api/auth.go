@@ -86,6 +86,8 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"setupRequired": s.auth.SetupRequired(),
 		"authenticated": false,
+		"totpEnabled":   s.auth.TOTPEnabled(),
+		"skipWizard":    s.skipWizard,
 	}
 	admin := false
 	if user, ok := s.currentUser(r); ok {

@@ -84,12 +84,15 @@ The daemon runs as root because its job is to edit system configuration,
 control services and create accounts. Everything it exposes is therefore
 behind authentication:
 
-- **One administrator account**, created on first run. Until it exists the API
-  only offers the setup endpoint; afterwards setup is refused. A fresh install
-  should be set up promptly, since whoever reaches it first claims it.
-- **The administrator password** is hashed with bcrypt. Failed sign-ins are
-  rate limited per client address. When an authenticator is enrolled, that
-  sign-in asks for the code as well.
+- **One administrator account**, created on first run. Until it exists, sign-in
+  is closed and the setup wizard's host and network steps are gated by the
+  one-time setup code; afterwards `/auth/setup` is refused. A fresh install
+  should be set up promptly, since whoever has the setup code can claim it.
+- **The administrator password** is hashed with bcrypt. The setup wizard asks
+  for a strong password. An optional authenticator (TOTP) can be turned on for
+  the administrator sign-in; the secret and recovery-code hashes live in the
+  secrets box, not in the state file. Citizen ID checks that same secret.
+  Failed sign-ins are rate limited per client address.
 - **Citizen ID** (`internal/citizenid`) adds users, groups, and per-app access
   for published hostnames. New passwords are argon2id. Sessions use a separate
   parent-domain cookie. See [CITIZEN-ID.md](CITIZEN-ID.md).

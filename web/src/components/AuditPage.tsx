@@ -68,7 +68,7 @@ export default function AuditPage() {
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Audit</h1>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
-            File changes, package installs, blocked published requests, agent calls, and Citizen ID sign-ins.
+            File changes and URL downloads are recorded here, including ones made from this browser. Package installs, setup actions, published requests the protection layer blocked, agent token calls, and Citizen ID sign-ins are recorded too.
             {log
               ? ` The newest ${log.maxEvents.toLocaleString()} are kept, for ${log.retentionDays} days.`
               : ""}

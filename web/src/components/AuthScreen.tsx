@@ -233,8 +233,10 @@ export function LoginScreen() {
               onChange={(e) => setCode(e.target.value)}
               inputMode="numeric"
               autoComplete="one-time-code"
-              required
+              spellCheck={false}
+              hint="From the authenticator app, or a recovery code."
               autoFocus
+              required
             />
           )}
           {error && <Alert>{error}</Alert>}

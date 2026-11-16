@@ -74,34 +74,44 @@ curl -fsSL https://raw.githubusercontent.com/Herculade0/FELDCORE/main/deploy/get
 The installer prints a one-time setup code. The same code is written to the
 journal (`journalctl -u feldcore -b`) and stored in
 `/var/lib/feldcore/setup-code`, readable only by root. Open
-`http://<this-server>:8787`, enter the code, and create the administrator
-account. The code stops working after that, so another machine on the LAN
-cannot claim the server first.
+`http://<this-server>:8787`. The guided setup asks for that code on every
+step until the administrator account exists. The code stops working after
+that, so another machine on the LAN cannot claim the server first.
 
-The wizard then continues where it left off if you close the page. Each step
-that changes the machine shows what it will do before it does it:
+Closing the page, or rebooting, continues at the same step. Optional steps
+can be skipped. Each step that changes the machine shows what it will do
+before it does it:
 
-1. Host name, time zone and NTP (`systemd-timesyncd`, or chrony).
-2. The current interface and address. DHCP stays as it is unless you choose a
-   static address. The page shows the new URL before applying it. A wrong
-   address drops the page; fix it from the console, or start setup over.
-3. Where share folders live, with free space, and a warning when that folder
-   is on the operating-system disk. Nothing is partitioned or formatted.
-4. Samba, NFS and Docker, plus libvirt/KVM only when the CPU can virtualise.
-   The install log streams in the page. Running it again skips what is already
-   installed.
-5. Unraid's four default shares, each one optional. SMB and NFS stay off.
-6. Optional security updates (`unattended-upgrades`) and an optional ufw
-   firewall. The firewall allows FELDCORE's port and the SSH port that is
-   actually listening, then denies other incoming traffic. sshd is not
-   edited and SSH is never turned off.
-7. Whether FELDCORE should check GitHub for a newer release. It does not
-   install one by itself.
+1. Welcome, including the setup code.
+2. Host name, time zone, locale and NTP (`systemd-timesyncd`, or chrony).
+3. The current interface and address. DHCP stays as it is unless you choose a
+   static address. DNS can be checked without rewriting the DHCP configuration.
+   A static address shows the new URL before applying it. A wrong address
+   drops the page; fix it from the console, or start setup over.
+4. The administrator account, with a strong password. An authenticator app
+   (TOTP) is optional and encouraged. Recovery codes are shown once. The
+   secret is not stored in `state.json`.
+5. Where share folders live. You can keep a folder, use one disk, or record a
+   pool name. Formatting one empty disk is possible only after you type the
+   confirmation phrase, and the operating-system disk cannot be formatted.
+   Assembling several disks into one pool is not done in this step.
+6. Remote access: none, Cloudflare Tunnel, or WireGuard.
+7. A first notification target: email or ntfy. A test is sent before the step
+   continues. Skipping does not turn an existing notification off.
+8. A Proton Drive backup of app data, or skip. Skipping does not turn an
+   existing backup off.
+9. A summary. Finishing creates `appdata`, `system`, `domains` and `isos` if
+   they are missing. SMB and NFS stay off.
+
+Package install, the firewall and update checks stay in Settings. From
+Settings → General you can run the non-destructive steps again (host, network,
+sign-in, remote access, notifications, backups). That replay does not format
+a disk and does not create another administrator.
 
 For a scripted install, start the daemon with `-skip-wizard` (or
-`FELDCORE_SKIP_WIZARD=1`). The setup code is still required. With the wizard
-skipped, `-default-shares` (the default) creates `appdata`, `system`,
-`domains` and `isos` on startup.
+`FELDCORE_SKIP_WIZARD=1`). The setup code is still required to create the
+account. With the wizard skipped, `-default-shares` (the default) creates
+`appdata`, `system`, `domains` and `isos` on startup.
 
 ## Development
 
@@ -143,8 +153,8 @@ or a disposable VM.
 - State lives in `/var/lib/feldcore/state.json` (root-only).
 - Share folders are created under `/srv/feldcore` (`-shares-root` to change).
 - On a fresh install the setup wizard creates Unraid's four default shares
-  if you leave them ticked: `appdata`, `system`, `domains` and `isos`. SMB
-  and NFS are left off, so nothing is exported until you turn a protocol on.
+  when you finish: `appdata`, `system`, `domains` and `isos`. SMB and NFS
+  are left off, so nothing is exported until you turn a protocol on.
   A share or folder that already has one of those names is kept as it is; an
   existing folder is adopted and its files are not changed. `media` and
   `data` are not created. The wizard is skipped with `-skip-wizard`; then
@@ -155,9 +165,11 @@ or a disposable VM.
   created. A static network change writes a FELDCORE drop-in for
   systemd-networkd or ifupdown and reloads that interface. It does not
   switch the address back if the new one is unreachable.
-  Choosing the firewall installs ufw and adds allow rules only; it does not
-  change sshd. Choosing automatic security updates installs
-  `unattended-upgrades` and turns on the Debian security-update schedule.
+  Choosing the firewall in Settings installs ufw and adds allow rules only;
+  it does not change sshd. Choosing automatic security updates in Settings
+  installs `unattended-upgrades` and turns on the Debian security-update
+  schedule. Formatting a data disk in the wizard runs `mkfs.ext4` only after
+  the confirmation phrase matches, and refuses the operating-system disk.
 - Samba: one line, `include = /etc/samba/feldcore-shares.conf`, is appended to
   `/etc/samba/smb.conf` the first time a share needs it. The original is saved
   as `smb.conf.feldcore-backup`. FELDCORE only ever rewrites its own included
@@ -207,7 +219,8 @@ internal/store     JSON state file (atomic writes)
 internal/shares    SMB/NFS share management
 internal/docker    Docker Engine API client + container management
 internal/apps      App Store: cached Community Applications catalogue
-internal/setup     first-start wizard and the one-time claim code
+internal/setup     guided setup wizard and the one-time claim code
+internal/storage   disk inventory the wizard calls (single-disk format only)
 scripts/           integration tests
 web/               React front-end (Vite + Tailwind), embedded via go:embed
 deploy/            install.sh, get.sh and the systemd unit

@@ -24,6 +24,8 @@ interface StatusResponse {
   /** True for the administrator. A directory user is signed in with this false. */
   admin?: boolean;
   wizardPending?: boolean;
+  skipWizard?: boolean;
+  totpEnabled?: boolean;
   username?: string;
 }
 
@@ -39,6 +41,7 @@ interface AuthValue {
   /** False until status says this session is the administrator. */
   admin: boolean;
   wizardPending: boolean;
+  skipWizard: boolean;
   /** "totp" means the password was accepted and an authenticator code is still required. */
   signIn: (username: string, password: string, totp?: string) => Promise<"ok" | "totp">;
   setup: (username: string, password: string, code: string) => Promise<void>;
@@ -53,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [admin, setAdmin] = useState(false);
   const [wizardPending, setWizardPending] = useState(false);
+  const [skipWizard, setSkipWizard] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -60,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUsername(s.authenticated ? (s.username ?? null) : null);
       setAdmin(s.authenticated ? Boolean(s.admin) : false);
       setWizardPending(Boolean(s.wizardPending));
+      setSkipWizard(Boolean(s.skipWizard));
       setPhase(s.authenticated ? "ready" : s.setupRequired ? "setup" : "login");
     } catch {
       setPhase("unreachable");
@@ -90,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username,
       admin,
       wizardPending,
+      skipWizard,
       refresh,
       signIn: async (u, p, totp) => {
         const res = await api<LoginResponse>("/citizen/login", {
@@ -113,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [phase, username, admin, wizardPending, refresh],
+    [phase, username, admin, wizardPending, skipWizard, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

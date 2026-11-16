@@ -33,6 +33,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
+	"github.com/Herculade0/feldcore/internal/storage"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/version"
@@ -106,6 +107,7 @@ func main() {
 	wiz := setup.New(setup.Deps{
 		Store: st, Shares: shareMgr, DataDir: cfg.DataDir,
 		ListenPort: listenPort(cfg.ListenAddr), Log: log,
+		Skip: cfg.SkipWizard,
 	})
 	if code, err := wiz.EnsureCode(); err != nil {
 		log.Error("could not prepare the setup code", "err", err)
@@ -128,6 +130,13 @@ func main() {
 		DataDir: cfg.DataDir, Version: version.Current, Log: log,
 	}
 	authSvc := auth.New(st)
+	authSvc.UseSecrets(box)
+	wiz.UseAccounts(authSvc)
+	wiz.UseAudit(authSvc)
+	wiz.UseSecrets(box)
+	wiz.UseVolume(storage.New("/", nil))
+	wiz.UseMail(mail)
+	wiz.UseDrive(backups)
 	pubPort := publishListenPort()
 	remoteSvc := &remote.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
@@ -137,6 +146,8 @@ func main() {
 		GatewayPort: pubPort,
 		Log:         log,
 	}
+	wiz.UseTunnel(remoteSvc)
+	wiz.UseVPN(vpnSvc)
 	proxySvc := &proxy.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
 		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), GatewayPort: pubPort, Log: log,
