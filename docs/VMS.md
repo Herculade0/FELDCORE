@@ -64,7 +64,10 @@ as warnings, because they would be dropped. Edit XML keeps them.
 
 A running guest's VNC display is proxied at `GET /api/v1/vms/{name}/console`.
 The handler is the same gate as the host terminal: a valid admin session, and
-an `Origin` that matches this host. noVNC then speaks VNC on that WebSocket.
+an `Origin` that matches this host. An agent token cannot open it. The scope
+check classifies the console as a shell, which no token includes, and the
+handler then requires the administrator's session cookie. noVNC speaks VNC on
+that WebSocket.
 
 The proxy dials only a loopback address. Domain XML that publishes VNC on any
 other address is refused, including raw XML. The display is not opened on the

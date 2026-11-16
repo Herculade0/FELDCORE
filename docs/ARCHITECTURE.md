@@ -25,7 +25,8 @@ The whole product ships as one executable with the web UI embedded via
 - **`internal/system`** — live metrics via gopsutil; keeps minimal state
   (previous network counters) to derive per-second rates.
 - **`internal/api`** — chi router. `/api/v1/*` JSON endpoints plus a WebSocket
-  stream; all other paths serve the embedded SPA with an index.html fallback.
+  stream, and a read-only MCP server at `/mcp`. All other paths serve the
+  embedded SPA with an index.html fallback.
 - **`internal/shares`** *(wip)* — model a share as a managed directory; render
   Samba and NFS config fragments; reload services.
 - **`internal/docker`** — talk to the Docker Engine API over its unix socket.
@@ -83,10 +84,24 @@ behind authentication:
 - **Sessions** are random 256-bit tokens. Only a SHA-256 hash is stored, so a
   leaked state file does not yield usable sessions. The cookie is HttpOnly and
   SameSite=Strict, and Secure when served over TLS.
+- **Agent tokens** are a second credential, for the owner's own agents. Each
+  is named, scoped (`read`, `containers`, `vms`, `admin`), and optional
+  expiry. The secret is shown once. Only a SHA-256 hash is stored. Callers
+  send `Authorization: Bearer`. A session cookie is still the administrator
+  and is not limited by scopes. A token is. Admin does not include a shell:
+  the host terminal and container consoles check the session cookie, and the
+  scope check refuses them first.
+- **MCP** is served at `/mcp` on the streamable HTTP transport. It requires a
+  bearer token with the `read` scope (admin includes read). A session cookie
+  is not accepted. Phase 1 tools are read-only. There is no shell or exec tool.
+- **Audit**: every call authenticated with a token is recorded (token name,
+  action, target, time, result). The newest 1,000 entries are kept, and
+  anything older than 90 days is dropped.
 - **Cross-site requests**: state-changing requests whose Origin does not match
   the Host are refused, and the WebSocket handshake enforces the same.
-- **Every `/api/v1` route except health and the login flow requires a
-  session**, including read-only metrics.
+  Non-browser clients send no Origin and are unaffected.
+- **Every `/api/v1` route except health and the login flow requires a session
+  or a bearer token**, including read-only metrics.
 
 Input that ends up in system configuration is validated against strict
 patterns (share names, user names, NFS clients) and free text is sanitised, so
@@ -95,4 +110,5 @@ directly with argument lists, never through a shell, and passwords are passed
 on stdin rather than the command line.
 
 Not yet done: TLS termination (run behind a reverse proxy, or on a trusted
-LAN, for now), multiple users and roles, and an audit log.
+LAN, for now), multiple users and roles, and an audit log of the changes
+FELDCORE itself makes to the system. Agent-token calls are already logged.
