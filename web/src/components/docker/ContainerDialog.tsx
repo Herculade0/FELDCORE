@@ -207,7 +207,7 @@ export default function ContainerDialog({
         )}
 
         {spec && (
-          <fieldset disabled={locked || busy} className="space-y-5">
+          <fieldset disabled={locked || busy} className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
             {locked && <Alert tone="warn">{info?.reason}</Alert>}
             {editing && !locked && (
               <Alert tone="info">
@@ -217,7 +217,7 @@ export default function ContainerDialog({
               </Alert>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <TextField
                 label={editing ? "Name" : "Name (optional)"}
                 value={spec.name}
@@ -274,11 +274,11 @@ export default function ContainerDialog({
             <GpuRow spec={spec} options={options} onChange={(gpu) => set({ gpu })} />
 
             <section>
-              <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
                 <h3 className="text-xs font-bold text-ink-2">
                   Paths, ports, variables, labels and devices
                 </h3>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {hiddenCount > 0 && (
                     <Button size="sm" onClick={() => setAdvanced((v) => !v)}>
                       {advanced ? "Hide advanced" : `Show advanced (${hiddenCount})`}
@@ -351,7 +351,7 @@ function TemplateFields({
 }) {
   const [iconOk, setIconOk] = useState(true);
   return (
-    <section className="space-y-4 rounded-2xl border border-line p-4">
+    <section className="min-w-0 space-y-4 rounded-2xl border border-line p-4">
       <div className="flex items-center gap-3">
         {spec.icon && iconOk ? (
           <img
@@ -398,7 +398,7 @@ function TemplateFields({
           rows={2}
           spellCheck={false}
           placeholder="--cap-add=NET_ADMIN"
-          className={`${inputClass} resize-y font-mono text-xs`}
+          className={`${inputClass} resize-y font-mono text-xs [overflow-wrap:anywhere]`}
         />
         <p className="mt-1.5 text-xs font-medium text-ink-3">
           Capabilities, memory, shared memory, DNS, tmpfs and logging options here are applied.
@@ -437,34 +437,36 @@ function ConfigRow({
   const sep = item.type === "variable" || item.type === "label" ? "=" : "→";
   const readOnly = item.type === "path" && item.mode.split(",").includes("ro");
   return (
-    <li className="flex items-center gap-3 rounded-2xl border border-line bg-surface-2 py-2 pl-3 pr-1.5">
-      <span className="w-14 shrink-0 rounded-lg bg-accent/12 py-1 text-center text-[9px] font-extrabold tracking-wider text-accent">
+    <li className="flex min-w-0 items-start gap-3 rounded-2xl border border-line bg-surface-2 py-2 pl-3 pr-1.5">
+      <span className="mt-0.5 w-14 shrink-0 rounded-lg bg-accent/12 py-1 text-center text-[9px] font-extrabold tracking-wider text-accent">
         {TYPE_CHIP[item.type]}
       </span>
       <div className="min-w-0 flex-1">
         {item.name && (
-          <div className="truncate text-sm font-bold text-ink">
+          <div className="text-sm font-bold text-ink [overflow-wrap:anywhere]">
             {item.name}
             {item.required && <span className="text-bad"> *</span>}
           </div>
         )}
-        <div className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-ink-2">
-          <span className="truncate">{left}</span>
-          <span className="shrink-0 text-ink-3">{sep}</span>
-          <span className="truncate">{right}</span>
+        <div className="font-mono text-xs text-ink-2 [overflow-wrap:anywhere]">
+          <span>{left}</span>
+          <span className="text-ink-3"> {sep} </span>
+          <span>{right}</span>
           {readOnly && (
-            <span className="shrink-0 rounded bg-track px-1 py-px font-sans text-[9px] font-bold text-ink-3">
+            <span className="ml-1.5 rounded bg-track px-1 py-px font-sans text-[9px] font-bold text-ink-3">
               READ ONLY
             </span>
           )}
           {item.display === "hidden" && (
-            <span className="shrink-0 rounded bg-track px-1 py-px font-sans text-[9px] font-bold text-ink-3">
+            <span className="ml-1.5 rounded bg-track px-1 py-px font-sans text-[9px] font-bold text-ink-3">
               HIDDEN
             </span>
           )}
         </div>
         {item.description && (
-          <div className="truncate text-[11px] font-medium text-ink-3">{item.description}</div>
+          <div className="text-[11px] font-medium leading-relaxed text-ink-3 [overflow-wrap:anywhere]">
+            {item.description}
+          </div>
         )}
       </div>
       <IconButton label={`Edit ${item.name || TYPE_CHIP[item.type].toLowerCase()}`} onClick={onEdit}>
@@ -499,13 +501,13 @@ function GpuRow({
   else detail = "No GPU was found on this server.";
 
   return (
-    <section className="flex items-start gap-3.5 rounded-2xl border border-line p-4">
+    <section className="flex min-w-0 items-start gap-3.5 rounded-2xl border border-line p-4">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/12 text-accent">
         <Cpu size={17} />
       </span>
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-bold text-ink">Use the GPU</h3>
-        <p className="mt-0.5 text-xs font-medium leading-relaxed text-ink-3">{detail}</p>
+        <p className="mt-0.5 text-xs font-medium leading-relaxed text-ink-3 [overflow-wrap:anywhere]">{detail}</p>
         {usable.length > 0 && blocked.length > 0 && (
           <p className="mt-1 text-xs font-medium text-ink-3">
             {blocked.map((g) => `${g.name}: ${g.note}`).join(" ")}
