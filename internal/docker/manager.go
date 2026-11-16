@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -297,24 +298,114 @@ func (m *Manager) Restart(ctx context.Context, id string) error {
 	return m.c.postJSON(ctx, "/containers/"+esc(id)+"/restart", url.Values{"t": {"10"}}, nil, nil)
 }
 
+// RemoveOutcome is what happened when a container was deleted. The container
+// removal itself has already succeeded; image fields only describe the
+// optional follow-up.
+type RemoveOutcome struct {
+	Message      string `json:"message"`
+	ImageRemoved bool   `json:"imageRemoved"`
+	ImageSkipped bool   `json:"imageSkipped"`
+}
+
 // Remove deletes a container. It must be stopped unless force is set.
-func (m *Manager) Remove(ctx context.Context, id string, force bool) error {
-	// Look the name up first so its stored setting names can be forgotten.
-	name := ""
+//
+// removeImage also deletes the container's image afterwards, but only when no
+// other container is using it. A skipped or failed image delete does not fail
+// the call: the container is already gone. Anonymous volumes are never
+// removed; mapped folders stay on disk either way.
+func (m *Manager) Remove(ctx context.Context, id string, force, removeImage bool) (RemoveOutcome, error) {
+	name, imageID, imageRef := "", "", ""
+	fullID := ""
 	if in, err := m.inspect(ctx, id); err == nil {
 		name = strings.TrimPrefix(in.Name, "/")
+		fullID = in.ID
+		imageID = in.Image
+		imageRef = strOf(in.Config["Image"])
+	}
+	shown := name
+	if shown == "" {
+		shown = "The container"
 	}
 	q := url.Values{}
 	if force {
 		q.Set("force", "1")
 	}
+	// v is deliberately omitted. Setting it would delete anonymous volumes.
 	if err := m.c.do2(ctx, "DELETE", "/containers/"+esc(id), q); err != nil {
-		return err
+		return RemoveOutcome{}, err
 	}
 	if name != "" && m.meta != nil {
 		_ = m.meta.DeleteContainerMeta(name)
 	}
-	return nil
+	out := RemoveOutcome{Message: shown + " was removed."}
+	if !removeImage {
+		return out, nil
+	}
+	if imageID == "" {
+		out.ImageSkipped = true
+		out.Message = shown + " was removed. Its image could not be identified, so the image was kept."
+		return out, nil
+	}
+	var listed []apiContainer
+	if err := m.c.getJSON(ctx, "/containers/json", url.Values{"all": {"1"}}, &listed); err != nil {
+		m.log.Warn("could not check whether the image is still in use", "image", imageID, "err", err)
+		out.ImageSkipped = true
+		out.Message = shown + " was removed. Its image could not be checked, so the image was kept."
+		return out, nil
+	}
+	if imageStillUsed(imageID, fullID, listed) {
+		out.ImageSkipped = true
+		out.Message = shown + " was removed. Its image is still used by another container, so the image was kept."
+		return out, nil
+	}
+	// No force flag: a container that appeared in the meantime makes Docker
+	// refuse, and that refusal is reported rather than overriding it.
+	if err := m.c.do2(ctx, "DELETE", "/images/"+esc(imageID), nil); err != nil {
+		m.log.Warn("could not delete image", "image", imageID, "ref", imageRef, "err", err)
+		out.ImageSkipped = true
+		if conflict(err) {
+			out.Message = shown + " was removed. Its image is still used by another container, so the image was kept."
+		} else {
+			out.Message = shown + " was removed, but the image could not be deleted."
+		}
+		return out, nil
+	}
+	out.ImageRemoved = true
+	if imageRef != "" {
+		out.Message = shown + " was removed, and the image " + imageRef + " was deleted."
+	} else {
+		out.Message = shown + " was removed, and its image was deleted."
+	}
+	return out, nil
+}
+
+// imageStillUsed reports whether a container other than skipID is based on
+// imageID. skipID is the container just removed, ignored in case the list
+// still mentions it. IDs match with or without the sha256: prefix.
+func imageStillUsed(imageID, skipID string, containers []apiContainer) bool {
+	imageID = canonID(imageID)
+	skipID = canonID(skipID)
+	if imageID == "" {
+		return false
+	}
+	for _, c := range containers {
+		if canonID(c.ID) == skipID && skipID != "" {
+			continue
+		}
+		if canonID(c.ImageID) == imageID {
+			return true
+		}
+	}
+	return false
+}
+
+func canonID(id string) string {
+	return strings.TrimPrefix(strings.TrimSpace(id), "sha256:")
+}
+
+func conflict(err error) bool {
+	var ae *APIError
+	return asAPIError(err, &ae) && ae.Status == http.StatusConflict
 }
 
 // hostIP returns this server's primary LAN address, or "" if none is found.
