@@ -114,6 +114,15 @@ func (s *Server) Router() http.Handler {
 			r.Post("/auth/logout", s.handleAuthLogout)
 		})
 
+		// The wizard is open until an administrator exists, and then only
+		// with a session or an admin-scoped token. It stays outside the
+		// short timeout because a disk step can take a while.
+		r.Group(func(r chi.Router) {
+			r.Use(s.wizardAccess)
+			r.Get("/setup/wizard", s.handleWizardStatus)
+			r.Post("/setup/wizard", s.handleWizard)
+		})
+
 		// Everything else needs a signed-in session or a scoped agent token.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
@@ -131,7 +140,6 @@ func (s *Server) Router() http.Handler {
 			// The catalogue is about 20MB; a refresh must not sit under the
 			// short request timeout.
 			r.Post("/apps/refresh", s.handleAppsRefresh)
-			r.Post("/setup/wizard", s.handleWizard)
 			r.Put("/settings/services", s.handleSettingsService)
 			r.Put("/settings/updates", s.handleSettingsUpdates)
 			r.Put("/vpn", s.handleVPNEnabled)
@@ -173,8 +181,6 @@ func (s *Server) Router() http.Handler {
 				r.Delete("/shares/users/{name}", s.handleShareUserDelete)
 
 				r.Get("/fs/suggest", s.handleFSSuggest)
-
-				r.Get("/setup/wizard", s.handleWizardStatus)
 
 				r.Get("/apps", s.handleApps)
 				r.Get("/apps/{id}", s.handleAppSpec)
@@ -431,6 +437,14 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, "FELDCORE has already been set up. Sign in instead.")
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "Incorrect username or password.")
+	case errors.Is(err, auth.ErrTOTPRequired):
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"error": "Enter the code from your authenticator.", "totpRequired": true,
+		})
+	case errors.Is(err, auth.ErrTOTPInvalid):
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"error": "That authenticator code is not right.", "totpRequired": true,
+		})
 	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:

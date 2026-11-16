@@ -61,6 +61,8 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"setupRequired": s.auth.SetupRequired(),
 		"authenticated": false,
+		"totpEnabled":   s.auth.TOTPEnabled(),
+		"skipWizard":    s.skipWizard,
 	}
 	if user, ok := s.currentUser(r); ok {
 		resp["authenticated"] = true
@@ -105,9 +107,11 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	token, expires, err := s.auth.Login(clientKey(r), in.Username, in.Password)
+	token, expires, err := s.auth.LoginWithCode(clientKey(r), in.Username, in.Password, in.Code)
 	if err != nil {
-		s.log.Warn("failed sign-in", "from", clientKey(r))
+		if s.log != nil {
+			s.log.Warn("failed sign-in", "from", clientKey(r))
+		}
 		s.fail(w, r, err)
 		return
 	}

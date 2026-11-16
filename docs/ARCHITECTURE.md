@@ -76,10 +76,14 @@ The daemon runs as root because its job is to edit system configuration,
 control services and create accounts. Everything it exposes is therefore
 behind authentication:
 
-- **One administrator account**, created on first run. Until it exists the API
-  only offers the setup endpoint; afterwards setup is refused. A fresh install
-  should be set up promptly, since whoever reaches it first claims it.
-- **Passwords** are hashed with bcrypt. Failed sign-ins are rate limited per
+- **One administrator account**, created on first run. Until it exists, sign-in
+  is closed and the setup wizard's host and network steps are gated by the
+  one-time setup code; afterwards `/auth/setup` is refused. A fresh install
+  should be set up promptly, since whoever has the setup code can claim it.
+- **Passwords** are hashed with bcrypt. The setup wizard asks for a strong
+  password. An optional authenticator (TOTP) can be turned on for the
+  administrator sign-in; the secret and recovery-code hashes live in the
+  secrets box, not in the state file. Failed sign-ins are rate limited per
   client address.
 - **Sessions** are random 256-bit tokens. Only a SHA-256 hash is stored, so a
   leaked state file does not yield usable sessions. The cookie is HttpOnly and

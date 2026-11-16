@@ -11,12 +11,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Herculade0/feldcore/internal/store"
+)
+
+var (
+	ErrTOTPRequired = errors.New("authenticator code required")
+	ErrTOTPInvalid  = errors.New("incorrect authenticator code")
 )
 
 const (
@@ -42,10 +48,11 @@ func (e *InputError) Error() string { return e.Msg }
 
 // Service owns accounts and sessions.
 type Service struct {
-	st   *store.Store
-	cost int
-	lim  *limiter
-	now  func() time.Time
+	st      *store.Store
+	cost    int
+	lim     *limiter
+	now     func() time.Time
+	secrets SecretBox
 
 	dummyOnce sync.Once
 	dummy     []byte
@@ -95,6 +102,12 @@ func (a *Service) Setup(username, password string) error {
 // Login checks credentials and, on success, returns a new session token.
 // clientKey identifies the caller for rate limiting (normally its IP).
 func (a *Service) Login(clientKey, username, password string) (token string, expires time.Time, err error) {
+	return a.LoginWithCode(clientKey, username, password, "")
+}
+
+// LoginWithCode is Login plus an authenticator code. When two-factor is on,
+// an empty code returns ErrTOTPRequired and does not create a session.
+func (a *Service) LoginWithCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
 	now := a.now()
 	if a.lim.blocked(clientKey, now) {
 		return "", time.Time{}, ErrRateLimited
@@ -105,14 +118,25 @@ func (a *Service) Login(clientKey, username, password string) (token string, exp
 	// a wrong password.
 	hash := a.dummyHash()
 	userOK := false
+	totpOn := false
 	if admin != nil && subtle.ConstantTimeCompare([]byte(admin.Username), []byte(username)) == 1 {
 		hash = []byte(admin.PasswordHash)
 		userOK = true
+		totpOn = admin.TOTPEnabled
 	}
 	passOK := bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 	if !userOK || !passOK {
 		a.lim.fail(clientKey, now)
 		return "", time.Time{}, ErrInvalidCredentials
+	}
+	if totpOn {
+		if strings.TrimSpace(code) == "" {
+			return "", time.Time{}, ErrTOTPRequired
+		}
+		if !a.codeMatches(code) {
+			a.lim.fail(clientKey, now)
+			return "", time.Time{}, ErrTOTPInvalid
+		}
 	}
 	a.lim.reset(clientKey)
 	return a.issue(username)
@@ -202,6 +226,18 @@ func (a *Service) SetSessionHours(h int) error {
 		s.Prefs.SessionHours = h
 		return nil
 	})
+}
+
+// CheckPassword reports whether password is the administrator's current one.
+func (a *Service) CheckPassword(password string) error {
+	admin := a.st.Snapshot().Admin
+	if admin == nil {
+		return ErrSetupDone
+	}
+	if bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)) != nil {
+		return ErrInvalidCredentials
+	}
+	return nil
 }
 
 // ChangePassword replaces the administrator password after checking the current one.

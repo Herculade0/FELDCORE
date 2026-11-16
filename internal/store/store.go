@@ -24,10 +24,12 @@ const (
 	SMBPrivate  = "private"  // only the listed share users, read and write
 )
 
-// User is a FELDCORE login account.
+// User is a FELDCORE login account. The authenticator secret is not stored
+// here; TOTPEnabled only records that sign-in must include a code.
 type User struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"passwordHash"`
+	TOTPEnabled  bool   `json:"totpEnabled,omitempty"`
 }
 
 // Session is a logged-in browser session. Only a hash of the token is stored.
@@ -368,6 +370,35 @@ type Wizard struct {
 	Unattended  bool     `json:"unattended"`
 	Firewall    bool     `json:"firewall"`
 	UpdateCheck bool     `json:"updateCheck"`
+
+	// Locale is the LANG value chosen in setup, such as en_US.UTF-8.
+	Locale string `json:"locale,omitempty"`
+	// AdminUser is the name chosen for the administrator, once claimed.
+	AdminUser string `json:"adminUser,omitempty"`
+	// TOTP records that the administrator enrolled an authenticator.
+	TOTP bool `json:"totp,omitempty"`
+
+	// StorageMode is keep, disk, or pool. StorageDevice is the chosen
+	// /dev path when a disk was selected. Nothing here is a passphrase.
+	StorageMode   string `json:"storageMode,omitempty"`
+	StorageDevice string `json:"storageDevice,omitempty"`
+	StorageMount  string `json:"storageMount,omitempty"`
+	StoragePool   string `json:"storagePool,omitempty"`
+
+	// RemoteMode is none, cloudflare, or wireguard. Tokens are not stored.
+	RemoteMode string `json:"remoteMode,omitempty"`
+	// NotifyKind is none, email, or ntfy. NotifyTo is the mailbox or topic,
+	// never a password or token.
+	NotifyKind string `json:"notifyKind,omitempty"`
+	NotifyTo   string `json:"notifyTo,omitempty"`
+	NtfyURL    string `json:"ntfyUrl,omitempty"`
+	// BackupKind is none or proton. The Proton password is not stored.
+	BackupKind string `json:"backupKind,omitempty"`
+
+	// Rerun is a settings replay of the steps that do not erase a disk.
+	Rerun     bool   `json:"rerun,omitempty"`
+	RerunStep string `json:"rerunStep,omitempty"`
+	Skipped   []string `json:"skipped,omitempty"`
 }
 
 func (s State) clone() State {
@@ -414,6 +445,7 @@ func (s State) clone() State {
 	if s.Wizard != nil {
 		w := *s.Wizard
 		w.ShareNames = append([]string(nil), s.Wizard.ShareNames...)
+		w.Skipped = append([]string(nil), s.Wizard.Skipped...)
 		c.Wizard = &w
 	}
 	if s.ContainerMeta != nil {

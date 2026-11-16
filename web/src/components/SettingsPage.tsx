@@ -26,6 +26,7 @@ import RemoteAccess from "./settings/RemoteAccess";
 import WebAddresses from "./settings/WebAddresses";
 import SnapshotSettings from "./settings/SnapshotSettings";
 import PublishingSettings from "./publish/ProtectionSettings";
+import { GuidedSetup } from "./setup/Wizard";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
   { key: "light", label: "Light", icon: Sun },
@@ -183,6 +184,8 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
           </fieldset>
         </div>
       </Card>
+
+      <GuidedSetup />
 
       {settings && tab === "general" && (
         <>
