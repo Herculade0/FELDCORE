@@ -36,8 +36,9 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **Shares** — create a folder, expose it over SMB (public, read-only or private with users) and NFS; installs Samba/NFS for you | ✅ working |
 | **Docker** — run, edit and manage containers (state, live stats, logs, lifecycle); Unraid-style paths/ports/variables/labels/devices, a folder picker, GPU sharing and an allocations table; installs Docker for you | ✅ working |
 | **App Store** — browse and search the Unraid Community Applications catalogue; choosing an app opens the container setup prefilled from its template | ✅ working |
-| **Settings** — appearance, host, network, services, firewall, updates, App Store feed | ✅ working |
-| **Terminal** — host shell, and a console in each running container | ✅ working |
+| **Settings** — appearance, host, network, services, firewall, updates, App Store feed, agent tokens | ✅ working |
+| **Agent access** — scoped bearer tokens, a read-only MCP server, and an audit log | ✅ working |
+| **Terminal** — host shell, and a console in each running container. Agent tokens cannot open it | ✅ working |
 | **VMs** — KVM/libvirt management | 🧭 later |
 
 ## Architecture
@@ -183,18 +184,25 @@ or a disposable VM.
 - GPU sharing passes `/dev/dri` into the container and adds the groups that
   own it. Nothing is installed for this.
 - The host terminal and each container console are a shell for the signed-in
-  administrator only. The host shell is closed when the window closes, or
-  after 15 minutes with no input. A container console is `docker exec` into
-  that container (bash, or sh if bash is not there) and is only offered while
-  the container is running.
+  administrator only. Agent tokens cannot open them. The host shell is closed
+  when the window closes, or after 15 minutes with no input. A container
+  console is `docker exec` into that container (bash, or sh if bash is not
+  there) and is only offered while the container is running.
+- Agent tokens are created under Settings → Agent access. The secret is shown
+  once and only a SHA-256 hash is stored. The same bearer token calls the
+  HTTP API (scopes are enforced) and the read-only MCP server at `/mcp`.
+  How to connect Claude Code and other clients is in
+  [docs/AGENTS.md](docs/AGENTS.md). Every token call is listed on the Audit
+  page.
 
 ## Layout
 
 ```
 cmd/feldcored      daemon entrypoint
 internal/system    live host metrics (gopsutil)
-internal/api       HTTP/WebSocket surface + SPA serving
-internal/auth      administrator account + sessions
+internal/api       HTTP/WebSocket surface, MCP at /mcp, SPA serving
+internal/auth      administrator account, sessions and agent tokens
+internal/vm        read-only libvirt domain list, when virsh is installed
 internal/store     JSON state file (atomic writes)
 internal/shares    SMB/NFS share management
 internal/docker    Docker Engine API client + container management
@@ -204,7 +212,7 @@ scripts/           integration tests
 web/               React front-end (Vite + Tailwind), embedded via go:embed
 deploy/            install.sh, get.sh and the systemd unit
 .github/workflows  release build (tag v*, does not run until you push a tag)
-docs/              architecture & roadmap
+docs/              architecture, roadmap and agent access
 ```
 
 ## Licence
