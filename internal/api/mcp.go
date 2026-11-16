@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/health"
 	"github.com/Herculade0/feldcore/internal/vm"
 )
 
@@ -20,7 +21,7 @@ import (
 // changes the host. Write tools are a later phase, behind an approval queue.
 
 const mcpInstructions = "Read-only tools for this FELDCORE server. " +
-	"They can look at the host, shares, containers, the App Store and virtual machines. " +
+	"They can look at the host, shares, containers, the App Store, virtual machines, and health. " +
 	"They cannot change anything, and there is no shell."
 
 func (s *Server) initMCP() {
@@ -47,6 +48,8 @@ func (s *Server) initMCP() {
 		"List or search the App Store catalogue. Nothing is installed."), s.toolListApps)
 	mcp.AddTool(server, readonly("list_vms", "List virtual machines",
 		"List virtual machines when the VM layer is installed. Nothing is started or stopped."), s.toolListVMs)
+	mcp.AddTool(server, readonly("health_report", "Health report",
+		"Read the latest health checks: SMART, temperatures, disk space, load, containers, VMs, failed services, certificates, and tunnels. Nothing is changed."), s.toolHealthReport)
 	s.mcpHTTP = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, &mcp.StreamableHTTPOptions{Logger: s.log})
@@ -85,6 +88,13 @@ func (s *Server) toolSystemInfo(ctx context.Context, _ *mcp.CallToolRequest, _ n
 		return nil, nil, errors.New("Couldn't read system information.")
 	}
 	return nil, info, nil
+}
+
+func (s *Server) toolHealthReport(ctx context.Context, _ *mcp.CallToolRequest, _ none) (*mcp.CallToolResult, health.Report, error) {
+	if s.health == nil {
+		return nil, health.Report{}, errors.New("Health monitoring is not available.")
+	}
+	return nil, s.health.Report(), nil
 }
 
 func (s *Server) toolSystemStats(ctx context.Context, _ *mcp.CallToolRequest, _ none) (*mcp.CallToolResult, any, error) {

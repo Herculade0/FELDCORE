@@ -148,8 +148,9 @@ func actorOf(r *http.Request) (string, string) {
 	return "admin", ""
 }
 
-// auditFile records a share change made by a signed-in administrator or by an
-// agent token. Reads are not recorded here; enforceScope already logs token calls.
+// auditFile records a change made by a signed-in administrator or by an agent
+// token: share files, health marks, and notification settings. Reads are not
+// recorded here; enforceScope already logs token calls.
 func (s *Server) auditFile(r *http.Request, action, target, result string) {
 	if s.auth == nil {
 		return
@@ -263,7 +264,9 @@ func isReadPath(p string) bool {
 		"/shares", "/fs/suggest", "/apps",
 		"/docker/status", "/docker/options", "/docker/containers", "/docker/images",
 		"/vms",
-		"/remote", "/proxy", "/proxy/ca", "/snapshots":
+		"/remote", "/proxy", "/proxy/ca", "/snapshots",
+		"/health/status", "/health/history", "/health/thresholds",
+		"/notifications/inbox":
 		return true
 	}
 	if strings.HasPrefix(p, "/vms/") {
