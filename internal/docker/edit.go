@@ -73,10 +73,13 @@ func (m *Manager) Update(ctx context.Context, id string, s Spec) (string, error)
 		return "", err
 	}
 
-	// Fetch a new image before touching the running container.
-	if s.Image != strOf(in.Config["Image"]) || !m.imagePresent(ctx, s.Image) {
-		if err := m.Pull(ctx, s.Image); err != nil {
-			return "", err
+	// Fetch a new image before touching the running container. Restoring a
+	// snapshot skips this when the pinned image is already present.
+	if !(skipPull(ctx) && m.imagePresent(ctx, s.Image)) {
+		if s.Image != strOf(in.Config["Image"]) || !m.imagePresent(ctx, s.Image) {
+			if err := m.Pull(ctx, s.Image); err != nil {
+				return "", err
+			}
 		}
 	}
 	body := recreateBody(in, m.imageConfig(ctx, in.Image), s, grant)
