@@ -168,10 +168,9 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
         <RemoveDialog
           container={removing}
           onClose={() => setRemoving(null)}
-          onRemoved={() => {
-            const n = removing.name;
+          onRemoved={(message) => {
             setRemoving(null);
-            changed(`${n} was removed.`);
+            changed(message);
           }}
         />
       )}
@@ -378,9 +377,10 @@ function RemoveDialog({
 }: {
   container: Container;
   onClose: () => void;
-  onRemoved: () => void;
+  onRemoved: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [removeImage, setRemoveImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const running = container.state === "running";
 
@@ -388,10 +388,13 @@ function RemoveDialog({
     setBusy(true);
     setError(null);
     try {
-      await api(`/docker/containers/${encodeURIComponent(container.id)}?force=${running ? 1 : 0}`, {
-        method: "DELETE",
-      });
-      onRemoved();
+      const q = new URLSearchParams({ force: running ? "1" : "0" });
+      if (removeImage) q.set("image", "1");
+      const res = await api<{ message?: string }>(
+        `/docker/containers/${encodeURIComponent(container.id)}?${q}`,
+        { method: "DELETE" },
+      );
+      onRemoved(res.message || `${container.name} was removed.`);
     } catch (e) {
       setError(errorMessage(e));
       setBusy(false);
@@ -416,8 +419,24 @@ function RemoveDialog({
       <div className="space-y-4">
         <p className="text-sm font-medium leading-relaxed text-ink-2">
           {running && "This container is running and will be stopped first. "}
-          The container is deleted. Images and any folders you mapped in stay on the server; data
-          kept only inside the container is lost.
+          The container is deleted. Folders you mapped in stay on the server. Anything saved only
+          inside the container is lost.
+        </p>
+        <label className="flex items-center gap-2.5 text-sm font-semibold text-ink">
+          <input
+            type="checkbox"
+            checked={removeImage}
+            onChange={(e) => setRemoveImage(e.target.checked)}
+            disabled={busy}
+            className="h-4 w-4 accent-accent"
+          />
+          Also remove image
+        </label>
+        <p className="text-xs font-medium leading-relaxed text-ink-3">
+          Removing the image frees the disk space it uses. The app&apos;s settings and any mapped
+          folders — app data, saves and media — are not touched. Installing it again downloads the
+          image once more, which takes longer. If another container is still using that image, it
+          is left in place.
         </p>
         {error && <Alert>{error}</Alert>}
       </div>

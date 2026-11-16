@@ -98,11 +98,13 @@ func (s *Server) handleDockerRestart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDockerRemove(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("force") == "1"
-	if err := s.docker.Remove(r.Context(), chi.URLParam(r, "id"), force); err != nil {
+	removeImage := r.URL.Query().Get("image") == "1"
+	out, err := s.docker.Remove(r.Context(), chi.URLParam(r, "id"), force, removeImage)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
