@@ -98,6 +98,14 @@ or a disposable VM.
 
 - State lives in `/var/lib/feldcore/state.json` (root-only).
 - Share folders are created under `/srv/feldcore` (`-shares-root` to change).
+- On startup as root, FELDCORE creates Unraid's four default shares when
+  they are missing: `appdata`, `system`, `domains` and `isos`. SMB and NFS
+  are left off, so nothing is exported until you turn a protocol on. A share
+  or folder that already has one of those names is kept as it is; an existing
+  folder is adopted as the share and its files are not changed. `media` and
+  `data` are not created. Pass `-default-shares=false` or set
+  `FELDCORE_DEFAULT_SHARES=0` to skip this. Without root, the defaults are
+  not created.
 - Samba: one line, `include = /etc/samba/feldcore-shares.conf`, is appended to
   `/etc/samba/smb.conf` the first time a share needs it. The original is saved
   as `smb.conf.feldcore-backup`. FELDCORE only ever rewrites its own included
@@ -119,9 +127,9 @@ or a disposable VM.
   the data directory (`ca-feed.json`) and only downloads it when you refresh,
   or the first time, if nothing is saved. Picking an app fills in the
   container form; it does not install it.
-- Template paths under `/mnt/user/appdata` are rewritten to the app data
-  folder: a share named `appdata` if you have one, otherwise
-  `<shares root>/appdata`, or whatever folder you set under Settings.
+- Template paths under `/mnt/user/appdata` are rewritten to the `appdata`
+  share (created with the other default shares, above), or to whatever
+  folder you set under Settings.
 - GPU sharing passes `/dev/dri` into the container and adds the groups that
   own it. Nothing is installed for this.
 

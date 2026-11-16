@@ -81,11 +81,18 @@ type Manager struct {
 	statusMu sync.RWMutex
 	smbErr   string
 	nfsErr   string
+
+	// asRoot reports whether this process may create share folders.
+	// Tests replace it; production uses the real effective uid.
+	asRoot func() bool
 }
 
 // New returns a Manager.
 func New(st *store.Store, p Paths, log *slog.Logger) *Manager {
-	return &Manager{st: st, p: p, id: lookupIdentity(), log: log}
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Manager{st: st, p: p, id: lookupIdentity(), log: log, asRoot: func() bool { return os.Geteuid() == 0 }}
 }
 
 func lookupIdentity() identity {
