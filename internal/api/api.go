@@ -37,6 +37,7 @@ type Deps struct {
 	Shares     *shares.Manager
 	Docker     *docker.Manager
 	Apps       *apps.Service
+	VMs        *vm.Manager
 	Setup      *setup.Service
 	Remote     *remote.Service
 	Proxy      *proxy.Service
@@ -54,6 +55,7 @@ type Server struct {
 	shares     *shares.Manager
 	docker     *docker.Manager
 	apps       *apps.Service
+	vms        *vm.Manager
 	wiz        *setup.Service
 	remote     *remote.Service
 	proxy      *proxy.Service
@@ -69,8 +71,9 @@ type Server struct {
 func New(d Deps) *Server {
 	s := &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
-		docker: d.Docker, apps: d.Apps, wiz: d.Setup, remote: d.Remote, proxy: d.Proxy,
-		snaps: d.Snaps, skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
+		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup,
+		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
+		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 	}
 	s.initMCP()
 	return s
@@ -118,6 +121,12 @@ func (s *Server) Router() http.Handler {
 			r.Post("/setup/wizard", s.handleWizard)
 			r.Put("/settings/services", s.handleSettingsService)
 			r.Put("/settings/updates", s.handleSettingsUpdates)
+			// Defining a domain and the VNC console are not short requests.
+			r.Post("/vms", s.handleVMCreate)
+			r.Put("/vms/{name}", s.handleVMUpdate)
+			r.Put("/vms/{name}/xml", s.handleVMXMLPut)
+			r.Post("/vms/{name}/snapshots/{snap}/revert", s.handleVMSnapshotRevert)
+			r.Get("/vms/{name}/console", s.handleVMConsole)
 			r.Put("/remote", s.handleRemoteSave)
 			r.Post("/remote/install", s.handleRemoteInstall)
 			r.Put("/proxy", s.handleProxySave)
@@ -158,6 +167,27 @@ func (s *Server) Router() http.Handler {
 				r.Put("/settings/defaults", s.handleSettingsDefaults)
 				r.Post("/settings/shares", s.handleSettingsShares)
 
+				r.Get("/vms", s.handleVMs)
+				r.Get("/vms/host", s.handleVMHost)
+				r.Get("/vms/settings", s.handleVMSettings)
+				r.Put("/vms/settings", s.handleVMSettingsSave)
+				r.Get("/vms/virtio", s.handleVirtio)
+				r.Post("/vms/virtio", s.handleVirtioDownload)
+				r.Delete("/vms/virtio/{file}", s.handleVirtioDelete)
+				r.Get("/vms/jobs/{id}", s.handleVMJob)
+				r.Get("/vms/{name}", s.handleVMGet)
+				r.Delete("/vms/{name}", s.handleVMDelete)
+				r.Get("/vms/{name}/xml", s.handleVMXML)
+				r.Post("/vms/{name}/start", s.handleVMStart)
+				r.Post("/vms/{name}/stop", s.handleVMStop)
+				r.Post("/vms/{name}/force-stop", s.handleVMForceStop)
+				r.Post("/vms/{name}/pause", s.handleVMPause)
+				r.Post("/vms/{name}/resume", s.handleVMResume)
+				r.Post("/vms/{name}/autostart", s.handleVMAutostart)
+				r.Get("/vms/{name}/snapshots", s.handleVMSnapshots)
+				r.Post("/vms/{name}/snapshots", s.handleVMSnapshotCreate)
+				r.Delete("/vms/{name}/snapshots/{snap}", s.handleVMSnapshotDelete)
+
 				r.Get("/remote", s.handleRemote)
 				r.Get("/proxy", s.handleProxy)
 				r.Get("/proxy/ca", s.handleProxyCA)
@@ -172,7 +202,6 @@ func (s *Server) Router() http.Handler {
 				r.Delete("/docker/containers/{id}/snapshots/{snap}", s.handleSnapshotDelete)
 				r.Get("/docker/images", s.handleDockerImages)
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
-				r.Get("/vms", s.handleVMs)
 
 				r.Get("/audit", s.handleAudit)
 				r.Get("/agent/tokens", s.handleTokensList)
@@ -279,6 +308,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		dockerOp    *docker.OpError
 		appsInput   *apps.InputError
 		appsOp      *apps.OpError
+		vmInput     *vm.InputError
+		vmOp        *vm.OpError
 		setupInput  *setup.InputError
 		setupOp     *setup.OpError
 		remoteInput *remote.InputError
@@ -297,6 +328,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, dockerInput.Msg)
 	case errors.As(err, &appsInput):
 		writeError(w, http.StatusBadRequest, appsInput.Msg)
+	case errors.As(err, &vmInput):
+		writeError(w, http.StatusBadRequest, vmInput.Msg)
 	case errors.As(err, &setupInput):
 		writeError(w, http.StatusBadRequest, setupInput.Msg)
 	case errors.As(err, &remoteInput):
@@ -314,6 +347,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &appsOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, appsOp.Msg)
+	case errors.As(err, &vmOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, vmOp.Msg)
 	case errors.As(err, &setupOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, setupOp.Msg)

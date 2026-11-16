@@ -199,6 +199,10 @@ type Prefs struct {
 	// Touched is set once Settings has saved update or firewall choices, so
 	// those win over the values the wizard stored.
 	Touched bool `json:"touched,omitempty"`
+	// VMDomains and VMISOs override the VM Manager's disk and ISO folders.
+	// Empty means the domains and isos shares under the shares root.
+	VMDomains string `json:"vmDomains,omitempty"`
+	VMISOs    string `json:"vmISOs,omitempty"`
 }
 
 // Wizard is how far first-start setup has got, and the choices made so far.
