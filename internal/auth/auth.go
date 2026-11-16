@@ -225,6 +225,9 @@ func (a *Service) ChangePassword(current, next string) error {
 			return ErrSetupDone
 		}
 		s.Admin.PasswordHash = string(hash)
+		// Citizen ID sessions carry this number. The original session cookie
+		// does not, so this sign-in keeps working exactly as before.
+		s.Admin.SessionVersion++
 		return nil
 	})
 }

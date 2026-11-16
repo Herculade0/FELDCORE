@@ -20,6 +20,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
@@ -37,6 +38,7 @@ type Deps struct {
 	System     *system.Collector
 	Sampler    *system.Sampler
 	Auth       *auth.Service
+	Citizen    *citizenid.Gateway
 	Shares     *shares.Manager
 	Docker     *docker.Manager
 	Apps       *apps.Service
@@ -58,6 +60,7 @@ type Server struct {
 	sys        *system.Collector
 	sampler    *system.Sampler
 	auth       *auth.Service
+	citizen    *citizenid.Gateway
 	shares     *shares.Manager
 	docker     *docker.Manager
 	apps       *apps.Service
@@ -79,7 +82,7 @@ type Server struct {
 // New returns a Server.
 func New(d Deps) *Server {
 	s := &Server{
-		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
+		sys: d.System, sampler: d.Sampler, auth: d.Auth, citizen: d.Citizen, shares: d.Shares,
 		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup,
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
@@ -109,6 +112,23 @@ func (s *Server) Router() http.Handler {
 			r.Post("/auth/setup", s.handleAuthSetup)
 			r.Post("/auth/login", s.handleAuthLogin)
 			r.Post("/auth/logout", s.handleAuthLogout)
+			r.Post("/citizen/login", s.handleCitizenLogin)
+			r.Post("/citizen/logout", s.handleCitizenLogout)
+			r.Post("/citizen/webauthn/login/begin", s.handlePasskeyLoginBegin)
+			r.Post("/citizen/webauthn/login/finish", s.handlePasskeyLoginFinish)
+		})
+
+		// Signed-in people, including accounts that are not the administrator.
+		r.Group(func(r chi.Router) {
+			r.Use(short)
+			r.Use(s.requireUser)
+			r.Get("/launcher", s.handleLauncher)
+			r.Get("/citizen/me", s.handleCitizenMe)
+			r.Post("/citizen/totp/begin", s.handleTOTPBegin)
+			r.Post("/citizen/totp/confirm", s.handleTOTPConfirm)
+			r.Post("/citizen/webauthn/register/begin", s.handlePasskeyRegisterBegin)
+			r.Post("/citizen/webauthn/register/finish", s.handlePasskeyRegisterFinish)
+			r.Delete("/citizen/passkeys/{id}", s.handlePasskeyDelete)
 		})
 
 		// Everything else needs a signed-in session or a scoped agent token.
@@ -228,6 +248,17 @@ func (s *Server) Router() http.Handler {
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
 
 				r.Get("/audit", s.handleAudit)
+				r.Get("/citizen", s.handleCitizenDirectory)
+				r.Post("/citizen/users", s.handleCitizenUserCreate)
+				r.Put("/citizen/users/{id}", s.handleCitizenUserUpdate)
+				r.Post("/citizen/users/{id}/password", s.handleCitizenPassword)
+				r.Post("/citizen/users/{id}/totp/reset", s.handleCitizenTOTPReset)
+				r.Delete("/citizen/users/{id}", s.handleCitizenUserDelete)
+				r.Delete("/citizen/users/{id}/passkeys/{key}", s.handleCitizenPasskeyDelete)
+				r.Post("/citizen/groups", s.handleCitizenGroupCreate)
+				r.Put("/citizen/groups/{id}", s.handleCitizenGroupUpdate)
+				r.Delete("/citizen/groups/{id}", s.handleCitizenGroupDelete)
+				r.Put("/citizen/apps/{container}", s.handleCitizenAppAccess)
 				r.Get("/agent/tokens", s.handleTokensList)
 				r.Post("/agent/tokens", s.handleTokenCreate)
 				r.Post("/agent/tokens/revoke-all", s.handleTokensRevokeAll)
@@ -244,6 +275,14 @@ func (s *Server) Router() http.Handler {
 			writeError(w, http.StatusNotFound, "No such API endpoint.")
 		})
 	})
+
+	// Citizen ID pages and the proxy's forward_auth check. These sit outside
+	// /api/v1 so a published app can reverse-proxy /citizen/* here.
+	r.Get("/citizen/signin", s.handleCitizenPage)
+	r.Post("/citizen/signin", s.handleCitizenPage)
+	r.Get("/citizen/check", s.handleCitizenCheck)
+	r.Post("/citizen/webauthn/login/begin", s.handlePasskeyLoginBegin)
+	r.Post("/citizen/webauthn/login/finish", s.handlePasskeyLoginFinish)
 
 	// Agents speak MCP here. Bearer token only; a browser session is not enough.
 	if s.mcpHTTP != nil {
@@ -326,6 +365,7 @@ func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, max int64) boo
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var (
 		authInput   *auth.InputError
+		citInput    *citizenid.InputError
 		shareInput  *shares.InputError
 		shareOp     *shares.OpError
 		dockerInput *docker.InputError
@@ -352,6 +392,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &authInput):
 		writeError(w, http.StatusBadRequest, authInput.Msg)
+	case errors.As(err, &citInput):
+		writeError(w, http.StatusBadRequest, citInput.Msg)
 	case errors.As(err, &shareInput):
 		writeError(w, http.StatusBadRequest, shareInput.Msg)
 	case errors.As(err, &dockerInput):
@@ -415,9 +457,15 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusNotFound, "That item no longer exists.")
 	case errors.Is(err, auth.ErrSetupDone):
 		writeError(w, http.StatusConflict, "FELDCORE has already been set up. Sign in instead.")
-	case errors.Is(err, auth.ErrInvalidCredentials):
+	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, citizenid.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "Incorrect username or password.")
-	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
+	case errors.Is(err, citizenid.ErrInvalidCode), errors.Is(err, citizenid.ErrPasskey):
+		writeError(w, http.StatusUnauthorized, "That verification could not be confirmed.")
+	case errors.Is(err, citizenid.ErrDisabled):
+		writeError(w, http.StatusForbidden, "This account is disabled.")
+	case errors.Is(err, citizenid.ErrNotFound):
+		writeError(w, http.StatusNotFound, "That item no longer exists.")
+	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, citizenid.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)

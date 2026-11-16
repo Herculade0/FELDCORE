@@ -1,9 +1,9 @@
 // Package store persists FELDCORE's own state as a single JSON file.
 //
-// The state is small (one admin account, sessions, agent tokens, share
-// definitions), so a file written atomically on every change is simpler and
-// more inspectable than a database, and keeps the binary free of native
-// dependencies.
+// The state is small (the administrator, Citizen ID accounts, sessions,
+// agent tokens, share definitions), so a file written atomically on every
+// change is simpler and more inspectable than a database, and keeps the
+// binary free of native dependencies.
 package store
 
 import (
@@ -24,10 +24,67 @@ const (
 	SMBPrivate  = "private"  // only the listed share users, read and write
 )
 
-// User is a FELDCORE login account.
+// User is the built-in administrator. Citizen ID accounts live in
+// State.Accounts so this login path stays as it is.
 type User struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"passwordHash"`
+	// TOTP is set once an authenticator is enrolled. The secret is in the
+	// secrets box. The original administrator sign-in does not ask for it.
+	TOTP bool `json:"totp,omitempty"`
+	// SessionVersion invalidates Citizen ID sessions when it changes.
+	// The original session cookie does not consult it.
+	SessionVersion int `json:"sessionVersion,omitempty"`
+	// WebAuthnID is the stable passkey user handle, base64url. Empty until
+	// the administrator registers a passkey.
+	WebAuthnID string `json:"webAuthnId,omitempty"`
+}
+
+// Account is a Citizen ID user other than the administrator.
+// PasswordHash is an argon2id PHC string. The TOTP secret is not here.
+type Account struct {
+	ID             string    `json:"id"`
+	Username       string    `json:"username"`
+	DisplayName    string    `json:"displayName,omitempty"`
+	PasswordHash   string    `json:"passwordHash"`
+	Disabled       bool      `json:"disabled,omitempty"`
+	GroupIDs       []string  `json:"groupIds,omitempty"`
+	TOTP           bool      `json:"totp,omitempty"`
+	SessionVersion int       `json:"sessionVersion,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+// Group is a named set of Citizen ID users. App access refers to these ids.
+type Group struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// AppGrant is who may open one published app. Container matches a web route.
+// Level is public, users, groups or admin. Empty means public.
+type AppGrant struct {
+	Container string   `json:"container"`
+	Level     string   `json:"level"`
+	GroupIDs  []string `json:"groupIds,omitempty"`
+}
+
+// Passkey is a WebAuthn credential. The public key is not a secret.
+// Credential is the JSON form of the library's credential record.
+type Passkey struct {
+	ID         string          `json:"id"`
+	UserID     string          `json:"userId"`
+	Name       string          `json:"name,omitempty"`
+	CreatedAt  time.Time       `json:"createdAt"`
+	Credential json.RawMessage `json:"credential"`
+}
+
+// CitizenSession is a gateway session kept by the session library.
+// TokenHash is a hash of the cookie value. Data is the encoded session.
+type CitizenSession struct {
+	TokenHash string    `json:"tokenHash"`
+	Data      string    `json:"data"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // Session is a logged-in browser session. Only a hash of the token is stored.
@@ -137,6 +194,13 @@ type State struct {
 	VPN    VPN    `json:"vpn,omitempty"`
 	Backup Backup `json:"backup,omitempty"`
 	Notify Notify `json:"notify,omitempty"`
+	// Accounts, Groups and AppGrants are Citizen ID. The administrator
+	// stays in Admin. TOTP secrets stay in the secrets box.
+	Accounts        []Account        `json:"accounts,omitempty"`
+	Groups          []Group          `json:"groups,omitempty"`
+	AppGrants       []AppGrant       `json:"appGrants,omitempty"`
+	Passkeys        []Passkey        `json:"passkeys,omitempty"`
+	CitizenSessions []CitizenSession `json:"citizenSessions,omitempty"`
 }
 
 // PublicRoute publishes one container through the Cloudflare Tunnel.
@@ -365,6 +429,31 @@ func (s State) clone() State {
 		c.VPN.Tunnels[i] = t
 	}
 	c.Notify.Events = append([]NotifyEvent(nil), s.Notify.Events...)
+	if s.Accounts != nil {
+		c.Accounts = make([]Account, len(s.Accounts))
+		for i, a := range s.Accounts {
+			a.GroupIDs = append([]string(nil), a.GroupIDs...)
+			c.Accounts[i] = a
+		}
+	}
+	c.Groups = append([]Group(nil), s.Groups...)
+	if s.AppGrants != nil {
+		c.AppGrants = make([]AppGrant, len(s.AppGrants))
+		for i, g := range s.AppGrants {
+			g.GroupIDs = append([]string(nil), g.GroupIDs...)
+			c.AppGrants[i] = g
+		}
+	}
+	if s.Passkeys != nil {
+		c.Passkeys = make([]Passkey, len(s.Passkeys))
+		for i, p := range s.Passkeys {
+			if p.Credential != nil {
+				p.Credential = append(json.RawMessage(nil), p.Credential...)
+			}
+			c.Passkeys[i] = p
+		}
+	}
+	c.CitizenSessions = append([]CitizenSession(nil), s.CitizenSessions...)
 	return c
 }
 

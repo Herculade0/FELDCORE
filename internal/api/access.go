@@ -55,6 +55,18 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: user})))
 			return
 		}
+		// A Citizen ID session may also be the administrator. Other accounts
+		// are refused here so the management API stays administrator-only.
+		if s.citizen != nil {
+			if id, ok := s.citizen.Identity(r); ok {
+				if !id.Admin {
+					writeError(w, http.StatusForbidden, "This page is for the administrator.")
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: id.Username})))
+				return
+			}
+		}
 		if raw, ok := bearerToken(r.Header); ok {
 			if s.auth == nil {
 				writeError(w, http.StatusUnauthorized, "Sign in to continue.")

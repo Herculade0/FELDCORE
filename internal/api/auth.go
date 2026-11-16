@@ -62,11 +62,22 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		"setupRequired": s.auth.SetupRequired(),
 		"authenticated": false,
 	}
+	admin := false
 	if user, ok := s.currentUser(r); ok {
 		resp["authenticated"] = true
 		resp["username"] = user
+		admin = true
+	} else if s.citizen != nil {
+		if id, ok := s.citizen.Identity(r); ok {
+			resp["authenticated"] = true
+			resp["username"] = id.Username
+			admin = id.Admin
+		}
 	}
-	if s.wiz != nil {
+	resp["admin"] = admin
+	if s.wiz != nil && admin {
+		resp["wizardPending"] = s.wiz.Pending()
+	} else if s.wiz != nil && resp["authenticated"] != true {
 		resp["wizardPending"] = s.wiz.Pending()
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -121,6 +132,9 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, r, err)
 			return
 		}
+	}
+	if s.citizen != nil {
+		_ = s.citizen.Logout(w, r)
 	}
 	clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
