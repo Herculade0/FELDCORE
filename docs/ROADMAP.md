@@ -61,13 +61,13 @@ Follow-ups
 - [ ] Warn when a chosen host port is already allocated, before applying
 
 ### GPU selection
-Specified in [GPU-SELECTION.md](GPU-SELECTION.md). Containers first. The VM
-manager keeps PCI passthrough and shares the same PCI address as the stable id.
-- [ ] First slice: inventory (model, vendor, driver, VRAM, render node, PCI
-      address, codecs), a picker in place of a hard-coded `/dev/dri`, and a
-      template that finds no GPU left unticked with "No GPU found"
-- [ ] NVIDIA via the Container Toolkit when that driver is already loaded
-- [ ] Dashboard usage, then the NVIDIA driver as a sysext on FELDCORE OS
+Specified in [GPU-SELECTION.md](GPU-SELECTION.md). Containers first. A GPU
+assigned to a VM is locked to that VM (boot-time stub on the VM manager
+branch), and both sides use the same PCI address.
+- [ ] First slice: live inventory, a read-only Settings list (model, vendor,
+      driver, VRAM, assigned to), a container picker that starts with nothing
+      selected, and a Settings button to install the NVIDIA Container Toolkit
+- [ ] Dashboard usage, ARM boards, and the NVIDIA driver as a sysext on FELDCORE OS
 
 ## M3 — Settings
 - [ ] Users & authentication management
