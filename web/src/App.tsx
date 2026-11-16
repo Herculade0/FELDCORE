@@ -15,6 +15,7 @@ import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
+import Launcher from "./components/Launcher";
 import Wizard from "./components/setup/Wizard";
 import { TerminalProvider } from "./components/Terminal";
 
@@ -46,8 +47,10 @@ function Gate() {
 }
 
 function Shell() {
-  const [active, setActive] = useState<NavKey>("dashboard");
-  const { username } = useAuth();
+  const { username, admin } = useAuth();
+  const items = admin ? NAV : NAV.filter((item) => item.key === "launcher");
+  const [active, setActive] = useState<NavKey>(admin ? "dashboard" : "launcher");
+  const page = items.some((item) => item.key === active) ? active : (items[0]?.key ?? "launcher");
 
   return (
     <TerminalProvider>
@@ -59,8 +62,8 @@ function Shell() {
           <Wordmark />
         </div>
         <nav className="mt-6 flex-1 space-y-1.5" aria-label="Main">
-          {NAV.map(({ key, label, icon: Icon, ready }) => {
-            const on = active === key;
+          {items.map(({ key, label, icon: Icon, ready }) => {
+            const on = page === key;
             return (
               <button
                 key={key}
@@ -110,20 +113,22 @@ function Shell() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-10 md:pt-8">
-        <ErrorBoundary resetKey={active} area={NAV.find((n) => n.key === active)?.label}>
-          {active === "dashboard" ? (
+        <ErrorBoundary resetKey={page} area={items.find((n) => n.key === page)?.label}>
+          {page === "dashboard" ? (
             <Dashboard onNavigate={setActive} />
-          ) : active === "shares" ? (
+          ) : page === "launcher" ? (
+            <Launcher />
+          ) : page === "shares" ? (
             <SharesPage />
-          ) : active === "docker" ? (
+          ) : page === "docker" ? (
             <DockerPage onOpenApps={() => setActive("apps")} />
-          ) : active === "apps" ? (
+          ) : page === "apps" ? (
             <AppsPage />
-          ) : active === "vms" ? (
+          ) : page === "vms" ? (
             <VMsPage />
-          ) : active === "audit" ? (
+          ) : page === "audit" ? (
             <AuditPage />
-          ) : active === "settings" ? (
+          ) : page === "settings" ? (
             <SettingsPage onOpenAudit={() => setActive("audit")} />
           ) : null}
         </ErrorBoundary>
@@ -134,8 +139,8 @@ function Shell() {
         className="glass fixed inset-x-3 bottom-3 z-20 flex justify-around rounded-3xl p-1.5 md:hidden"
         aria-label="Main"
       >
-        {NAV.map(({ key, label, icon: Icon }) => {
-          const on = active === key;
+        {items.map(({ key, label, icon: Icon }) => {
+          const on = page === key;
           return (
             <button
               key={key}

@@ -25,6 +25,7 @@ import MailNotifications from "./settings/MailSettings";
 import RemoteAccess from "./settings/RemoteAccess";
 import WebAddresses from "./settings/WebAddresses";
 import SnapshotSettings from "./settings/SnapshotSettings";
+import CitizenID from "./settings/CitizenID";
 import { InstallPanel, useInstall } from "./install/InstallPanel";
 import PublishingSettings from "./publish/ProtectionSettings";
 
@@ -65,7 +66,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"general" | "network" | "remote" | "publishing">("general");
+  const [tab, setTab] = useState<"general" | "network" | "remote" | "publishing" | "citizen">("general");
 
   const reload = () =>
     api<Settings>("/settings")
@@ -87,7 +88,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
       <header>
         <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Settings</h1>
         <p className="mt-2 text-sm font-semibold text-ink-2">
-          Appearance, this server, names on the network, publishing, remote access, and agent access.
+          Appearance, this server, names on the network, publishing, remote access, Citizen ID, and agent access.
         </p>
       </header>
 
@@ -98,6 +99,7 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
             ["network", "Network"],
             ["publishing", "Publishing"],
             ["remote", "Remote access"],
+            ["citizen", "Citizen ID"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -119,6 +121,8 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
       {tab === "remote" && <RemoteAccess />}
 
       {tab === "publishing" && <PublishingSettings />}
+
+      {tab === "citizen" && <CitizenID />}
 
       {tab === "network" && settings && (
         <>
@@ -416,6 +420,9 @@ function SecurityCard({ settings, onSaved }: { settings: Settings; onSaved: () =
             onSaved();
           }}
         />
+        <p className="mt-3 text-xs font-medium leading-relaxed text-ink-3">
+          This is the administrator password. Other people, and their authenticators, are managed under Citizen ID.
+        </p>
         <div className="mt-6 max-w-xs">
           <TextField
             label="Session timeout (hours)"

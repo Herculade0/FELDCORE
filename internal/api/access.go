@@ -55,6 +55,8 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: user})))
 			return
 		}
+		// The parent-domain Citizen ID cookie is not a management session.
+		// A published app must not be able to replay it against /api/v1.
 		if raw, ok := bearerToken(r.Header); ok {
 			if s.auth == nil {
 				writeError(w, http.StatusUnauthorized, "Sign in to continue.")
