@@ -70,7 +70,7 @@ func (m *Manager) applyNFS(ctx context.Context, shares []store.Share) error {
 		return errNotRoot
 	}
 
-	content := []byte(RenderNFS(shares, m.p.SharesRoot, m.id))
+	content := []byte(RenderNFS(shares, m.Root(), m.id))
 	if err := writeAtomic(m.p.ExportsFile, content, 0o644); err != nil {
 		return fmt.Errorf("could not write %s: %v", m.p.ExportsFile, err)
 	}

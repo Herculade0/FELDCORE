@@ -33,7 +33,7 @@ func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDockerCreate(w http.ResponseWriter, r *http.Request) {
 	var spec docker.Spec
-	if !readJSON(w, r, &spec) {
+	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
 	id, err := s.docker.Create(r.Context(), spec)
@@ -57,7 +57,7 @@ func (s *Server) handleDockerSpec(w http.ResponseWriter, r *http.Request) {
 // handleDockerUpdate applies edited settings by recreating the container.
 func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 	var spec docker.Spec
-	if !readJSON(w, r, &spec) {
+	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
 	id, err := s.docker.Update(r.Context(), chi.URLParam(r, "id"), spec)
@@ -98,11 +98,13 @@ func (s *Server) handleDockerRestart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDockerRemove(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("force") == "1"
-	if err := s.docker.Remove(r.Context(), chi.URLParam(r, "id"), force); err != nil {
+	removeImage := r.URL.Query().Get("image") == "1"
+	out, err := s.docker.Remove(r.Context(), chi.URLParam(r, "id"), force, removeImage)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {

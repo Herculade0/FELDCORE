@@ -126,7 +126,7 @@ func (a *Service) issue(username string) (string, time.Time, error) {
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
 	now := a.now()
-	expires := now.Add(SessionTTL)
+	expires := now.Add(a.ttl())
 	err := a.st.Update(func(s *store.State) error {
 		live := s.Sessions[:0]
 		for _, se := range s.Sessions {
@@ -172,6 +172,61 @@ func (a *Service) Authenticate(token string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ttl is how long a new session lasts. Settings can shorten or lengthen it.
+func (a *Service) ttl() time.Duration {
+	h := a.st.Snapshot().Prefs.SessionHours
+	if h < 1 || h > 24*30 {
+		return SessionTTL
+	}
+	return time.Duration(h) * time.Hour
+}
+
+// SessionHours is the timeout shown in Settings. 168 is one week, the default.
+func (a *Service) SessionHours() int {
+	h := a.st.Snapshot().Prefs.SessionHours
+	if h < 1 || h > 24*30 {
+		return int(SessionTTL / time.Hour)
+	}
+	return h
+}
+
+// SetSessionHours stores how long new sign-ins last. Existing sessions keep
+// the expiry they were given.
+func (a *Service) SetSessionHours(h int) error {
+	if h < 1 || h > 24*30 {
+		return &InputError{"Session timeout is between 1 and 720 hours."}
+	}
+	return a.st.Update(func(s *store.State) error {
+		s.Prefs.SessionHours = h
+		return nil
+	})
+}
+
+// ChangePassword replaces the administrator password after checking the current one.
+func (a *Service) ChangePassword(current, next string) error {
+	admin := a.st.Snapshot().Admin
+	if admin == nil {
+		return ErrSetupDone
+	}
+	if err := validate(admin.Username, next); err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(current)) != nil {
+		return ErrInvalidCredentials
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(next), a.cost)
+	if err != nil {
+		return err
+	}
+	return a.st.Update(func(s *store.State) error {
+		if s.Admin == nil {
+			return ErrSetupDone
+		}
+		s.Admin.PasswordHash = string(hash)
+		return nil
+	})
 }
 
 // Logout ends the session for token, if any.

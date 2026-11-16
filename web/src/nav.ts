@@ -4,10 +4,11 @@ import {
   LayoutDashboard,
   MonitorPlay,
   Settings,
+  Store,
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "shares" | "docker" | "vms" | "settings";
+export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "settings";
 
 export interface NavItem {
   key: NavKey;
@@ -36,8 +37,15 @@ export const NAV: NavItem[] = [
   {
     key: "docker",
     label: "Docker",
-    desc: "Containers & app store",
+    desc: "Containers",
     icon: Container,
+    ready: true,
+  },
+  {
+    key: "apps",
+    label: "App Store",
+    desc: "Community applications",
+    icon: Store,
     ready: true,
   },
   {

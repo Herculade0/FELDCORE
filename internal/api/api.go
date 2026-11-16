@@ -16,39 +16,48 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/system"
 )
 
 // Deps are the services the HTTP layer exposes.
 type Deps struct {
-	System  *system.Collector
-	Sampler *system.Sampler
-	Auth    *auth.Service
-	Shares  *shares.Manager
-	Docker  *docker.Manager
-	WebRoot fs.FS
-	Log     *slog.Logger
+	System     *system.Collector
+	Sampler    *system.Sampler
+	Auth       *auth.Service
+	Shares     *shares.Manager
+	Docker     *docker.Manager
+	Apps       *apps.Service
+	Setup      *setup.Service
+	SkipWizard bool
+	WebRoot    fs.FS
+	Log        *slog.Logger
 }
 
 // Server holds the dependencies shared by HTTP handlers.
 type Server struct {
-	sys     *system.Collector
-	sampler *system.Sampler
-	auth    *auth.Service
-	shares  *shares.Manager
-	docker  *docker.Manager
-	webRoot fs.FS
-	log     *slog.Logger
+	sys        *system.Collector
+	sampler    *system.Sampler
+	auth       *auth.Service
+	shares     *shares.Manager
+	docker     *docker.Manager
+	apps       *apps.Service
+	wiz        *setup.Service
+	skipWizard bool
+	webRoot    fs.FS
+	log        *slog.Logger
 }
 
 // New returns a Server.
 func New(d Deps) *Server {
 	return &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
-		docker: d.Docker, webRoot: d.WebRoot, log: d.Log,
+		docker: d.Docker, apps: d.Apps, wiz: d.Setup, skipWizard: d.SkipWizard,
+		webRoot: d.WebRoot, log: d.Log,
 	}
 }
 
@@ -80,11 +89,19 @@ func (s *Server) Router() http.Handler {
 
 			// Long-lived or slow endpoints sit outside the short timeout.
 			r.Get("/system/stream", s.handleSystemStream)
+			r.Get("/terminal", s.handleHostTerminal)
+			r.Get("/docker/containers/{id}/terminal", s.handleContainerTerminal)
 			r.Post("/shares/services/{service}/install", s.handleServiceInstall)
 			// Installing Docker and pulling images can take minutes.
 			r.Post("/docker/install", s.handleDockerInstall)
 			r.Post("/docker/containers", s.handleDockerCreate)
 			r.Put("/docker/containers/{id}", s.handleDockerUpdate)
+			// The catalogue is about 20MB; a refresh must not sit under the
+			// short request timeout.
+			r.Post("/apps/refresh", s.handleAppsRefresh)
+			r.Post("/setup/wizard", s.handleWizard)
+			r.Put("/settings/services", s.handleSettingsService)
+			r.Put("/settings/updates", s.handleSettingsUpdates)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -102,6 +119,21 @@ func (s *Server) Router() http.Handler {
 				r.Delete("/shares/users/{name}", s.handleShareUserDelete)
 
 				r.Get("/fs/suggest", s.handleFSSuggest)
+
+				r.Get("/setup/wizard", s.handleWizardStatus)
+
+				r.Get("/apps", s.handleApps)
+				r.Get("/apps/{id}", s.handleAppSpec)
+
+				r.Get("/settings", s.handleSettings)
+				r.Put("/settings/system", s.handleSettingsSystem)
+				r.Put("/settings/network", s.handleSettingsNetwork)
+				r.Put("/settings/firewall", s.handleSettingsFirewall)
+				r.Put("/settings/password", s.handleSettingsPassword)
+				r.Put("/settings/session", s.handleSettingsSession)
+				r.Put("/settings/feed", s.handleSettingsFeed)
+				r.Put("/settings/defaults", s.handleSettingsDefaults)
+				r.Post("/settings/shares", s.handleSettingsShares)
 
 				r.Get("/docker/status", s.handleDockerStatus)
 				r.Get("/docker/options", s.handleDockerOptions)
@@ -170,10 +202,21 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 
 // readJSON decodes a small JSON request body into v.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	return readJSONLimit(w, r, v, 64<<10)
+}
+
+// readJSONLimit is readJSON with a caller-chosen cap. Container specs from a
+// large template are much bigger than the other request bodies.
+func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, max int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, max)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, http.StatusRequestEntityTooLarge, "That request is too large.")
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "The request was not valid JSON.")
 		return false
 	}
@@ -188,6 +231,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		shareOp     *shares.OpError
 		dockerInput *docker.InputError
 		dockerOp    *docker.OpError
+		appsInput   *apps.InputError
+		appsOp      *apps.OpError
+		setupInput  *setup.InputError
+		setupOp     *setup.OpError
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -196,12 +243,24 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, shareInput.Msg)
 	case errors.As(err, &dockerInput):
 		writeError(w, http.StatusBadRequest, dockerInput.Msg)
+	case errors.As(err, &appsInput):
+		writeError(w, http.StatusBadRequest, appsInput.Msg)
+	case errors.As(err, &setupInput):
+		writeError(w, http.StatusBadRequest, setupInput.Msg)
 	case errors.As(err, &shareOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, shareOp.Msg)
 	case errors.As(err, &dockerOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, dockerOp.Msg)
+	case errors.As(err, &appsOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, appsOp.Msg)
+	case errors.As(err, &setupOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, setupOp.Msg)
+	case errors.Is(err, apps.ErrNotFound):
+		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):
 		writeError(w, http.StatusNotFound, "That container no longer exists.")
 	case errors.Is(err, shares.ErrNotFound):
@@ -210,7 +269,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, "FELDCORE has already been set up. Sign in instead.")
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "Incorrect username or password.")
-	case errors.Is(err, auth.ErrRateLimited):
+	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)

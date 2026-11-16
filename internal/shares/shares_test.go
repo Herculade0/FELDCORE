@@ -200,3 +200,84 @@ func TestCreateUpdateDeleteLifecycle(t *testing.T) {
 		t.Error("deleting a share with an empty folder should remove the folder")
 	}
 }
+
+func TestEnsureDefaults(t *testing.T) {
+	ctx := context.Background()
+	m := newTestManager(t)
+	m.asRoot = func() bool { return true }
+
+	// An existing appdata folder, with a file in it, must be adopted.
+	appdata := m.dir("appdata")
+	if err := os.MkdirAll(appdata, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(appdata, "keep-me")
+	if err := os.WriteFile(marker, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(appdata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := info.Mode()
+
+	// An existing share is not overwritten.
+	if _, err := m.Create(ctx, Input{
+		Name:    "system",
+		Comment: "leave this",
+		SMB:     store.SMB{Enabled: true, Access: store.SMBReadOnly},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m.EnsureDefaults(ctx)
+	m.EnsureDefaults(ctx) // second run changes nothing
+
+	got := map[string]store.Share{}
+	for _, sh := range m.st.Snapshot().Shares {
+		if _, ok := got[sh.Name]; ok {
+			t.Fatalf("share %s stored twice", sh.Name)
+		}
+		got[sh.Name] = sh
+	}
+	for _, name := range []string{"appdata", "system", "domains", "isos"} {
+		sh, ok := got[name]
+		if !ok {
+			t.Errorf("missing default share %s", name)
+			continue
+		}
+		if st, err := os.Stat(m.dir(name)); err != nil || !st.IsDir() {
+			t.Errorf("folder for %s was not created", name)
+		}
+		if name != "system" && (sh.SMB.Enabled || sh.NFS.Enabled) {
+			t.Errorf("%s should not be exported, smb=%v nfs=%v", name, sh.SMB.Enabled, sh.NFS.Enabled)
+		}
+	}
+	for _, extra := range []string{"media", "data"} {
+		if _, ok := got[extra]; ok {
+			t.Errorf("Unraid does not ship a default %s share", extra)
+		}
+	}
+
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "mine" {
+		t.Fatalf("adopted appdata folder was modified: %v %q", err, data)
+	}
+	if st, err := os.Stat(appdata); err != nil || st.Mode() != before {
+		t.Errorf("adopted folder mode changed: was %v now %v", before, st.Mode())
+	}
+	sys := got["system"]
+	if sys.Comment != "leave this" || !sys.SMB.Enabled || sys.SMB.Access != store.SMBReadOnly {
+		t.Errorf("existing system share was overwritten: %+v", sys)
+	}
+
+	// Without root, nothing new is created.
+	quiet := newTestManager(t)
+	quiet.asRoot = func() bool { return false }
+	quiet.EnsureDefaults(ctx)
+	if len(quiet.st.Snapshot().Shares) != 0 {
+		t.Fatalf("defaults created without root: %+v", quiet.st.Snapshot().Shares)
+	}
+	if _, err := os.Stat(quiet.dir("domains")); !os.IsNotExist(err) {
+		t.Fatalf("folder created without root: %v", err)
+	}
+}

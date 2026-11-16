@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -220,6 +222,7 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		Managed: rc.Labels[ManagedLabel] == "true",
 		Compose: rc.Labels[composeLabel] != "",
 		GPU:     rc.Labels[GPULabel] == "true",
+		Icon:    containerIcon(rc.Labels),
 		IPs:     []string{},
 	}
 
@@ -268,7 +271,11 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		c.Ports = append(c.Ports, Port{Host: p.PublicPort, Container: p.PrivatePort, Proto: p.Type})
 	}
 	sort.Slice(c.Ports, func(i, j int) bool { return c.Ports[i].Host < c.Ports[j].Host })
-	c.WebURL = guessWebURL(c.Ports)
+	if web := resolveWebUI(rc.Labels[webUILabel], c.Ports); web != "" {
+		c.WebURL = web
+	} else {
+		c.WebURL = guessWebURL(c.Ports)
+	}
 	if c.Ports == nil {
 		// A nil slice marshals to JSON null; the UI expects an array. A
 		// stopped container has no published ports, so this is the common path.
@@ -291,24 +298,114 @@ func (m *Manager) Restart(ctx context.Context, id string) error {
 	return m.c.postJSON(ctx, "/containers/"+esc(id)+"/restart", url.Values{"t": {"10"}}, nil, nil)
 }
 
+// RemoveOutcome is what happened when a container was deleted. The container
+// removal itself has already succeeded; image fields only describe the
+// optional follow-up.
+type RemoveOutcome struct {
+	Message      string `json:"message"`
+	ImageRemoved bool   `json:"imageRemoved"`
+	ImageSkipped bool   `json:"imageSkipped"`
+}
+
 // Remove deletes a container. It must be stopped unless force is set.
-func (m *Manager) Remove(ctx context.Context, id string, force bool) error {
-	// Look the name up first so its stored setting names can be forgotten.
-	name := ""
+//
+// removeImage also deletes the container's image afterwards, but only when no
+// other container is using it. A skipped or failed image delete does not fail
+// the call: the container is already gone. Anonymous volumes are never
+// removed; mapped folders stay on disk either way.
+func (m *Manager) Remove(ctx context.Context, id string, force, removeImage bool) (RemoveOutcome, error) {
+	name, imageID, imageRef := "", "", ""
+	fullID := ""
 	if in, err := m.inspect(ctx, id); err == nil {
 		name = strings.TrimPrefix(in.Name, "/")
+		fullID = in.ID
+		imageID = in.Image
+		imageRef = strOf(in.Config["Image"])
+	}
+	shown := name
+	if shown == "" {
+		shown = "The container"
 	}
 	q := url.Values{}
 	if force {
 		q.Set("force", "1")
 	}
+	// v is deliberately omitted. Setting it would delete anonymous volumes.
 	if err := m.c.do2(ctx, "DELETE", "/containers/"+esc(id), q); err != nil {
-		return err
+		return RemoveOutcome{}, err
 	}
 	if name != "" && m.meta != nil {
 		_ = m.meta.DeleteContainerMeta(name)
 	}
-	return nil
+	out := RemoveOutcome{Message: shown + " was removed."}
+	if !removeImage {
+		return out, nil
+	}
+	if imageID == "" {
+		out.ImageSkipped = true
+		out.Message = shown + " was removed. Its image could not be identified, so the image was kept."
+		return out, nil
+	}
+	var listed []apiContainer
+	if err := m.c.getJSON(ctx, "/containers/json", url.Values{"all": {"1"}}, &listed); err != nil {
+		m.log.Warn("could not check whether the image is still in use", "image", imageID, "err", err)
+		out.ImageSkipped = true
+		out.Message = shown + " was removed. Its image could not be checked, so the image was kept."
+		return out, nil
+	}
+	if imageStillUsed(imageID, fullID, listed) {
+		out.ImageSkipped = true
+		out.Message = shown + " was removed. Its image is still used by another container, so the image was kept."
+		return out, nil
+	}
+	// No force flag: a container that appeared in the meantime makes Docker
+	// refuse, and that refusal is reported rather than overriding it.
+	if err := m.c.do2(ctx, "DELETE", "/images/"+esc(imageID), nil); err != nil {
+		m.log.Warn("could not delete image", "image", imageID, "ref", imageRef, "err", err)
+		out.ImageSkipped = true
+		if conflict(err) {
+			out.Message = shown + " was removed. Its image is still used by another container, so the image was kept."
+		} else {
+			out.Message = shown + " was removed, but the image could not be deleted."
+		}
+		return out, nil
+	}
+	out.ImageRemoved = true
+	if imageRef != "" {
+		out.Message = shown + " was removed, and the image " + imageRef + " was deleted."
+	} else {
+		out.Message = shown + " was removed, and its image was deleted."
+	}
+	return out, nil
+}
+
+// imageStillUsed reports whether a container other than skipID is based on
+// imageID. skipID is the container just removed, ignored in case the list
+// still mentions it. IDs match with or without the sha256: prefix.
+func imageStillUsed(imageID, skipID string, containers []apiContainer) bool {
+	imageID = canonID(imageID)
+	skipID = canonID(skipID)
+	if imageID == "" {
+		return false
+	}
+	for _, c := range containers {
+		if canonID(c.ID) == skipID && skipID != "" {
+			continue
+		}
+		if canonID(c.ImageID) == imageID {
+			return true
+		}
+	}
+	return false
+}
+
+func canonID(id string) string {
+	return strings.TrimPrefix(strings.TrimSpace(id), "sha256:")
+}
+
+func conflict(err error) bool {
+	var ae *APIError
+	return asAPIError(err, &ae) && ae.Status == http.StatusConflict
 }
 
 // hostIP returns this server's primary LAN address, or "" if none is found.
@@ -415,6 +512,56 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// containerIcon returns the icon URL stored on a container, preferring the
+// label Unraid uses. Anything that is not an http(s) address is dropped so
+// the browser is only ever handed a real image URL.
+func containerIcon(labels map[string]string) string {
+	icon := labels[unraidIconLabel]
+	if icon == "" {
+		icon = labels[iconLabel]
+	}
+	return httpURL(icon)
+}
+
+// webUIPort matches Unraid's [PORT:32400] placeholder.
+var webUIPort = regexp.MustCompile(`\[PORT:(\d+)\]`)
+
+// resolveWebUI turns an Unraid WebUI template into a link the UI can open.
+// [IP] becomes the HOST token the front-end replaces with this server's name,
+// and [PORT:n] becomes the published host port for container port n.
+// Anything still unresolved is dropped, so a half-filled template is not
+// offered as a link.
+func resolveWebUI(tmpl string, ports []Port) string {
+	tmpl = strings.TrimSpace(tmpl)
+	if tmpl == "" {
+		return ""
+	}
+	out := strings.ReplaceAll(tmpl, "[IP]", "HOST")
+	out = webUIPort.ReplaceAllStringFunc(out, func(m string) string {
+		sub := webUIPort.FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		cport, _ := strconv.Atoi(sub[1])
+		for _, p := range ports {
+			if p.Container == cport && p.Proto == "tcp" && p.Host > 0 {
+				return strconv.Itoa(p.Host)
+			}
+		}
+		if cport > 0 {
+			return strconv.Itoa(cport)
+		}
+		return m
+	})
+	if strings.ContainsAny(out, "[]") {
+		return ""
+	}
+	if !strings.HasPrefix(out, "http://") && !strings.HasPrefix(out, "https://") {
+		return ""
+	}
+	return out
 }
 
 // guessWebURL offers a browser link for a published HTTP-ish port. It is a
