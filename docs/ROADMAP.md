@@ -85,12 +85,12 @@ The running system is a Debian image (kernel plus a squashfs root), built with d
 - [ ] Persistent config partition, mounted at a fixed path, holding FELDCORE state
 
 ### OS-2 — Installer ISO
-- [ ] ISO that partitions a chosen disk: boot partition, A and B image slots, config partition
-- [ ] Leave the rest of that disk, and any other disks, for storage
+- [ ] ISO that partitions one chosen OS disk: boot partition, A and B image slots, config partition
+- [ ] Write only that disk. Data disks are left untouched
 - [ ] First boot runs the existing setup wizard
 
 ### OS-3 — Atomic updates
-- [ ] Write the new image into the inactive slot and boot it
+- [ ] Update the OS only by writing a new image into the inactive slot and booting it. The running system has no apt
 - [ ] Use systemd-boot boot counting so a failed boot falls back to the previous slot
 - [ ] Keep the config partition out of the image, so an update does not wipe state
 
@@ -98,18 +98,15 @@ The running system is a Debian image (kernel plus a squashfs root), built with d
 - [ ] Data, appdata, and VM disks live on the storage disks, not on the OS slots
 - [ ] Share definitions and container templates stay on the config partition
 - [ ] Drivers and extra software ship as systemd-sysext images
-- [ ] apt stays available. Installs land in a persistent overlay or sysext layer that survives an image update, and a "reset to clean image" throws that layer away
+- [ ] Apps run as Docker containers. No apt on the running system
 
 ### Decisions
 
 - **Bootloader.** systemd-boot, UEFI only. A/B slots use boot counting.
 - **Secure Boot.** Off for the first image. Signing the kernel and the image comes later.
-- **Drivers and extras.** systemd-sysext images.
-- **Packages.** apt stays available. That fights a read-only root, so apt installs go into a persistent overlay or sysext layer that an image update does not wipe. "Reset to clean image" drops that layer and leaves the shipped image.
-
-### Still open
-
-- **Migration from a plain Debian install.** Not decided. The two options are: export the config, install the image, and import, or convert the running Debian system in place.
+- **Drivers and extras.** systemd-sysext images. Apps are Docker containers.
+- **Packages.** Image only. The running system has no apt. The OS changes only when an image is swapped.
+- **Migration from a plain Debian install.** Export the config, install the image fresh, and import the config. The installer writes only the chosen OS disk, so data disks stay as they are. The importer points shares and containers back at those existing paths. In-place conversion of the running Debian system is rejected: it is too risky and too fiddly.
 
 ## Cross-cutting
 - [ ] Packaging: .deb, and a one-line curl installer
