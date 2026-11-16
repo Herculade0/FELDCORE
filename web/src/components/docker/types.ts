@@ -18,6 +18,7 @@ export interface Container {
   compose: boolean;
   gpu: boolean;
   webUrl: string;
+  icon?: string;
   network: string;
   ips: string[];
   cpuPct: number;

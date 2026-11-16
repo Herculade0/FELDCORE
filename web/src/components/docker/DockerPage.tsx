@@ -218,7 +218,7 @@ function ContainerRow({
   return (
     <Card className="flex flex-col gap-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3.5">
-        <IconBadge icon={ContainerIcon} muted={!running} />
+        <ContainerMark src={c.icon} muted={!running} />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-base font-extrabold text-ink">{c.name}</h2>
@@ -294,6 +294,22 @@ function ContainerRow({
       </div>
     </Card>
   );
+}
+
+function ContainerMark({ src, muted }: { src?: string; muted?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className={`h-12 w-12 shrink-0 rounded-2xl bg-surface-2 object-contain ${muted ? "opacity-60" : ""}`}
+      />
+    );
+  }
+  return <IconBadge icon={ContainerIcon} muted={muted} />;
 }
 
 function DockerUnavailable({

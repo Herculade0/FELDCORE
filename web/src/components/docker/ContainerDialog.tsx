@@ -166,7 +166,7 @@ export default function ContainerDialog({
 
   const title = container ? `Edit ${container.name}` : (heading ?? "Run a container");
   const showTemplate =
-    fromApp || !!(spec && (spec.webUi || spec.icon || spec.extraParams || spec.privileged));
+    fromApp || !!(spec && (spec.webUi || spec.extraParams || spec.privileged));
   const hiddenCount = spec
     ? spec.configs.filter((c) => c.display === "advanced" || c.display === "hidden").length
     : 0;
@@ -269,6 +269,22 @@ export default function ContainerDialog({
               </SelectField>
             </div>
 
+            <div className="flex min-w-0 items-start gap-3">
+              <TextField
+                className="min-w-0 flex-1"
+                label="Icon URL"
+                value={spec.icon}
+                onChange={(e) => set({ icon: e.target.value })}
+                placeholder="https://example.com/icon.png"
+                hint="Shown next to this container. Leave blank to use the default icon."
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+              <div className="mt-6">
+                <IconPreview key={spec.icon} src={spec.icon} />
+              </div>
+            </div>
+
             {showTemplate && <TemplateFields spec={spec} notes={fromApp ? notes : undefined} onChange={set} />}
 
             <GpuRow spec={spec} options={options} onChange={(gpu) => set({ gpu })} />
@@ -349,25 +365,13 @@ function TemplateFields({
   notes?: string[];
   onChange: (patch: Partial<Spec>) => void;
 }) {
-  const [iconOk, setIconOk] = useState(true);
   return (
     <section className="min-w-0 space-y-4 rounded-2xl border border-line p-4">
-      <div className="flex items-center gap-3">
-        {spec.icon && iconOk ? (
-          <img
-            src={spec.icon}
-            alt=""
-            className="h-12 w-12 shrink-0 rounded-2xl bg-surface-2 object-contain"
-            referrerPolicy="no-referrer"
-            onError={() => setIconOk(false)}
-          />
-        ) : null}
-        <div>
-          <h3 className="text-sm font-bold text-ink">From the template</h3>
-          <p className="text-xs font-medium text-ink-3">
-            Review these settings, then apply. Nothing is installed until you do.
-          </p>
-        </div>
+      <div>
+        <h3 className="text-sm font-bold text-ink">From the template</h3>
+        <p className="text-xs font-medium text-ink-3">
+          Review these settings, then apply. Nothing is installed until you do.
+        </p>
       </div>
       {notes && notes.length > 0 && (
         <Alert tone="info">
@@ -415,6 +419,26 @@ function TemplateFields({
         <Toggle checked={spec.privileged} onChange={(privileged) => onChange({ privileged })} label="Privileged" />
       </div>
     </section>
+  );
+}
+
+function IconPreview({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  const show = src.trim() !== "" && !failed;
+  return (
+    <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-line bg-surface-2">
+      {show ? (
+        <img
+          src={src}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <span className="text-[9px] font-bold uppercase tracking-wider text-ink-3">Icon</span>
+      )}
+    </span>
   );
 }
 
