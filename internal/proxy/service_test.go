@@ -148,3 +148,39 @@ func TestPortConflictBlocksStart(t *testing.T) {
 		t.Fatal("proxy started despite the conflict")
 	}
 }
+
+func TestGatewayRoutePointsAtDaemon(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := secrets.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := &fakeEngine{ready: true}
+	svc := &Service{
+		Store: st, Secrets: box, Engine: eng, DataDir: dir, GatewayPort: 8791,
+		Listen: func() []int { return nil },
+	}
+	if err := svc.SetRoute(RouteInput{
+		Container: "plex", Hostname: "plex.home.arpa", Port: 32400, TLS: "internal", Enabled: true, Gateway: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(dir + "/caddy/Caddyfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "host.docker.internal:8791") || strings.Contains(text, "plex:32400") {
+		t.Fatalf("caddyfile %s", text)
+	}
+	if !strings.Contains(text, "tls internal") {
+		t.Fatalf("caddyfile %s", text)
+	}
+}
