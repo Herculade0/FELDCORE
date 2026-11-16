@@ -165,6 +165,7 @@ The `container` object maps onto the Unraid template the App Store already conve
 | config `type: variable`, `target` | Env name | Variable |
 | config `mask: true` | Mask | Value stays hidden |
 | config `display` | `always`, `advanced`, or `hidden` | Same three levels |
+| `files` | A script shipped in the feed's asset archive | Copied onto the host path at install, mode `0755` by default |
 
 Authors write host paths as `/mnt/user/<share>/...` so the rewriter keeps one code path. `requires` is plain text. The scrubber still runs, so pasted markup cannot become a link.
 
@@ -185,19 +186,49 @@ The Games tab is generic. A profile adds:
 
 The label `feldcore.template` is `<source-id>/<template-id>`. That is how the Games page finds which running containers it can query, and how a later "update available" check compares `feldcore.template.version` with the feed.
 
-### Suggested first game profiles
+### Suggested starter catalogue
 
-"First batch" means the first game YAML files written when the Games phase starts. It is not a limit on the catalogue. The Games tab is generic, so a game that comes later is another YAML file and no new Go code.
+The first templates do not have to be games. This is a suggestion, made of things the owner runs, and any row can be swapped before it is written. Only the modded Valheim server is specified as a real template below. The others are ordinary containers or a bundle, using the same schema, and are not written out yet.
 
-This list is a suggestion, because these are servers the owner runs or has mentioned. Swap any of them before the files are written.
+| Suggestion | Kind | What it is |
+| --- | --- | --- |
+| Valheim, modded | `game` | The first template. Thunderstore profile sync, BepInEx, and RCON. Specified in the next section and written out under Examples. |
+| Calibre-Web Automated | `container` | The ebook library. A normal container template: image, config folder, port. No mod sync. |
+| Orthanc | `container` | The DICOM server. A normal container template. |
+| OpenWebRX+ | `container` | SDR receiver. Same shape as the readsb example: a web port plus a USB device claim matched by serial. |
+| A media bundle | `bundle` | A prewired stack on one Docker network. The bundle example later in this document is the shape. Which members go in the owner's stack is still open. |
 
-| Profile | Player count in the first YAML |
-| --- | --- |
-| Minecraft Java | The log regex already in the example below (`There are N of a max of M players online`). |
-| Valheim | `a2s` on the query port, which is the game port plus one (UDP 2457 when the game port is 2456). The template publishes that port and sets `query.port` to it. The player list from A2S is often empty; the count is the part worth showing. |
-| Necesse | `none` until a stable log line is chosen. Same rule: no query type the server does not actually answer. |
+### First template: modded Valheim
 
-RCON for these three is stored on the container (protocol, port, masked password variable) and is not connected yet. That connection is the phase after Games.
+Valheim's dedicated server has no RCON and no mod manager. The template is a `game` on top of `ghcr.io/lloesche/valheim-server` (the same image as Docker Hub `lloesche/valheim-server`). That image is maintained, installs BepInEx when `BEPINEX=true`, keeps the world under `/config/worlds_local`, and copies plugins from `/config/bepinex/plugins` into the game tree on install and update. It does not download a Thunderstore profile. An open change for that (pull request 777 on `valheim-server-docker`) is not in the image. The sync is a script this template ships, run from the image's `PRE_SERVER_RUN_HOOK` on every server start, including a restart inside the container.
+
+The script is [docs/examples/valheim-modded.sync.sh](examples/valheim-modded.sync.sh). In the store repo it is `scripts/valheim-modded.sync.sh`, hashed in the signed feed, and the template's `files` entry installs it at `/config/feldcore/thunderstore-sync` mode `0755`. FELDCORE writes that file when the container is created. The hook always exits 0, so a Thunderstore failure still lets the server start.
+
+On each start the script:
+
+1. Reads `THUNDERSTORE_PROFILE`. A blank value or a value that is not a UUID leaves the current mods in place and logs a warning.
+2. Fetches `https://thunderstore.io/api/experimental/legacyprofile/get/{code}/`. That is the endpoint r2modman and Thunderstore Mod Manager resolve a share code to. The body starts with `#r2modman\n` and then a base64 ZIP. The ZIP holds `export.r2x` (the mod list) and any exported config files. A timeout, a network error, or a 404 (the code is unknown or expired) logs a warning and does not change the installed mods.
+3. Parses `export.r2x`. Each mod is `Author-Name` plus `version.major`, `version.minor`, and `version.patch`, and an `enabled` flag that defaults to true. Versions are taken from that file. The script never substitutes "latest".
+4. Downloads each enabled mod from `https://thunderstore.io/package/download/{namespace}/{name}/{version}/`, following redirects, into `/config/feldcore/cache/{Author-Name}-{version}.zip`. A file already in the cache is reused. The namespace is the text before the first hyphen.
+5. Skips a package whose Valheim community categories include `Client-side` and do not include `Server-side`, and logs it as skipped. A package tagged both is installed. A package tagged neither is installed and logged as not marked client or server. `denikson-BepInExPack_Valheim` is always installed when the profile lists it, because the pack is the runtime and is not tagged `Server-side`. The category list is `https://thunderstore.io/c/valheim/api/v1/package/`, which was about 180MB in November 2026. The script reduces it to name-to-categories, caches that for 24 hours, and does not download it again on every boot. If the list cannot be fetched and there is no cache, client-only filtering is skipped for that start, everything enabled is installed, and the log says so.
+6. If any pinned download fails, the script stops before it replaces plugins, logs a warning, and starts the server with the last good set.
+7. Only after every download has succeeded, it installs into `/config/bepinex/plugins/{Author-Name}/` and, when the live tree exists, into `/opt/valheim/bepinex/BepInEx/plugins/`. A BepInEx pack ZIP (one that contains a `BepInEx/` tree, including the pinned `denikson-BepInExPack_Valheim`) is overlaid onto the BepInEx directory without deleting `BepInEx/config` or the plugins folder. Zip members that escape the destination (`..`, absolute paths) are rejected.
+8. Removes a plugin directory only when this script installed it on an earlier run (recorded in `/config/feldcore/managed.txt`) and the new profile no longer lists it. Worlds, backups, and files the owner copied in by hand are left alone.
+9. Copies config files from the profile ZIP into `BepInEx/config`, then writes `org.tristan.rcon.cfg` last so the profile cannot blank the RCON password.
+
+`lloesche/valheim-server` with `BEPINEX=true` may download a newer BepInExPack than the profile pins. The hook runs before each server start and overlays the pinned pack again. A server that is already running is not rewritten until the next start.
+
+RCON is on by default. Valheim does not speak it. The plugin is **Tristan-ValheimRcon** ([Thunderstore](https://thunderstore.io/c/valheim/p/Tristan/ValheimRcon/), [source](https://github.com/Tristan-dvr/ValheimRcon)), version **1.6.4**, which was current on 16 November 2026 and had been updated on 13 November 2026. It is tagged `Server-side`. Its packets are Source RCON (`Login = 3`, `Command = 2`, response `0`), and mcrcon connects to it, so the template's `game.rcon.type` is `source`. The config file is `BepInEx/config/org.tristan.rcon.cfg`, section `1. Rcon`, keys `Port` and `Password`. An empty password makes the plugin refuse to listen, so the password field is required and masked. The plugin's own default port is 2458, the same number as Valheim's crossplay UDP port. The template publishes RCON on **2459/tcp** and writes that port into the config, and publishes 2456–2458/udp for the game, the Steam query, and crossplay.
+
+If the profile already enables `Tristan-ValheimRcon`, `ferrinius-RCON_Next`, or `AviiNL-rcon`, the script keeps that one and does not add a second listener. The profile's version wins. `AviiNL-rcon` last updated in March 2024; the log says it is the older plugin and still follows the profile. If the profile has none of them, the script adds `Tristan-ValheimRcon` 1.6.4.
+
+`ferrinius-RCON_Next` 1.2.3 is also maintained and is also Source RCON, and it is also server-side. It is the fallback if ValheimRcon stops tracking game updates. It is not the default: its listener stays off until `enabled` is true and the password is not the rejected default `ChangeMe`, and its own page says Valheim console commands such as `save` need the Valheim bridge rather than the core plugin alone. ValheimRcon already includes those commands (`save`, `say`, `kick`, `ban`, and others).
+
+The FELDCORE RCON console is still a later phase. This template wires `game.rcon` now (protocol `source`, port 2459, password variable `RCON_PASSWORD`) so that console has nothing left to guess. The password is only in the container env and in `org.tristan.rcon.cfg` on the server volume. It is not in the YAML. Source RCON is not encrypted. The port is for a trusted network.
+
+The image's admin, ban, and permit lists are `ADMINLIST_IDS`, `BANNEDLIST_IDS`, and `PERMITTEDLIST_IDS` (SteamID64, space separated). Setting one replaces the matching `adminlist.txt`, `bannedlist.txt`, or `permittedlist.txt`. FELDCORE omits the variable when the field is blank, so an empty form does not wipe a list the owner edited in the world folder. Those files live under `/config`. Backups default on, hourly, in `/config/backups`, which is the same volume and must not be placed inside `worlds_local`. `SERVER_PASS` has to be at least 5 characters or Valheim rejects it. `SERVER_PUBLIC` and `CROSSPLAY` are the public and crossplay toggles. `VALHEIM_PLUS` stays false, because the image cannot load it together with BepInEx.
+
+A profile code is trusted input. The mods it names run inside the server. The log records the code, the mods installed, the mods skipped as client-only, and any warning. It does not record the server password or the RCON password.
 
 ### VM profiles
 
@@ -267,7 +298,7 @@ OpenWebRX+, readsb/tar1090, rtl_433, AIS-catcher, and SatDump are five container
 
 `schema/feldcore-store.schema.json` in the store repo is the document below. CI validates the compiled feed against the root. CI validates each YAML template against `#/$defs/template`. Draft 2020-12.
 
-`feedbuild` enforces the rules the schema cannot express cleanly: unique ids, `replaces` hitting at most one CA app, member ids existing, icon files existing and within 256KiB, no `..` in paths, SVG without `script` or an external reference, game regexes compiling, password-like variables having an empty masked default, Windows and macOS having no download URL, and asset bytes matching the hashes in the signed feed.
+`feedbuild` enforces the rules the schema cannot express cleanly: unique ids, `replaces` hitting at most one CA app, member ids existing, icon files existing and within 256KiB, every `files` path existing in the asset archive, no `..` in paths, SVG without `script` or an external reference, game regexes compiling, password-like variables having an empty masked default, Windows and macOS having no download URL, and asset bytes matching the hashes in the signed feed.
 
 ```json
 {
@@ -393,7 +424,20 @@ OpenWebRX+, readsb/tar1090, rtl_433, AIS-catcher, and SatDump are five container
         "requires": { "type": "string", "maxLength": 500 },
         "extraParams": { "type": "string", "maxLength": 500 },
         "restart": { "enum": ["no", "unless-stopped", "always", "on-failure"] },
-        "configs": { "type": "array", "items": { "$ref": "#/$defs/config" } }
+        "configs": { "type": "array", "items": { "$ref": "#/$defs/config" } },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "installTo"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^scripts/[A-Za-z0-9._/-]+\\.sh$" },
+              "installTo": { "type": "string", "minLength": 1, "maxLength": 300 },
+              "mode": { "type": "string", "pattern": "^0[0-7]{3}$" }
+            }
+          }
+        }
       }
     },
     "config": {
@@ -724,7 +768,149 @@ container:
         match: serial
 ```
 
-Game profile. Player count comes from the server log. The RCON password is a masked variable the user types:
+First template, modded Valheim. The sync script is [docs/examples/valheim-modded.sync.sh](examples/valheim-modded.sync.sh). Player count is Steam A2S on UDP 2457. RCON is Tristan-ValheimRcon on TCP 2459:
+
+```yaml
+apiVersion: feldcore.store/v1
+kind: game
+id: valheim
+name: Valheim
+version: 1.0.0
+summary: Modded Valheim dedicated server. A Thunderstore profile code installs BepInEx and those mods on every start.
+icon: icons/valheim.png
+categories:
+  - Games
+project: https://github.com/lloesche/valheim-server-docker
+container:
+  image: ghcr.io/lloesche/valheim-server:latest
+  network: bridge
+  requires: A Thunderstore or r2modman profile code for Valheim. The server password needs at least 5 characters. The RCON password is required, because ValheimRcon stays off when it is empty.
+  restart: unless-stopped
+  files:
+    - path: scripts/valheim-modded.sync.sh
+      installTo: /config/feldcore/thunderstore-sync
+      mode: "0755"
+  configs:
+    - type: path
+      name: Config
+      target: /config
+      default: /mnt/user/appdata/valheim
+      mode: rw
+      required: true
+      description: World, BepInEx, Thunderstore cache, and backups.
+    - type: port
+      name: Game
+      target: "2456"
+      default: "2456"
+      proto: udp
+    - type: port
+      name: Query
+      target: "2457"
+      default: "2457"
+      proto: udp
+      description: Steam A2S. The game port plus one.
+    - type: port
+      name: Crossplay
+      target: "2458"
+      default: "2458"
+      proto: udp
+    - type: port
+      name: RCON
+      target: "2459"
+      default: "2459"
+      proto: tcp
+      description: Tristan-ValheimRcon. Not Valheim's UDP 2458.
+    - type: variable
+      name: Server name
+      target: SERVER_NAME
+      default: Valheim
+    - type: variable
+      name: World name
+      target: WORLD_NAME
+      default: Dedicated
+      required: true
+      description: Filename in worlds_local, without .db or .fwl.
+    - type: variable
+      name: Server password
+      target: SERVER_PASS
+      default: ""
+      mask: true
+      required: true
+      description: At least 5 characters. Valheim rejects a shorter one.
+    - type: variable
+      name: Public
+      target: SERVER_PUBLIC
+      default: "true"
+      description: true lists the server in the browser. false does not.
+    - type: variable
+      name: Crossplay
+      target: CROSSPLAY
+      default: "false"
+      description: true allows PlayFab clients and uses UDP 2458.
+    - type: variable
+      name: Backups
+      target: BACKUPS
+      default: "true"
+      description: Hourly zip of worlds_local into /config/backups.
+    - type: variable
+      name: Admins
+      target: ADMINLIST_IDS
+      default: ""
+      description: SteamID64 values, separated by spaces. Blank leaves adminlist.txt alone.
+    - type: variable
+      name: Banned
+      target: BANNEDLIST_IDS
+      default: ""
+      description: SteamID64 values, separated by spaces. Blank leaves bannedlist.txt alone.
+    - type: variable
+      name: Permitted
+      target: PERMITTEDLIST_IDS
+      default: ""
+      description: SteamID64 values, separated by spaces. Blank leaves permittedlist.txt alone.
+    - type: variable
+      name: Thunderstore profile
+      target: THUNDERSTORE_PROFILE
+      default: ""
+      required: true
+      description: The r2modman or Thunderstore Mod Manager share code.
+    - type: variable
+      name: RCON password
+      target: RCON_PASSWORD
+      default: ""
+      mask: true
+      required: true
+    - type: variable
+      name: BepInEx
+      target: BEPINEX
+      default: "true"
+      display: hidden
+    - type: variable
+      name: ValheimPlus
+      target: VALHEIM_PLUS
+      default: "false"
+      display: hidden
+    - type: variable
+      name: Mod sync
+      target: PRE_SERVER_RUN_HOOK
+      default: /config/feldcore/thunderstore-sync
+      display: hidden
+game:
+  query:
+    type: a2s
+    port: 2457
+  rcon:
+    type: source
+    port: 2459
+    passwordVariable: RCON_PASSWORD
+  saves:
+    - name: World
+      path: /config/worlds_local
+      hostDefault: /mnt/user/appdata/valheim/worlds_local
+  updates:
+    mode: image
+```
+
+Game profile kept as the log-reader example. It is not part of the starter list. Player count comes from the server log, and the RCON password is a masked variable:
 
 ```yaml
 apiVersion: feldcore.store/v1
@@ -1177,7 +1363,7 @@ Each phase is shippable on its own. A later phase does not block browsing the te
 | Phase | What lands | Depends on | Size | Where the work is |
 | --- | --- | --- | --- | --- |
 | MVP | One GitHub App sign-in for the whole feed (device flow, installed only on `Herculade0/feldcore-store`), encrypted credential, minisign pin, the two catalogue toggles, the Community Apps switch, manual Refresh and 24-hour auto-refresh, merge, badge, hide list, container install through the current dialog, labels, the store repo with `feedbuild` and the Action, one override and one original container. A pasted fine-grained token is the fallback only. | The App Store (M2b), and the owner registering the GitHub App | Medium | `internal/apps` grows the two catalogues and the merge. `internal/store` gains ciphertext and a state-version bump. Settings gains the switches and the sign-in. The App Store page gains the two toggles. The Docker create path gains two labels. A private `ghcr.io` pull sends `X-Registry-Auth` from that same sign-in. Pull, edit, and rollback otherwise stay as they are. |
-| Games | Games pill inside FELDCORE Store, log and A2S readers, save rows, version label compared to the feed, Update via the existing recreate. Suggested first YAML: Minecraft Java, Valheim, Necesse. | MVP | Medium | A status handler and a reader. The dialog gains a Game section. No new container runtime. RCON is the phase after this one, and only the Source protocol, using the password variable the MVP already stores. |
+| Games | Games pill inside FELDCORE Store, log and A2S readers, save rows, version label compared to the feed, Update via the existing recreate. The first game template is modded Valheim, including the Thunderstore sync script. The FELDCORE RCON console is the phase after this one and uses the `source` settings that template already stores. | MVP | Medium | A status handler and a reader. The dialog gains a Game section. Installing Valheim also writes the sync script onto the config volume. No new container runtime. |
 | Bundles | Confirm page, network create, ordered create, remove-this-attempt | MVP | Medium | Docker manager learns to create a network. New dialog. The feed format is already fixed in the MVP, so templates can be written early. |
 | SDR | USB inventory, serial claim, dropdown on a device row | MVP | Small | A sysfs read, a claim map in state, one control in the dialog. The five SDR templates are YAML. |
 | VMs | Confirm page, cloud-image download with checksum, BYO ISO picker, domain create | M4 | Large | Blocked on libvirt, disks, and a console. Templates can land on the VMs pill earlier and show "not installed yet". Windows era profiles are rows in YAML once the wizard can apply machine, bus, and NIC. |
@@ -1220,7 +1406,7 @@ Making the store public is a different product from this design: review before a
 - One sign-in covers the whole feed. Installing an app does not ask again. The sign-in to build is a GitHub App installed only on that repo, via device flow. A pasted fine-grained token is the fallback. The `repo` scope is not used.
 - The App Store has two toggle buttons, Community Apps and FELDCORE Store. Settings can disable Community Apps and leave only the store.
 - Refresh is a button on the page and an auto-refresh option in Settings. Auto-refresh defaults to on, every 24 hours.
-- The first game profiles to write are a suggestion, not a limit: Minecraft Java, Valheim, and Necesse. See [Suggested first game profiles](#suggested-first-game-profiles).
+- The starter catalogue does not have to be games. The suggestion is modded Valheim (the first real template), Calibre-Web Automated, Orthanc, OpenWebRX+, and a media bundle. See [Suggested starter catalogue](#suggested-starter-catalogue).
 
 ### Open questions
 
