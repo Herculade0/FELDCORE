@@ -222,6 +222,9 @@ func (s *Service) SetAppdata(path string) (Settings, error) {
 	return s.Settings(), nil
 }
 
+// defaultAppdata is the appdata share when that share exists, so Unraid
+// template paths under /mnt/user/appdata land in the share FELDCORE created
+// (or adopted). A custom folder, when set, still wins over this.
 func (s *Service) defaultAppdata() string {
 	if p := s.sharePaths()["appdata"]; p != "" {
 		return p

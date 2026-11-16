@@ -58,8 +58,16 @@ func main() {
 		SambaInclude: cfg.SambaInclude,
 		ExportsFile:  cfg.ExportsFile,
 	}, log)
-	// Bring the system in line with stored state (e.g. after a restore).
-	go shareMgr.Apply(ctx)
+	// Default shares first, then render Samba/NFS from whatever is stored.
+	// EnsureDefaults no-ops without root and when -default-shares is off.
+	go func() {
+		if cfg.DefaultShares {
+			shareMgr.EnsureDefaults(ctx)
+		} else {
+			log.Info("default shares disabled")
+		}
+		shareMgr.Apply(ctx)
+	}()
 
 	if os.Geteuid() != 0 {
 		log.Warn("not running as root: shares cannot be applied to the system")
