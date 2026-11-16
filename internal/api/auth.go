@@ -23,17 +23,6 @@ func (s *Server) currentUser(r *http.Request) (string, bool) {
 	return s.auth.Authenticate(c.Value)
 }
 
-// requireAuth rejects requests without a valid session.
-func (s *Server) requireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.currentUser(r); !ok {
-			writeError(w, http.StatusUnauthorized, "Sign in to continue.")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,

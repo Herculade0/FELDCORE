@@ -1,8 +1,9 @@
 // Package store persists FELDCORE's own state as a single JSON file.
 //
-// The state is small (one admin account, sessions, share definitions), so a
-// file written atomically on every change is simpler and more inspectable than
-// a database, and keeps the binary free of native dependencies.
+// The state is small (one admin account, sessions, agent tokens, share
+// definitions), so a file written atomically on every change is simpler and
+// more inspectable than a database, and keeps the binary free of native
+// dependencies.
 package store
 
 import (
@@ -35,6 +36,32 @@ type Session struct {
 	Username  string    `json:"username"`
 	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// APIToken is a named bearer credential for an agent. Only a hash of the
+// secret is stored. Prefix is the non-secret start of the token, so a person
+// can tell tokens apart after the secret has been shown once.
+type APIToken struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Hash       string     `json:"hash"`
+	Prefix     string     `json:"prefix"`
+	Scopes     []string   `json:"scopes"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	Revoked    bool       `json:"revoked,omitempty"`
+}
+
+// AuditEvent is one call made with an agent token.
+type AuditEvent struct {
+	ID        string    `json:"id"`
+	Time      time.Time `json:"time"`
+	TokenID   string    `json:"tokenId,omitempty"`
+	TokenName string    `json:"tokenName"`
+	Action    string    `json:"action"`
+	Target    string    `json:"target,omitempty"`
+	Result    string    `json:"result"`
 }
 
 // SMB is a share's Windows file sharing configuration.
@@ -77,7 +104,11 @@ type State struct {
 	Version  int       `json:"version"`
 	Admin    *User     `json:"admin,omitempty"`
 	Sessions []Session `json:"sessions,omitempty"`
-	Shares   []Share   `json:"shares"`
+	// APITokens are bearer credentials for the owner's agents.
+	APITokens []APIToken `json:"apiTokens,omitempty"`
+	// Audit is the capped log of calls authenticated with those tokens.
+	Audit  []AuditEvent `json:"audit,omitempty"`
+	Shares []Share      `json:"shares"`
 	// ShareUsers are the SMB accounts FELDCORE created and therefore owns.
 	ShareUsers []string `json:"shareUsers"`
 	// ContainerMeta holds setting names/descriptions per container name,
@@ -195,6 +226,22 @@ func (s State) clone() State {
 		c.Admin = &a
 	}
 	c.Sessions = append([]Session(nil), s.Sessions...)
+	if s.APITokens != nil {
+		c.APITokens = make([]APIToken, len(s.APITokens))
+		for i, t := range s.APITokens {
+			t.Scopes = append([]string(nil), t.Scopes...)
+			if t.ExpiresAt != nil {
+				exp := *t.ExpiresAt
+				t.ExpiresAt = &exp
+			}
+			if t.LastUsedAt != nil {
+				used := *t.LastUsedAt
+				t.LastUsedAt = &used
+			}
+			c.APITokens[i] = t
+		}
+	}
+	c.Audit = append([]AuditEvent(nil), s.Audit...)
 	c.Shares = make([]Share, len(s.Shares))
 	for i, sh := range s.Shares {
 		sh.SMB.Users = append([]string(nil), sh.SMB.Users...)

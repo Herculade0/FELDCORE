@@ -11,10 +11,25 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+
+	"github.com/Herculade0/feldcore/internal/term"
 )
 
 // idPattern is a Docker name or id. It keeps the exec path from escaping the API.
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+// consoleCreateBody is the Docker exec create payload: a TTY, a colour-capable
+// terminal, and a shell that keeps a custom prompt but colours a stock one.
+func consoleCreateBody() map[string]any {
+	return map[string]any{
+		"AttachStdin":  true,
+		"AttachStdout": true,
+		"AttachStderr": true,
+		"Tty":          true,
+		"Env":          term.ContainerEnv(),
+		"Cmd":          []string{"sh", "-c", term.ContainerCommand()},
+	}
+}
 
 // Console attaches to a new shell in a running container, the same session
 // `docker exec -it` opens. bash is used when the image has it, otherwise sh.
@@ -26,14 +41,7 @@ func (m *Manager) Console(ctx context.Context, id string) (io.ReadWriteCloser, f
 	var created struct {
 		ID string `json:"Id"`
 	}
-	err := m.c.postJSON(ctx, "/containers/"+esc(id)+"/exec", nil, map[string]any{
-		"AttachStdin":  true,
-		"AttachStdout": true,
-		"AttachStderr": true,
-		"Tty":          true,
-		// Try bash, then sh, inside the container.
-		"Cmd": []string{"sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh"},
-	}, &created)
+	err := m.c.postJSON(ctx, "/containers/"+esc(id)+"/exec", nil, consoleCreateBody(), &created)
 	if err != nil {
 		return nil, nil, nil, err
 	}
