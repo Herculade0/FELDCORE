@@ -11,6 +11,9 @@ interface Event {
   action: string;
   target?: string;
   result: string;
+  ip?: string;
+  host?: string;
+  detail?: Record<string, string>;
 }
 
 interface Log {
@@ -65,7 +68,7 @@ export default function AuditPage() {
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Audit</h1>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
-            File changes and URL downloads are recorded here, including ones made from this browser. Agent token calls are recorded too.
+            File changes and URL downloads are recorded here, including ones made from this browser. Package installs, published requests the protection layer blocked, and agent token calls are recorded too.
             {log
               ? ` The newest ${log.maxEvents.toLocaleString()} are kept, for ${log.retentionDays} days.`
               : ""}
@@ -85,7 +88,7 @@ export default function AuditPage() {
           <p className="mt-5 text-sm font-medium text-ink-3">Loading…</p>
         ) : events.length === 0 ? (
           <p className="mt-5 text-sm font-medium leading-relaxed text-ink-3">
-            Nothing has been recorded yet. File changes, URL downloads and agent token calls show up here.
+            Nothing has been recorded yet. File changes and URL downloads from this browser show up here, along with package installs, blocked published requests, and agent token calls.
           </p>
         ) : (
           <ul className="mt-4 divide-y divide-line">
@@ -103,6 +106,9 @@ export default function AuditPage() {
                     <div className="truncate text-xs font-medium text-ink-3">
                       {ev.tokenName}
                       {ev.target ? ` · ${ev.target}` : ""}
+                      {ev.detail?.reason ? ` · ${ev.detail.reason}` : ""}
+                      {ev.ip ? ` · ${ev.ip}` : ""}
+                      {ev.host ? ` · ${ev.host}` : ""}
                     </div>
                   </div>
                   <span className={`w-fit rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${tone.cls}`}>

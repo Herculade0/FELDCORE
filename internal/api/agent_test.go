@@ -31,7 +31,11 @@ func TestScopeFor(t *testing.T) {
 		{http.MethodPost, "/api/v1/docker/containers/abc/start", auth.ScopeContainers},
 		{http.MethodDelete, "/api/v1/docker/containers/abc", auth.ScopeContainers},
 		{http.MethodPost, "/api/v1/docker/containers", auth.ScopeContainers},
+		{http.MethodPost, "/api/v1/docker/review", auth.ScopeContainers},
 		{http.MethodPost, "/api/v1/docker/install", auth.ScopeAdmin},
+		{http.MethodGet, "/api/v1/installs", auth.ScopeAdmin},
+		{http.MethodGet, "/api/v1/installs/abc", auth.ScopeAdmin},
+		{http.MethodPost, "/api/v1/installs", auth.ScopeAdmin},
 		{http.MethodGet, "/api/v1/terminal", "shell"},
 		{http.MethodGet, "/api/v1/docker/containers/abc/terminal", "shell"},
 		{http.MethodGet, "/api/v1/vms/box/console", "shell"},
@@ -57,6 +61,10 @@ func TestScopeFor(t *testing.T) {
 		{http.MethodPatch, "/api/v1/shares/media/uploads/abc", auth.ScopeFilesWrite},
 		{http.MethodPost, "/api/v1/shares/media/fetch", auth.ScopeFilesWrite},
 		{http.MethodGet, "/api/v1/settings/files", auth.ScopeAdmin},
+		{http.MethodGet, "/api/v1/publish", auth.ScopeAdmin},
+		{http.MethodPut, "/api/v1/publish", auth.ScopeAdmin},
+		{http.MethodGet, "/api/v1/docker/containers/abc/publish", auth.ScopeAdmin},
+		{http.MethodPut, "/api/v1/docker/containers/abc/publish", auth.ScopeAdmin},
 	}
 	for _, c := range cases {
 		if got := scopeFor(c.method, c.path); got != c.want {

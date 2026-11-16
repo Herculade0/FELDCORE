@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Herculade0/feldcore/internal/install"
 )
 
 // Admin tools live in sbin directories that are not always on PATH.
@@ -36,6 +38,19 @@ func run(ctx context.Context, timeout time.Duration, stdin, name string, args ..
 	path, ok := findBin(name)
 	if !ok {
 		return "", fmt.Errorf("%s is not installed", name)
+	}
+	if stdin == "" && install.WantsLines(ctx) {
+		text, err := install.Run(ctx, timeout, name, args...)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return text, fmt.Errorf("%s timed out after %s", name, timeout)
+			}
+			if tail := lastLines(text, 3); tail != "" {
+				return text, fmt.Errorf("%s failed: %s", name, tail)
+			}
+			return text, fmt.Errorf("%s failed: %w", name, err)
+		}
+		return text, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

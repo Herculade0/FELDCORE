@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Cpu, Loader2, Pencil, Plus, X } from "lucide-react";
-import { api, errorMessage } from "../../lib/api";
+import { ApiError, api, errorMessage } from "../../lib/api";
 import { Alert, Button, IconButton, Modal, SelectField, TextField, Toggle, inputClass } from "../form";
 import ConfigDialog from "./ConfigDialog";
+import PublishForm from "../publish/PublishForm";
 import {
   blankConfig,
   configSummary,
   type ConfigItem,
   type Container,
+  type Finding,
   type Image,
   type Options,
   type Spec,
@@ -41,6 +43,9 @@ const NEW_SPEC: Spec = {
   icon: "",
   extraParams: "",
   privileged: false,
+  isolate: "private",
+  links: [],
+  deployAnyway: false,
   vpn: "",
 };
 
@@ -49,9 +54,27 @@ function hydrate(s: Spec): Spec {
   return {
     ...NEW_SPEC,
     ...s,
+    isolate: s.isolate === "shared" || s.isolate === "private" ? s.isolate : NEW_SPEC.isolate,
+    links: s.links ?? [],
+    deployAnyway: false,
     vpn: s.vpn ?? "",
     configs: (s.configs ?? []).map((c) => ({ ...blankConfig(c.type), ...c })),
   };
+}
+
+function appNetwork(name: string): string {
+  const n = name.trim();
+  return n ? `feldcore-app-${n}` : "feldcore-app-<name>";
+}
+
+function blocksPrivate(s: Spec): boolean {
+  return !!s.vpn || s.network === "host" || s.network === "none" || s.network.startsWith("container:");
+}
+
+function findingsOf(e: unknown): Finding[] | null {
+  if (!(e instanceof ApiError) || e.status !== 409 || !e.body || typeof e.body !== "object") return null;
+  const found = (e.body as { findings?: unknown }).findings;
+  return Array.isArray(found) ? (found as Finding[]) : null;
 }
 
 function configFilled(c: ConfigItem): boolean {
@@ -78,6 +101,7 @@ export default function ContainerDialog({
   notes,
   heading,
   requires,
+  preferIsolate,
   onClose,
   onSaved,
 }: {
@@ -89,6 +113,8 @@ export default function ContainerDialog({
   heading?: string;
   /** Unraid Requires text, shown only when the form was opened from the App Store. */
   requires?: string;
+  /** Open an existing container with a private network already selected. */
+  preferIsolate?: boolean;
   onClose: () => void;
   onSaved: (name: string, edited: boolean) => void;
 }) {
@@ -104,13 +130,16 @@ export default function ContainerDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [findings, setFindings] = useState<Finding[]>([]);
   // Index of the setting open in the sub-dialog; -1 adds a new one.
   const [configAt, setConfigAt] = useState<number | null>(null);
 
   useEffect(() => {
     api<Options>("/docker/options")
       .then(setOptions)
-      .catch(() => setOptions({ networks: ["bridge", "host", "none"], gpus: [], gpuAvailable: false, vpns: [] }));
+      .catch(() =>
+        setOptions({ networks: ["bridge", "host", "none"], gpus: [], gpuAvailable: false, vpns: [], peers: [] }),
+      );
     api<{ images: Image[] }>("/docker/images")
       .then((r) => setImages(r.images ?? []))
       .catch(() => {});
@@ -118,13 +147,46 @@ export default function ContainerDialog({
 
   useEffect(() => {
     if (!container) return;
+    let cancel = false;
     api<SpecInfo>(`/docker/containers/${encodeURIComponent(container.id)}/spec`)
       .then((res) => {
+        if (cancel) return;
         setInfo(res);
-        setSpec(hydrate(res.spec));
+        const next = hydrate(res.spec);
+        if (preferIsolate && !blocksPrivate(next)) {
+          next.isolate = "private";
+          next.network = "bridge";
+        }
+        setSpec(next);
       })
-      .catch((e) => setLoadError(errorMessage(e)));
-  }, [container]);
+      .catch((e) => {
+        if (!cancel) setLoadError(errorMessage(e));
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [container, preferIsolate]);
+
+  useEffect(() => {
+    if (!spec) return;
+    let cancel = false;
+    const handle = setTimeout(() => {
+      api<{ findings: Finding[] }>("/docker/review", {
+        method: "POST",
+        body: { spec: { ...spec, deployAnyway: false } },
+      })
+        .then((res) => {
+          if (!cancel) setFindings(res.findings ?? []);
+        })
+        .catch(() => {
+          if (!cancel) setFindings([]);
+        });
+    }, 300);
+    return () => {
+      cancel = true;
+      clearTimeout(handle);
+    };
+  }, [spec]);
 
   const set = (patch: Partial<Spec>) => setSpec((cur) => (cur ? { ...cur, ...patch } : cur));
   const locked = editing && info !== null && !info.editable;
@@ -139,7 +201,53 @@ export default function ContainerDialog({
     setConfigAt(null);
   };
 
-  const submit = async () => {
+  const setNetwork = (network: string) => {
+    if (network === "host" || network === "none") {
+      set({ network, isolate: "shared", links: [] });
+      return;
+    }
+    set({ network });
+  };
+
+  const setVpn = (vpn: string) => {
+    if (vpn) set({ vpn, isolate: "shared", links: [] });
+    else set({ vpn });
+  };
+
+  const setPrivate = (on: boolean) => {
+    if (on) set({ isolate: "private", network: "bridge" });
+    else set({ isolate: "shared" });
+  };
+
+  const toggleLink = (name: string, on: boolean) => {
+    setSpec((cur) => {
+      if (!cur) return cur;
+      const links = cur.links.filter((n) => n !== name);
+      if (on) links.push(name);
+      links.sort();
+      return { ...cur, links };
+    });
+  };
+
+  const applyFix = async (id: string) => {
+    if (!spec || locked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ spec: Spec; findings: Finding[] }>("/docker/review", {
+        method: "POST",
+        body: { spec, apply: [id] },
+      });
+      setSpec(hydrate(res.spec));
+      setFindings(res.findings ?? []);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (ack: boolean) => {
     if (!spec || locked) return;
     const missing = spec.configs.find((c) => c.required && !configFilled(c));
     if (missing) {
@@ -150,16 +258,30 @@ export default function ContainerDialog({
     setBusy(true);
     setError(null);
     try {
+      const reviewed = await api<{ findings: Finding[] }>("/docker/review", {
+        method: "POST",
+        body: { spec: { ...spec, deployAnyway: false } },
+      });
+      const found = reviewed.findings ?? [];
+      setFindings(found);
+      const high = found.some((f) => f.severity === "high");
+      if (high && !ack) {
+        setError(
+          "This setup has high-risk settings. Read the warnings, apply a safer setting, or choose Deploy anyway.",
+        );
+        setBusy(false);
+        return;
+      }
+      const body = { ...spec, deployAnyway: ack && high };
       if (container) {
-        await api(`/docker/containers/${encodeURIComponent(container.id)}`, {
-          method: "PUT",
-          body: spec,
-        });
+        await api(`/docker/containers/${encodeURIComponent(container.id)}`, { method: "PUT", body });
       } else {
-        await api("/docker/containers", { method: "POST", body: spec });
+        await api("/docker/containers", { method: "POST", body });
       }
       onSaved(spec.name || spec.image, editing);
     } catch (e) {
+      const found = findingsOf(e);
+      if (found) setFindings(found);
       setError(errorMessage(e));
       setBusy(false);
     }
@@ -175,6 +297,15 @@ export default function ContainerDialog({
   const hiddenCount = spec
     ? spec.configs.filter((c) => c.display === "advanced" || c.display === "hidden").length
     : 0;
+  const high = findings.some((f) => f.severity === "high");
+  const warnOnly = !high && findings.length > 0;
+  const linkLock = !!spec && blocksPrivate(spec);
+  const privateOn = !!spec && spec.isolate === "private" && !linkLock;
+  const nameRequired = !!spec && (privateOn || spec.links.length > 0);
+  const peers = (options?.peers ?? []).filter((p) => p.name && p.name !== spec?.name);
+  const linkedElsewhere = (spec?.links ?? []).filter(
+    (name) => name !== spec?.name && !peers.some((p) => p.name === name),
+  );
 
   return (
     <>
@@ -182,21 +313,20 @@ export default function ContainerDialog({
         title={title}
         size="lg"
         onClose={onClose}
-        onSubmit={submit}
+        onSubmit={() => void submit(false)}
         footer={
           <>
             <Button onClick={onClose} disabled={busy}>
               {locked ? "Close" : "Cancel"}
             </Button>
-            {!locked && (
+            {!locked && high && (
+              <Button variant="danger" onClick={() => void submit(true)} loading={busy} disabled={!spec}>
+                Deploy anyway
+              </Button>
+            )}
+            {!locked && !high && (
               <Button type="submit" variant="primary" loading={busy} disabled={!spec}>
-                {busy
-                  ? "Applying…"
-                  : editing
-                    ? "Apply"
-                    : spec?.autostart
-                      ? "Create & start"
-                      : "Create"}
+                {busy ? "Applying…" : warnOnly ? "Continue" : editing ? "Apply" : spec?.autostart ? "Create & start" : "Create"}
               </Button>
             )}
           </>
@@ -212,6 +342,7 @@ export default function ContainerDialog({
         )}
 
         {spec && (
+          <>
           <fieldset disabled={locked || busy} className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
             {fromApp && requires && (
               <div className="rounded-2xl border border-warn/40 bg-warn/15 px-3 py-2 text-sm font-medium leading-relaxed text-ink">
@@ -228,15 +359,19 @@ export default function ContainerDialog({
                 Anything saved only inside the container is lost.
               </Alert>
             )}
+            <RiskPanel findings={findings} busy={busy || locked} onFix={(id) => void applyFix(id)} />
 
             <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <TextField
-                label={editing ? "Name" : "Name (optional)"}
+                label={nameRequired || editing ? "Name" : "Name (optional)"}
                 value={spec.name}
                 onChange={(e) => set({ name: e.target.value })}
-                placeholder={editing ? "" : "Docker picks one if blank"}
+                placeholder={
+                  nameRequired ? "Used to name its private network" : editing ? "" : "Docker picks one if blank"
+                }
                 autoCapitalize="none"
                 spellCheck={false}
+                required={nameRequired}
               />
               <div>
                 <TextField
@@ -256,23 +391,32 @@ export default function ContainerDialog({
                   ))}
                 </datalist>
               </div>
-              <SelectField
-                label="Network type"
-                value={spec.network}
-                onChange={(e) => set({ network: e.target.value })}
-                hint={NETWORK_HINT[spec.network] ?? "A network you created in Docker."}
-              >
-                {networks.map((n) => (
-                  <option key={n} value={n}>
-                    {n === "bridge" ? "Bridge" : n === "host" ? "Host" : n === "none" ? "None" : n}
-                  </option>
-                ))}
-              </SelectField>
+              {privateOn ? (
+                <TextField
+                  label="Network type"
+                  value={appNetwork(spec.name)}
+                  readOnly
+                  hint="This container uses its own network. Other containers reach it only when you link them."
+                />
+              ) : (
+                <SelectField
+                  label="Network type"
+                  value={spec.network}
+                  onChange={(e) => setNetwork(e.target.value)}
+                  hint={NETWORK_HINT[spec.network] ?? "A network you created in Docker."}
+                >
+                  {networks.map((n) => (
+                    <option key={n} value={n}>
+                      {n === "bridge" ? "Bridge" : n === "host" ? "Host" : n === "none" ? "None" : n}
+                    </option>
+                  ))}
+                </SelectField>
+              )}
               <SelectField
                 className="sm:col-span-2"
                 label="Route through VPN"
                 value={spec.vpn}
-                onChange={(e) => set({ vpn: e.target.value })}
+                onChange={(e) => setVpn(e.target.value)}
                 hint={
                   spec.vpn
                     ? "Uses the tunnel's gateway network. If the tunnel drops, this container has no traffic."
@@ -302,6 +446,18 @@ export default function ContainerDialog({
                 ))}
               </SelectField>
             </div>
+
+            <NetworkFields
+              spec={spec}
+              privateOn={privateOn}
+              linkLock={linkLock}
+              editing={editing}
+              locked={locked}
+              peers={peers}
+              extraLinks={linkedElsewhere}
+              onPrivate={setPrivate}
+              onToggleLink={toggleLink}
+            />
 
             {spec.vpn && (
               <Alert tone="info">
@@ -390,6 +546,16 @@ export default function ContainerDialog({
 
             {error && <Alert>{error}</Alert>}
           </fieldset>
+          {container ? (
+            <div className="mt-5">
+              <PublishForm containerId={container.id} containerName={container.name} />
+            </div>
+          ) : (
+            <p className="mt-5 text-xs font-medium leading-relaxed text-ink-3">
+              Publish is available after the container exists. Create it, open it again, and turn on the switch.
+            </p>
+          )}
+          </>
         )}
       </Modal>
 
@@ -492,10 +658,129 @@ function IconPreview({ src }: { src: string }) {
 }
 
 const NETWORK_HINT: Record<string, string> = {
-  bridge: "Isolated from your network; reachable through the ports you map.",
+  bridge: "Reachable through the ports you map. Other containers on this bridge can reach it.",
   host: "Shares this server's network directly. Port mappings are ignored.",
   none: "No network access at all.",
 };
+
+function NetworkFields({
+  spec,
+  privateOn,
+  linkLock,
+  editing,
+  locked,
+  peers,
+  extraLinks,
+  onPrivate,
+  onToggleLink,
+}: {
+  spec: Spec;
+  privateOn: boolean;
+  linkLock: boolean;
+  editing: boolean;
+  locked: boolean;
+  peers: { name: string; id: string }[];
+  extraLinks: string[];
+  onPrivate: (on: boolean) => void;
+  onToggleLink: (name: string, on: boolean) => void;
+}) {
+  const net = appNetwork(spec.name);
+  const choices = [...peers.map((p) => p.name), ...extraLinks];
+  return (
+    <section className="space-y-4 rounded-2xl border border-line p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold text-ink">Private network</h3>
+          <p className="mt-0.5 text-xs font-medium leading-relaxed text-ink-3">
+            {linkLock
+              ? "A private network stays off while this container uses the host network, no network, or a VPN."
+              : privateOn
+                ? `Other containers cannot reach this one. Its network is ${net}.`
+                : "This container shares a network with other apps. Turn this on to give it a network of its own."}
+          </p>
+        </div>
+        <Toggle checked={privateOn} disabled={linkLock} onChange={onPrivate} label="Private network" />
+      </div>
+      {editing && !privateOn && !linkLock && !locked && (
+        <Button size="sm" onClick={() => onPrivate(true)}>
+          Isolate
+        </Button>
+      )}
+      <div>
+        <h3 className="text-sm font-bold text-ink">Linked apps</h3>
+        <p className="mt-0.5 text-xs font-medium leading-relaxed text-ink-3">
+          {linkLock
+            ? "Linked apps join this container's network. That stays off for the host network, no network, and a VPN."
+            : `Checked containers join ${net} and can reach this app. Everything else stays on its own network.`}
+        </p>
+        {choices.length === 0 ? (
+          <p className="mt-3 text-xs font-medium text-ink-3">No other containers can be linked yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {choices.map((name) => (
+              <li key={name}>
+                <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-accent"
+                    checked={spec.links.includes(name)}
+                    disabled={linkLock}
+                    onChange={(e) => onToggleLink(name, e.target.checked)}
+                  />
+                  {name}
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RiskPanel({
+  findings,
+  busy,
+  onFix,
+}: {
+  findings: Finding[];
+  busy: boolean;
+  onFix: (id: string) => void;
+}) {
+  if (findings.length === 0) return null;
+  const high = findings.some((f) => f.severity === "high");
+  return (
+    <section
+      aria-label="Security check"
+      className={`space-y-3 rounded-2xl border px-4 py-3 ${high ? "border-bad/40 bg-bad/10" : "border-warn/40 bg-warn/15"}`}
+    >
+      <div>
+        <h3 className={`text-sm font-bold ${high ? "text-bad" : "text-warn"}`}>
+          {high ? "High-risk settings" : "Settings to review"}
+        </h3>
+        <p className="mt-1 text-sm font-medium leading-relaxed text-ink">
+          {high
+            ? "Deploying keeps these settings only after you choose Deploy anyway. Apply a safer setting where one is offered."
+            : "These settings are allowed. Read them before you continue."}
+        </p>
+      </div>
+      <ul className="space-y-3">
+        {findings.map((f) => (
+          <li key={f.id} className="rounded-xl border border-line bg-surface-2 px-3 py-2.5">
+            <div className="text-sm font-bold text-ink">{f.title}</div>
+            <p className="mt-1 text-xs font-medium leading-relaxed text-ink-2">{f.reason}</p>
+            <p className="mt-1 text-xs font-medium leading-relaxed text-ink">{f.suggestion}</p>
+            {f.fix && (
+              <Button size="sm" className="mt-2" onClick={() => onFix(f.id)} disabled={busy}>
+                Apply safer setting
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 function ConfigRow({
   item,
