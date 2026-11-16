@@ -29,6 +29,7 @@ import { stateStyle, type Container, type DockerStatus } from "./types";
 import AddressDialog from "./AddressDialog";
 import SnapshotsDialog from "./SnapshotsDialog";
 import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
+import PublishedApps from "../publish/PublishedApps";
 
 export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
@@ -127,6 +128,8 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
             Docker {status.version} · {containers.length} container
             {containers.length === 1 ? "" : "s"}
           </div>
+
+          <PublishedApps />
 
           {containers.length ? (
             <div className="space-y-3">

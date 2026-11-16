@@ -58,7 +58,11 @@ type Service struct {
 	Engine     Engine
 	DataDir    string
 	ListenPort int
-	Log        *slog.Logger
+	// GatewayPort is feldcored's publish listener. Routes with Gateway set
+	// are reverse-proxied there so protection and Citizen ID run before the
+	// container. Zero keeps the older behaviour: Caddy dials the container.
+	GatewayPort int
+	Log         *slog.Logger
 	// Listen reports host ports already in use. Nil uses the kernel tables.
 	Listen func() []int
 }
@@ -94,6 +98,8 @@ type RouteInput struct {
 	Port      int
 	TLS       string
 	Enabled   bool
+	// Gateway sends the hostname to feldcored's publish listener.
+	Gateway bool
 }
 
 // View returns the current proxy settings.
@@ -191,6 +197,7 @@ func (s *Service) SetRoute(in RouteInput) error {
 		if in.Enabled {
 			next = append(next, store.WebRoute{
 				Container: in.Container, Hostname: host, Port: in.Port, TLS: tls, Enabled: true,
+				Gateway: in.Gateway,
 			})
 		}
 		st.Web.Routes = next
@@ -358,6 +365,12 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 			if err == nil && mode == "none" {
 				return nil, input(r.Container + " has no network, so a hostname cannot reach it.")
 			}
+		}
+		// Publish routes stop at feldcored. Caddy still obtains the certificate
+		// and terminates TLS; the listener runs protection, Citizen ID, then
+		// the proxy to the container. Nothing new is placed in front of Caddy.
+		if r.Gateway && s.GatewayPort > 0 {
+			up = fmt.Sprintf("host.docker.internal:%d", s.GatewayPort)
 		}
 		tls := r.TLS
 		if tls == "" {

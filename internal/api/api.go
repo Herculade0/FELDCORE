@@ -24,6 +24,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
+	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
@@ -52,6 +53,7 @@ type Deps struct {
 	VPN        *vpn.Service
 	Backups    *backup.Service
 	Mail       *notify.Service
+	Publish    *publish.Service
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -76,6 +78,7 @@ type Server struct {
 	backups    *backup.Service
 	mail       *notify.Service
 	installs   *install.Runner
+	publish    *publish.Service
 }
 
 // New returns a Server.
@@ -85,7 +88,7 @@ func New(d Deps) *Server {
 		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup,
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
-		vpn: d.VPN, backups: d.Backups, mail: d.Mail,
+		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
 	}
 	s.wireInstalls()
 	s.initMCP()
@@ -151,6 +154,8 @@ func (s *Server) Router() http.Handler {
 			r.Post("/remote/install", s.handleRemoteInstall)
 			r.Put("/proxy", s.handleProxySave)
 			r.Put("/docker/containers/{id}/address", s.handleAddressSave)
+			r.Put("/publish", s.handlePublishSave)
+			r.Put("/docker/containers/{id}/publish", s.handleContainerPublishSave)
 			r.Post("/docker/containers/{id}/snapshots", s.handleSnapshotCreate)
 			r.Post("/docker/containers/{id}/snapshots/{snap}/restore", s.handleSnapshotRestore)
 			r.Put("/snapshots", s.handleSnapshotSettings)
@@ -225,6 +230,8 @@ func (s *Server) Router() http.Handler {
 				r.Get("/docker/containers", s.handleDockerContainers)
 				r.Get("/docker/containers/{id}/spec", s.handleDockerSpec)
 				r.Get("/docker/containers/{id}/address", s.handleAddress)
+				r.Get("/publish", s.handlePublish)
+				r.Get("/docker/containers/{id}/publish", s.handleContainerPublish)
 				r.Get("/docker/containers/{id}/snapshots", s.handleSnapshots)
 				r.Delete("/docker/containers/{id}/snapshots/{snap}", s.handleSnapshotDelete)
 				r.Get("/docker/images", s.handleDockerImages)
@@ -353,6 +360,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		remoteOp    *remote.OpError
 		proxyInput  *proxy.InputError
 		proxyOp     *proxy.OpError
+		pubInput    *publish.InputError
+		pubOp       *publish.OpError
 		snapInput   *snapshots.InputError
 		snapOp      *snapshots.OpError
 	)
@@ -379,6 +388,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, remoteInput.Msg)
 	case errors.As(err, &proxyInput):
 		writeError(w, http.StatusBadRequest, proxyInput.Msg)
+	case errors.As(err, &pubInput):
+		writeError(w, http.StatusBadRequest, pubInput.Msg)
 	case errors.As(err, &snapInput):
 		writeError(w, http.StatusBadRequest, snapInput.Msg)
 	case errors.As(err, &shareOp):
@@ -411,6 +422,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &proxyOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, proxyOp.Msg)
+	case errors.As(err, &pubOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, pubOp.Msg)
 	case errors.As(err, &snapOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, snapOp.Msg)
