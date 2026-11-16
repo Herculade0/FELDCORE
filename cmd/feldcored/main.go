@@ -25,6 +25,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
+	"github.com/Herculade0/feldcore/internal/vm"
 	"github.com/Herculade0/feldcore/web"
 )
 
@@ -113,6 +114,16 @@ func main() {
 				out := map[string]string{}
 				for _, f := range shareMgr.Folders() {
 					out[strings.ToLower(f.Name)] = f.Path
+				}
+				return out
+			},
+		}),
+		VMs: vm.New(vm.Deps{
+			Store: st, SharesRoot: cfg.SharesRoot, Log: log,
+			Shares: func() []vm.ShareInfo {
+				var out []vm.ShareInfo
+				for _, f := range shareMgr.Folders() {
+					out = append(out, vm.ShareInfo{Name: f.Name, Path: f.Path})
 				}
 				return out
 			},

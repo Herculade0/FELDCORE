@@ -3,11 +3,11 @@
 A modern, self-hostable server management UI — the parts of the Unraid
 experience that are useful on *any* Linux box, minus the array/parity storage
 model. Drop one binary onto a Debian (or any systemd) machine and you get a
-clean web UI to manage the system, shares, Docker, and later VMs.
+clean web UI to manage the system, shares, Docker and virtual machines.
 
 > **Status: pre-alpha.** The dashboard, sign-in, first-start setup, Shares,
-> Docker and the App Store work. VM management is next — see
-> [docs/ROADMAP.md](docs/ROADMAP.md).
+> Docker, the App Store and virtual machines work. See
+> [docs/VMS.md](docs/VMS.md) for the VM manager.
 
 ## Why
 
@@ -38,7 +38,7 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **App Store** — browse and search the Unraid Community Applications catalogue; choosing an app opens the container setup prefilled from its template | ✅ working |
 | **Settings** — appearance, host, network, services, firewall, updates, App Store feed | ✅ working |
 | **Terminal** — host shell, and a console in each running container | ✅ working |
-| **VMs** — KVM/libvirt management | 🧭 later |
+| **VMs** — KVM/libvirt: create and edit, CPU pinning, UEFI/TPM, disks, ISO and VirtIO drivers, VNC in the browser, passthrough, snapshots | ✅ working |
 
 ## Architecture
 

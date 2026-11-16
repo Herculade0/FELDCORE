@@ -53,7 +53,7 @@ export const NAV: NavItem[] = [
     label: "VMs",
     desc: "Virtual machines",
     icon: MonitorPlay,
-    ready: false,
+    ready: true,
   },
   {
     key: "settings",

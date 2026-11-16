@@ -22,6 +22,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/system"
+	"github.com/Herculade0/feldcore/internal/vm"
 )
 
 // Deps are the services the HTTP layer exposes.
@@ -32,6 +33,7 @@ type Deps struct {
 	Shares     *shares.Manager
 	Docker     *docker.Manager
 	Apps       *apps.Service
+	VMs        *vm.Manager
 	Setup      *setup.Service
 	SkipWizard bool
 	WebRoot    fs.FS
@@ -46,6 +48,7 @@ type Server struct {
 	shares     *shares.Manager
 	docker     *docker.Manager
 	apps       *apps.Service
+	vms        *vm.Manager
 	wiz        *setup.Service
 	skipWizard bool
 	webRoot    fs.FS
@@ -56,7 +59,7 @@ type Server struct {
 func New(d Deps) *Server {
 	return &Server{
 		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
-		docker: d.Docker, apps: d.Apps, wiz: d.Setup, skipWizard: d.SkipWizard,
+		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup, skipWizard: d.SkipWizard,
 		webRoot: d.WebRoot, log: d.Log,
 	}
 }
@@ -102,6 +105,12 @@ func (s *Server) Router() http.Handler {
 			r.Post("/setup/wizard", s.handleWizard)
 			r.Put("/settings/services", s.handleSettingsService)
 			r.Put("/settings/updates", s.handleSettingsUpdates)
+			// Defining a domain and the VNC console are not short requests.
+			r.Post("/vms", s.handleVMCreate)
+			r.Put("/vms/{name}", s.handleVMUpdate)
+			r.Put("/vms/{name}/xml", s.handleVMXMLPut)
+			r.Post("/vms/{name}/snapshots/{snap}/revert", s.handleSnapshotRevert)
+			r.Get("/vms/{name}/console", s.handleVMConsole)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -134,6 +143,27 @@ func (s *Server) Router() http.Handler {
 				r.Put("/settings/feed", s.handleSettingsFeed)
 				r.Put("/settings/defaults", s.handleSettingsDefaults)
 				r.Post("/settings/shares", s.handleSettingsShares)
+
+				r.Get("/vms", s.handleVMs)
+				r.Get("/vms/host", s.handleVMHost)
+				r.Get("/vms/settings", s.handleVMSettings)
+				r.Put("/vms/settings", s.handleVMSettingsSave)
+				r.Get("/vms/virtio", s.handleVirtio)
+				r.Post("/vms/virtio", s.handleVirtioDownload)
+				r.Delete("/vms/virtio/{file}", s.handleVirtioDelete)
+				r.Get("/vms/jobs/{id}", s.handleVMJob)
+				r.Get("/vms/{name}", s.handleVMGet)
+				r.Delete("/vms/{name}", s.handleVMDelete)
+				r.Get("/vms/{name}/xml", s.handleVMXML)
+				r.Post("/vms/{name}/start", s.handleVMStart)
+				r.Post("/vms/{name}/stop", s.handleVMStop)
+				r.Post("/vms/{name}/force-stop", s.handleVMForceStop)
+				r.Post("/vms/{name}/pause", s.handleVMPause)
+				r.Post("/vms/{name}/resume", s.handleVMResume)
+				r.Post("/vms/{name}/autostart", s.handleVMAutostart)
+				r.Get("/vms/{name}/snapshots", s.handleSnapshots)
+				r.Post("/vms/{name}/snapshots", s.handleSnapshotCreate)
+				r.Delete("/vms/{name}/snapshots/{snap}", s.handleSnapshotDelete)
 
 				r.Get("/docker/status", s.handleDockerStatus)
 				r.Get("/docker/options", s.handleDockerOptions)
@@ -233,6 +263,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		dockerOp    *docker.OpError
 		appsInput   *apps.InputError
 		appsOp      *apps.OpError
+		vmInput     *vm.InputError
+		vmOp        *vm.OpError
 		setupInput  *setup.InputError
 		setupOp     *setup.OpError
 	)
@@ -245,6 +277,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, dockerInput.Msg)
 	case errors.As(err, &appsInput):
 		writeError(w, http.StatusBadRequest, appsInput.Msg)
+	case errors.As(err, &vmInput):
+		writeError(w, http.StatusBadRequest, vmInput.Msg)
 	case errors.As(err, &setupInput):
 		writeError(w, http.StatusBadRequest, setupInput.Msg)
 	case errors.As(err, &shareOp):
@@ -256,6 +290,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &appsOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, appsOp.Msg)
+	case errors.As(err, &vmOp):
+		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusInternalServerError, vmOp.Msg)
 	case errors.As(err, &setupOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, setupOp.Msg)

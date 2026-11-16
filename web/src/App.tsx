@@ -10,10 +10,10 @@ import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
-import ComingSoon from "./components/ComingSoon";
 import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
+import VMsPage from "./components/vms/VMsPage";
 import Wizard from "./components/setup/Wizard";
 
 export default function App() {
@@ -116,11 +116,11 @@ function Shell() {
             <DockerPage onOpenApps={() => setActive("apps")} />
           ) : active === "apps" ? (
             <AppsPage />
+          ) : active === "vms" ? (
+            <VMsPage />
           ) : active === "settings" ? (
             <SettingsPage />
-          ) : (
-            <ComingSoon nav={active} />
-          )}
+          ) : null}
         </ErrorBoundary>
       </main>
 
