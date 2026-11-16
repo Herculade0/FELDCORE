@@ -132,13 +132,3 @@ func runVirsh(ctx context.Context, path string, args ...string) (string, error) 
 	}
 	return text, nil
 }
-
-func lastLine(s string) string {
-	lines := strings.Split(s, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if l := strings.TrimSpace(lines[i]); l != "" {
-			return l
-		}
-	}
-	return ""
-}
