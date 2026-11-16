@@ -72,6 +72,14 @@ Follow-ups
 - [ ] Create VM wizard (ISO, disk, CPU, RAM, virtio)
 - [ ] Browser console (VNC/SPICE)
 
+## FELDCORE-STORE
+
+A private catalogue merged on top of Community Apps: game profiles, VM templates, app bundles, SDR apps, and fixed versions of broken templates. It builds on the App Store (M2b). Design and scope: [FELDCORE-STORE.md](FELDCORE-STORE.md).
+
+- [ ] MVP — extra store sources, a signed feed from a private GitHub repo, merge and override, FELDCORE badge
+- [ ] Games, bundles, and SDR device claims
+- [ ] One-click VMs from store templates, after M4
+
 ## Cross-cutting
 - [ ] Packaging: .deb, and a one-line curl installer
 - [ ] Config persistence (embedded db or on-disk state in /var/lib/feldcore)
