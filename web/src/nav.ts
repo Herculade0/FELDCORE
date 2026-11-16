@@ -3,6 +3,7 @@ import {
   FolderTree,
   HeartPulse,
   LayoutDashboard,
+  LayoutGrid,
   MonitorPlay,
   ScrollText,
   Settings,
@@ -10,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "health" | "audit" | "settings";
+export type NavKey = "dashboard" | "launcher" | "shares" | "docker" | "apps" | "vms" | "health" | "audit" | "settings";
 
 export interface NavItem {
   key: NavKey;
@@ -27,6 +28,13 @@ export const NAV: NavItem[] = [
     label: "Dashboard",
     desc: "Your server at a glance",
     icon: LayoutDashboard,
+    ready: true,
+  },
+  {
+    key: "launcher",
+    label: "Launcher",
+    desc: "Apps you can open",
+    icon: LayoutGrid,
     ready: true,
   },
   {

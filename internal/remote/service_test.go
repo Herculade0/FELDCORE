@@ -203,7 +203,7 @@ func TestPublishContainerRoute(t *testing.T) {
 	if err := svc.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(ingress, "http://plex:32400") || !strings.Contains(dns, "tun.cfargotunnel.com") {
+	if !strings.Contains(ingress, "http://host.docker.internal:8791") || strings.Contains(ingress, "http://plex:32400") || !strings.Contains(dns, "tun.cfargotunnel.com") {
 		t.Fatalf("ingress %s dns %s", ingress, dns)
 	}
 	if len(eng.connected) == 0 || eng.connected[0] != "plex" {

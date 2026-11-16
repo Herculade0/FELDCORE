@@ -64,6 +64,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if deny.Msg != "" {
 				msg = deny.Msg
 			}
+			if deny.Location != "" {
+				w.Header().Set("Location", deny.Location)
+			}
 		}
 		writeDenied(w, status, msg, http.StatusForbidden, msg)
 		return
