@@ -32,6 +32,22 @@ func TestSelectAndPruneAndDue(t *testing.T) {
 	if strings.Join(names, ",") != "state.json,snapshots" {
 		t.Fatalf("included %v", got)
 	}
+	if err := os.Mkdir(filepath.Join(dir, "compose"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got = SelectSources(dir, filepath.Join(dir, "missing-app"), true, true, func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	})
+	names = nil
+	for _, s := range got {
+		if s.Path != "" {
+			names = append(names, s.Name)
+		}
+	}
+	if strings.Join(names, ",") != "state.json,snapshots,compose" {
+		t.Fatalf("compose folder not included: %v", got)
+	}
 	if notes := Notes(got); len(notes) != 1 || !strings.Contains(notes[0], "appdata") {
 		t.Fatalf("notes %v", notes)
 	}

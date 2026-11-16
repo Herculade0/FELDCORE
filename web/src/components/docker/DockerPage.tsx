@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  Layers,
   Pencil,
   Play,
   Plus,
@@ -32,7 +33,13 @@ import SnapshotsDialog from "./SnapshotsDialog";
 import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 import PublishedApps from "../publish/PublishedApps";
 
-export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
+export default function DockerPage({
+  onOpenApps,
+  onOpenStack,
+}: {
+  onOpenApps?: () => void;
+  onOpenStack?: (name: string) => void;
+}) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
   const [containers, setContainers] = useState<Container[]>([]);
   const [host, setHost] = useState("localhost");
@@ -145,24 +152,34 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
           <PublishedApps />
 
           {containers.length ? (
-            <div className="space-y-3">
-              {containers.map((c) => (
-                <ContainerRow
-                  key={c.id}
-                  c={c}
-                  host={host}
-                  onAction={changed}
-                  onError={setError}
-                  onLogs={() => setLogsFor(c)}
-                  onConsole={() => openContainer({ id: c.id, name: c.name, icon: c.icon })}
-                  onEdit={() => openEdit(c)}
-                  onIsolate={() => openEdit(c, true)}
-                  onAddress={() => setAddressFor(c)}
-                  onSnapshots={() => setSnapsFor(c)}
-                  onRemove={() => setRemoving(c)}
-                />
-              ))}
-            </div>
+            <ContainerGroups
+              containers={containers}
+              host={host}
+              onAction={changed}
+              onError={setError}
+              onLogs={setLogsFor}
+              onConsole={(c) => openContainer({ id: c.id, name: c.name, icon: c.icon })}
+              onEdit={(c) => openEdit(c)}
+              onIsolate={(c) => openEdit(c, true)}
+              onAddress={setAddressFor}
+              onSnapshots={setSnapsFor}
+              onRemove={setRemoving}
+              onMakeStack={
+                onOpenStack
+                  ? async (c) => {
+                      try {
+                        const st = await api<{ name: string }>("/stacks/from-container", {
+                          method: "POST",
+                          body: { id: c.id, removeOriginal: true },
+                        });
+                        onOpenStack(st.name);
+                      } catch (e) {
+                        setError(errorMessage(e));
+                      }
+                    }
+                  : undefined
+              }
+            />
           ) : (
             <Card className="flex flex-col items-center px-6 py-12 text-center">
               <IconBadge icon={Boxes} size={64} />
@@ -210,6 +227,91 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
   );
 }
 
+function ContainerGroups({
+  containers,
+  host,
+  onAction,
+  onError,
+  onLogs,
+  onConsole,
+  onEdit,
+  onIsolate,
+  onAddress,
+  onSnapshots,
+  onRemove,
+  onMakeStack,
+}: {
+  containers: Container[];
+  host: string;
+  onAction: (msg: string) => void;
+  onError: (msg: string) => void;
+  onLogs: (c: Container) => void;
+  onConsole: (c: Container) => void;
+  onEdit: (c: Container) => void;
+  onIsolate: (c: Container) => void;
+  onAddress: (c: Container) => void;
+  onSnapshots: (c: Container) => void;
+  onRemove: (c: Container) => void;
+  onMakeStack?: (c: Container) => void;
+}) {
+  const groups = groupContainers(containers);
+  const row = (c: Container) => (
+    <ContainerRow
+      key={c.id}
+      c={c}
+      host={host}
+      onAction={onAction}
+      onError={onError}
+      onLogs={() => onLogs(c)}
+      onConsole={() => onConsole(c)}
+      onEdit={() => onEdit(c)}
+      onIsolate={() => onIsolate(c)}
+      onAddress={() => onAddress(c)}
+      onSnapshots={() => onSnapshots(c)}
+      onRemove={() => onRemove(c)}
+      onMakeStack={onMakeStack && !c.compose && !c.role && !c.vpnGateway ? () => onMakeStack(c) : undefined}
+    />
+  );
+  if (!groups) {
+    return <div className="space-y-3">{containers.map(row)}</div>;
+  }
+  return (
+    <div className="space-y-6">
+      {groups.map((g) => (
+        <section key={g.key} className="space-y-3">
+          <div className="flex items-baseline gap-2 px-1">
+            <h2 className="text-sm font-extrabold text-ink">{g.title}</h2>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-ink-3">{g.hint}</span>
+          </div>
+          {g.items.map(row)}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function groupContainers(containers: Container[]): { key: string; title: string; hint: string; items: Container[] }[] | null {
+  if (!containers.some((c) => c.stack || c.project)) return null;
+  const order: string[] = [];
+  const map = new Map<string, { key: string; title: string; hint: string; items: Container[] }>();
+  for (const c of containers) {
+    const key = c.stack ? `stack:${c.stack}` : c.project ? `project:${c.project}` : "loose";
+    let group = map.get(key);
+    if (!group) {
+      group = c.stack
+        ? { key, title: c.stack, hint: "Stack", items: [] }
+        : c.project
+          ? { key, title: c.project, hint: "Compose project", items: [] }
+          : { key, title: "Other containers", hint: "Not in a stack", items: [] };
+      map.set(key, group);
+      order.push(key);
+    }
+    group.items.push(c);
+  }
+  order.sort((a, b) => (a === "loose" ? 1 : 0) - (b === "loose" ? 1 : 0));
+  return order.map((key) => map.get(key)!);
+}
+
 function canIsolate(c: Container): boolean {
   if (c.isolated || c.vpn || c.vpnGateway || c.role || c.compose) return false;
   const network = c.network || "";
@@ -229,6 +331,7 @@ function ContainerRow({
   onAddress,
   onSnapshots,
   onRemove,
+  onMakeStack,
 }: {
   c: Container;
   host: string;
@@ -241,6 +344,7 @@ function ContainerRow({
   onAddress: () => void;
   onSnapshots: () => void;
   onRemove: () => void;
+  onMakeStack?: () => void;
 }) {
   const [busy, setBusy] = useState("");
   const st = stateStyle(c.state);
@@ -281,6 +385,11 @@ function ContainerRow({
             {c.gpu && (
               <span className="rounded-full bg-ok/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ok">
                 GPU
+              </span>
+            )}
+            {c.service && (
+              <span className="rounded-full bg-track px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ink-3">
+                {c.service}
               </span>
             )}
             {c.isolated && (
@@ -357,6 +466,11 @@ function ContainerRow({
         {canIsolate(c) && (
           <IconButton label="Isolate" onClick={onIsolate} disabled={!!busy}>
             <Shield size={16} />
+          </IconButton>
+        )}
+        {onMakeStack && (
+          <IconButton label="Make a stack" onClick={onMakeStack} disabled={!!busy}>
+            <Layers size={16} />
           </IconButton>
         )}
         <IconButton label={c.vpnGateway ? "Managed from Settings → VPN" : "Edit"} onClick={onEdit} disabled={!!busy || c.vpnGateway}>

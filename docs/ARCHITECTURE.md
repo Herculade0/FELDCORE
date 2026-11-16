@@ -30,6 +30,8 @@ The whole product ships as one executable with the web UI embedded via
 - **`internal/shares`** *(wip)* — model a share as a managed directory; render
   Samba and NFS config fragments; reload services.
 - **`internal/docker`** — talk to the Docker Engine API over its unix socket.
+- **`internal/compose`** — Compose stacks. Files live in `<data-dir>/compose`
+  (see [COMPOSE.md](COMPOSE.md)) and are deployed with the `docker compose` CLI.
 - **`internal/apps`** — the App Store. It caches the public Community
   Applications feed (the same JSON Unraid's CA plugin downloads, which already
   contains each template) and turns a chosen template into a container spec.

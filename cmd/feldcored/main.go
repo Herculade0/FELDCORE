@@ -223,6 +223,8 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		DataDir:    cfg.DataDir,
+		SharesRoot: cfg.SharesRoot,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

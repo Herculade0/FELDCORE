@@ -21,14 +21,17 @@ address.
 
 | Scope | What it allows |
 | --- | --- |
-| `read` | Look at the host, shares, the App Store, containers, container logs, and VMs. Required for MCP. |
+| `read` | Look at the host, shares, the App Store, containers, container logs, VMs, and Compose stacks (including stack logs and stack job progress). Required for MCP. |
 | `containers` | Create, start, stop, restart and delete containers over the HTTP API. |
 | `vms` | Create, edit, start, stop and delete virtual machines over the HTTP API. Listing VMs is `read`. |
-| `admin` | Settings, shares, tokens and every other API call. Includes the three scopes above. |
+| `files:read` | List, preview and download files in a share. |
+| `files:write` | Upload, rename, move, copy and delete files in a share. Includes `files:read`. |
+| `stacks` | Save, deploy, update, stop and remove Compose stacks. Listing stacks and reading logs is `read`. |
+| `admin` | Settings, shares, tokens and every other API call. Includes the scopes above. |
 
 `admin` does not include a shell. The host terminal, container consoles and a VM's VNC console stay on the signed-in browser session. An agent token that calls them is refused and the refusal is written to the audit log.
 
-Grant `read` together with `containers` when an agent should both look and change containers. A token with only `containers` cannot call MCP and cannot read system info.
+Grant `read` together with `containers` when an agent should both look and change containers. Grant `read` with `stacks` as well: deploy returns a job immediately, and following it is a read. A token with only `containers` or only `stacks` cannot call MCP and cannot read system info. Stack files, the security check and the on-disk path are described in [COMPOSE.md](COMPOSE.md).
 
 ## Call the HTTP API
 
