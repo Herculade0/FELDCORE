@@ -32,16 +32,44 @@ func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerCreate(w http.ResponseWriter, r *http.Request) {
-	var req docker.CreateRequest
-	if !readJSON(w, r, &req) {
+	var spec docker.Spec
+	if !readJSON(w, r, &spec) {
 		return
 	}
-	id, err := s.docker.Create(r.Context(), req)
+	id, err := s.docker.Create(r.Context(), spec)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+// handleDockerSpec returns a container's current settings for the edit dialog.
+func (s *Server) handleDockerSpec(w http.ResponseWriter, r *http.Request) {
+	info, err := s.docker.Spec(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+// handleDockerUpdate applies edited settings by recreating the container.
+func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
+	var spec docker.Spec
+	if !readJSON(w, r, &spec) {
+		return
+	}
+	id, err := s.docker.Update(r.Context(), chi.URLParam(r, "id"), spec)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+func (s *Server) handleDockerOptions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.docker.Options(r.Context()))
 }
 
 func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {

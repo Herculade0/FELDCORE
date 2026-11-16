@@ -1,10 +1,12 @@
 import {
   useEffect,
   useId,
+  useRef,
   type ButtonHTMLAttributes,
   type FormEvent,
   type InputHTMLAttributes,
   type ReactNode,
+  type SelectHTMLAttributes,
 } from "react";
 import { CircleAlert, Info, Loader2, TriangleAlert, X } from "lucide-react";
 
@@ -106,6 +108,34 @@ export function TextField({
   );
 }
 
+/** Shared look for text-like inputs that aren't a TextField. */
+export const inputClass =
+  "w-full rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-sm font-medium text-ink placeholder:text-ink-3 disabled:opacity-60";
+
+export function SelectField({
+  label,
+  hint,
+  children,
+  className = "",
+  ...rest
+}: {
+  label: string;
+  hint?: ReactNode;
+} & SelectHTMLAttributes<HTMLSelectElement>) {
+  const id = useId();
+  return (
+    <div className={className}>
+      <label htmlFor={id} className="mb-1.5 block text-xs font-bold text-ink-2">
+        {label}
+      </label>
+      <select id={id} className={inputClass} {...rest}>
+        {children}
+      </select>
+      {hint && <p className="mt-1.5 text-xs font-medium text-ink-3">{hint}</p>}
+    </div>
+  );
+}
+
 export function Toggle({
   checked,
   onChange,
@@ -167,6 +197,10 @@ export function Alert({
   );
 }
 
+// Open dialogs, oldest first. Dialogs can stack (one opened from another), and
+// Escape must close only the top one.
+const openModals: symbol[] = [];
+
 /**
  * A dialog. When `onSubmit` is given the dialog is a form, so Enter submits
  * and the footer's submit button works.
@@ -177,22 +211,35 @@ export function Modal({
   onSubmit,
   children,
   footer,
+  size = "md",
 }: {
   title: string;
   onClose: () => void;
   onSubmit?: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  size?: "md" | "lg";
 }) {
   const id = useId();
+  // Keep the latest onClose without re-registering, which would reorder the stack.
+  const close = useRef(onClose);
+  close.current = onClose;
 
   useEffect(() => {
+    const token = Symbol("modal");
+    openModals.push(token);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && openModals[openModals.length - 1] === token) {
+        close.current();
+      }
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const i = openModals.indexOf(token);
+      if (i >= 0) openModals.splice(i, 1);
+    };
+  }, []);
 
   const body = (
     <>
@@ -213,8 +260,9 @@ export function Modal({
     </>
   );
 
-  const panel =
-    "panel relative flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-3xl";
+  const panel = `panel relative flex max-h-[92vh] w-full flex-col rounded-t-3xl sm:rounded-3xl ${
+    size === "lg" ? "max-w-2xl" : "max-w-lg"
+  }`;
 
   return (
     <div

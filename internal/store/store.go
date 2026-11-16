@@ -60,6 +60,13 @@ type Share struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// ConfigMeta is the human labelling of one container setting (a path, port,
+// variable...). Docker has nowhere to keep it, so FELDCORE does.
+type ConfigMeta struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
 // State is everything FELDCORE persists.
 type State struct {
 	Version  int       `json:"version"`
@@ -68,6 +75,9 @@ type State struct {
 	Shares   []Share   `json:"shares"`
 	// ShareUsers are the SMB accounts FELDCORE created and therefore owns.
 	ShareUsers []string `json:"shareUsers"`
+	// ContainerMeta holds setting names/descriptions per container name,
+	// keyed by a stable id for the setting (e.g. "path:/config").
+	ContainerMeta map[string]map[string]ConfigMeta `json:"containerMeta,omitempty"`
 }
 
 func (s State) clone() State {
@@ -83,7 +93,48 @@ func (s State) clone() State {
 		c.Shares[i] = sh
 	}
 	c.ShareUsers = append([]string(nil), s.ShareUsers...)
+	if s.ContainerMeta != nil {
+		c.ContainerMeta = make(map[string]map[string]ConfigMeta, len(s.ContainerMeta))
+		for name, items := range s.ContainerMeta {
+			cp := make(map[string]ConfigMeta, len(items))
+			for k, v := range items {
+				cp[k] = v
+			}
+			c.ContainerMeta[name] = cp
+		}
+	}
 	return c
+}
+
+// ContainerMeta returns the stored setting labels for a container.
+func (s *Store) ContainerMeta(name string) map[string]ConfigMeta {
+	return s.Snapshot().ContainerMeta[name]
+}
+
+// SetContainerMeta replaces the stored setting labels for a container.
+func (s *Store) SetContainerMeta(name string, meta map[string]ConfigMeta) error {
+	return s.Update(func(st *State) error {
+		if len(meta) == 0 {
+			delete(st.ContainerMeta, name)
+			return nil
+		}
+		if st.ContainerMeta == nil {
+			st.ContainerMeta = map[string]map[string]ConfigMeta{}
+		}
+		st.ContainerMeta[name] = meta
+		return nil
+	})
+}
+
+// DeleteContainerMeta forgets a container's setting labels.
+func (s *Store) DeleteContainerMeta(name string) error {
+	if _, ok := s.Snapshot().ContainerMeta[name]; !ok {
+		return nil
+	}
+	return s.Update(func(st *State) error {
+		delete(st.ContainerMeta, name)
+		return nil
+	})
 }
 
 // Store guards the state file.

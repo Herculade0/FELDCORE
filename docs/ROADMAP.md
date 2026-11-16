@@ -33,6 +33,14 @@ Follow-ups
 - [x] Logs viewer (demuxed stdout/stderr, auto-refresh)
 - [x] Create container (image pull, name, ports, volumes, env, restart policy)
 - [x] Engine API client over the unix socket (no heavy SDK dependency)
+- [x] Edit a container, Unraid-style: read its settings back, recreate with
+      the changes, and roll back to the original if the new one fails
+- [x] "Add configuration" with Path, Port, Variable, Label and Device, each
+      with a name and description
+- [x] Host path picker: shares first, then live folder suggestions
+- [x] Network type per container (bridge, host, none, user-defined)
+- [x] GPU sharing switch for AMD/Intel-style GPUs (/dev/dri)
+- [x] Allocations table: network, address and host ports per container
 
 ### M2b — Docker app store 🔜
 - [ ] Ingest the Unraid Community Applications template catalogue
@@ -45,7 +53,12 @@ Follow-ups
 - [ ] Container detail view (full config, inspect)
 - [ ] Image management (remove unused, prune)
 - [ ] docker-compose stack import
-- [ ] Map a FELDCORE share into a container in one step
+- [ ] NVIDIA GPU sharing: offer to install the NVIDIA Container Toolkit, only
+      when an NVIDIA card is present
+- [ ] Intel-specific extras (e.g. QuickSync tooling), only when an Intel GPU
+      is present
+- [ ] Choose a specific GPU when a server has more than one
+- [ ] Warn when a chosen host port is already allocated, before applying
 
 ## M3 — Settings
 - [ ] Users & authentication management

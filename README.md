@@ -33,7 +33,7 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **Dashboard** — live CPU, memory, load, uptime, per-mount storage, network throughput, per-core | ✅ working |
 | **Sign-in** — administrator account, sessions, everything behind a login | ✅ working |
 | **Shares** — create a folder, expose it over SMB (public, read-only or private with users) and NFS; installs Samba/NFS for you | ✅ working |
-| **Docker** — run and manage containers (state, live stats, logs, lifecycle), create from any image; installs Docker for you | ✅ working |
+| **Docker** — run, edit and manage containers (state, live stats, logs, lifecycle); Unraid-style paths/ports/variables/labels/devices, a folder picker, GPU sharing and an allocations table; installs Docker for you | ✅ working |
 | **Docker app store** — one-click installs from the Unraid Community Applications catalogue | 🔜 next |
 | **Settings** — users/auth, network, services, appearance | 🔜 planned |
 | **VMs** — KVM/libvirt management | 🧭 later |
@@ -108,8 +108,15 @@ or a disposable VM.
 - Deleting a share never deletes files; only an empty folder is removed.
 - Docker is used over its unix socket (`/var/run/docker.sock`). The one-click
   install adds your distribution's `docker.io` package. Containers FELDCORE
-  creates are tagged with a `feldcore.managed=true` label; it never alters
-  containers you started yourself.
+  creates are tagged with a `feldcore.managed=true` label. It only changes a
+  container when you edit, start, stop or remove it yourself, and refuses to
+  edit ones that belong to a Docker Compose project.
+- Editing a container replaces it, because Docker cannot change ports, paths
+  or variables in place. The original is kept until the replacement has
+  started, and is restored if it does not. Files in mapped folders survive;
+  data stored only inside the container does not.
+- GPU sharing passes `/dev/dri` into the container and adds the groups that
+  own it. Nothing is installed for this.
 
 ## Layout
 

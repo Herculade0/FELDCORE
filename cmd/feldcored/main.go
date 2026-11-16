@@ -68,7 +68,7 @@ func main() {
 		Sampler: sampler,
 		Auth:    auth.New(st),
 		Shares:  shareMgr,
-		Docker:  docker.NewManager(cfg.DockerSocket, log),
+		Docker:  docker.NewManager(cfg.DockerSocket, st, log),
 		WebRoot: webRoot,
 		Log:     log,
 	})

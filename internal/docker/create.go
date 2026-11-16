@@ -4,40 +4,50 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
-	"path"
-	"regexp"
-	"sort"
 	"strings"
-)
-
-var (
-	nameRe  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$`)
-	imageRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,254}$`)
 )
 
 // Create pulls the image if needed, creates the container, and (when
 // requested) starts it. It returns the new container's short id.
-func (m *Manager) Create(ctx context.Context, req CreateRequest) (string, error) {
-	name := strings.TrimSpace(req.Name)
-	if name != "" && !nameRe.MatchString(name) {
-		return "", invalid("Container names use letters, numbers and _ . - and start with a letter or number.")
+func (m *Manager) Create(ctx context.Context, s Spec) (string, error) {
+	if err := normaliseSpec(&s); err != nil {
+		return "", err
 	}
-	image := strings.TrimSpace(req.Image)
-	if !imageRe.MatchString(image) {
-		return "", invalid("Enter an image name, for example %q.", "nginx:latest")
-	}
-	body, err := buildCreate(req, image)
+	grant, err := m.grantFor(s)
 	if err != nil {
 		return "", err
 	}
 
 	// Pull first so a missing image is reported clearly rather than as a
 	// cryptic create failure.
-	if err := m.Pull(ctx, image); err != nil {
+	if err := m.Pull(ctx, s.Image); err != nil {
 		return "", err
 	}
 
+	cfg, host := map[string]any{}, map[string]any{}
+	applySpec(cfg, host, s, grant)
+	body := cfg
+	body["HostConfig"] = host
+
+	id, err := m.createContainer(ctx, s.Name, body)
+	if err != nil {
+		return "", err
+	}
+	m.log.Info("container created", "name", s.Name, "image", s.Image, "id", shortID(id))
+	m.saveMeta(ctx, id, s)
+
+	if s.Autostart {
+		if err := m.Start(ctx, id); err != nil {
+			return shortID(id), &OpError{fmt.Sprintf("The container was created but would not start: %v", err)}
+		}
+	}
+	return shortID(id), nil
+}
+
+// createContainer issues the create call and returns the full container id.
+func (m *Manager) createContainer(ctx context.Context, name string, body map[string]any) (string, error) {
 	q := url.Values{}
 	if name != "" {
 		q.Set("name", name)
@@ -49,93 +59,69 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (string, error)
 	for _, w := range created.Warnings {
 		m.log.Warn("docker create warning", "name", name, "warning", w)
 	}
-	m.log.Info("container created", "name", name, "image", image, "id", shortID(created.ID))
-
-	if req.Autostart {
-		if err := m.Start(ctx, created.ID); err != nil {
-			return shortID(created.ID), fmt.Errorf("the container was created but would not start: %w", err)
-		}
-	}
-	return shortID(created.ID), nil
+	return created.ID, nil
 }
 
-// buildCreate turns the UI request into the Engine API create body.
-func buildCreate(req CreateRequest, image string) (*createBody, error) {
-	b := &createBody{
-		Image:  image,
-		Labels: map[string]string{ManagedLabel: "true"},
-	}
-	for k, v := range req.Labels {
-		if k != ManagedLabel {
-			b.Labels[k] = v
+// saveMeta stores the spec's setting names and descriptions under the
+// container's actual name (Docker picks one when none was given).
+func (m *Manager) saveMeta(ctx context.Context, id string, s Spec) {
+	name := s.Name
+	if name == "" {
+		if in, err := m.inspect(ctx, id); err == nil {
+			name = strings.TrimPrefix(in.Name, "/")
 		}
 	}
+	if name == "" || m.meta == nil {
+		return
+	}
+	if err := m.meta.SetContainerMeta(name, metaOf(s)); err != nil {
+		m.log.Warn("could not save container setting names", "name", name, "err", err)
+	}
+}
 
-	for _, e := range req.Env {
-		key := strings.TrimSpace(e.Key)
-		if key == "" {
-			continue
-		}
-		if strings.ContainsAny(key, "= \t\n") {
-			return nil, invalid("%q is not a valid environment variable name.", key)
-		}
-		b.Env = append(b.Env, key+"="+e.Value)
+// inspect fetches a container's full configuration, keeping numbers exact.
+func (m *Manager) inspect(ctx context.Context, id string) (*inspectContainer, error) {
+	raw, err := m.c.getRaw(ctx, "/containers/"+esc(id)+"/json")
+	if err != nil {
+		return nil, err
 	}
+	var in inspectContainer
+	if err := decodeRaw(raw, &in); err != nil {
+		return nil, err
+	}
+	return &in, nil
+}
 
-	ports := map[string]struct{}{}
-	bindings := map[string][]portBinding{}
-	for _, p := range req.Ports {
-		proto := strings.ToLower(p.Proto)
-		if proto != "tcp" && proto != "udp" {
-			proto = "tcp"
-		}
-		if p.Container < 1 || p.Container > 65535 || p.Host < 1 || p.Host > 65535 {
-			return nil, invalid("Port numbers must be between 1 and 65535.")
-		}
-		key := fmt.Sprintf("%d/%s", p.Container, proto)
-		ports[key] = struct{}{}
-		bindings[key] = append(bindings[key], portBinding{HostIP: "", HostPort: fmt.Sprintf("%d", p.Host)})
+// imageConfig returns an image's default Config, or an empty map when the
+// image is no longer present locally.
+func (m *Manager) imageConfig(ctx context.Context, ref string) map[string]any {
+	raw, err := m.c.getRaw(ctx, "/images/"+esc(ref)+"/json")
+	if err != nil {
+		return map[string]any{}
 	}
-	if len(ports) > 0 {
-		b.ExposedPorts = ports
-		b.HostConfig.PortBindings = bindings
+	var img struct {
+		Config map[string]any `json:"Config"`
 	}
+	if decodeRaw(raw, &img) != nil || img.Config == nil {
+		return map[string]any{}
+	}
+	return img.Config
+}
 
-	for _, v := range req.Volumes {
-		host := strings.TrimSpace(v.Host)
-		ctr := strings.TrimSpace(v.Container)
-		if host == "" && ctr == "" {
-			continue
-		}
-		if !path.IsAbs(host) {
-			return nil, invalid("Host path %q must be absolute (start with /).", host)
-		}
-		if !path.IsAbs(ctr) {
-			return nil, invalid("Container path %q must be absolute (start with /).", ctr)
-		}
-		if strings.ContainsAny(host+ctr, ":") {
-			return nil, invalid("Paths cannot contain a colon.")
-		}
-		bind := host + ":" + ctr
-		if v.ReadOnly {
-			bind += ":ro"
-		}
-		b.HostConfig.Binds = append(b.HostConfig.Binds, bind)
-	}
+// imagePresent reports whether an image reference exists locally.
+func (m *Manager) imagePresent(ctx context.Context, ref string) bool {
+	_, err := m.c.getRaw(ctx, "/images/"+esc(ref)+"/json")
+	return err == nil
+}
 
-	policy := req.RestartPolicy
-	switch policy {
-	case "", "no":
-		policy = "no"
-	case "always", "unless-stopped", "on-failure":
-	default:
-		return nil, invalid("Unknown restart policy %q.", policy)
+// getRaw performs a GET and returns the response body.
+func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
+	resp, err := c.do(ctx, "GET", path, nil, nil, "")
+	if err != nil {
+		return nil, err
 	}
-	// "no" must be sent as an empty name, not the string "no".
-	if policy != "no" {
-		b.HostConfig.RestartPolicy = restartPolicy{Name: policy}
-	}
-	return b, nil
+	defer drain(resp)
+	return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 }
 
 // Pull downloads an image, blocking until done. Progress lines are drained;
@@ -145,7 +131,10 @@ func (m *Manager) Pull(ctx context.Context, image string) error {
 	q := url.Values{"fromImage": {repo}, "tag": {tag}}
 	resp, err := m.c.do(ctx, "POST", "/images/create", q, nil, "")
 	if err != nil {
-		return pullError(err, image)
+		if NotFound(err) {
+			return invalid("Image %q was not found.", image)
+		}
+		return err
 	}
 	defer drain(resp)
 
@@ -159,13 +148,6 @@ func (m *Manager) Pull(ctx context.Context, image string) error {
 		}
 	}
 	return sc.Err()
-}
-
-func pullError(err error, image string) error {
-	if NotFound(err) {
-		return invalid("Image %q was not found.", image)
-	}
-	return err
 }
 
 // splitRef separates an image reference into a repository and a tag, defaulting
@@ -182,11 +164,4 @@ func splitRef(ref string) (repo, tag string) {
 		return ref[:colon], ref[colon+1:]
 	}
 	return ref, "latest"
-}
-
-// sortedEnv is a small helper used in tests to compare env slices stably.
-func sortedEnv(env []string) []string {
-	out := append([]string(nil), env...)
-	sort.Strings(out)
-	return out
 }

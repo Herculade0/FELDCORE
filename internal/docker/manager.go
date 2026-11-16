@@ -4,13 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Herculade0/feldcore/internal/store"
 )
 
 // ManagedLabel marks containers FELDCORE created, so the UI can tell them from
@@ -26,10 +30,22 @@ func invalid(format string, a ...any) error {
 	return &InputError{Msg: fmt.Sprintf(format, a...)}
 }
 
+// MetaStore keeps the names and descriptions of container settings, which
+// Docker itself has nowhere to store.
+type MetaStore interface {
+	ContainerMeta(name string) map[string]store.ConfigMeta
+	SetContainerMeta(name string, meta map[string]store.ConfigMeta) error
+	DeleteContainerMeta(name string) error
+}
+
 // Manager is the high-level Docker surface used by the API layer.
 type Manager struct {
-	c   *Client
-	log *slog.Logger
+	c    *Client
+	meta MetaStore // may be nil
+	log  *slog.Logger
+
+	// editMu makes container replacement one-at-a-time.
+	editMu sync.Mutex
 
 	// statusCache avoids hammering the socket (and apt/dpkg checks) on every
 	// poll; status rarely changes second to second.
@@ -40,8 +56,39 @@ type Manager struct {
 }
 
 // NewManager returns a Manager talking to the daemon at socket.
-func NewManager(socket string, log *slog.Logger) *Manager {
-	return &Manager{c: NewClient(socket), log: log, cacheFor: 3 * time.Second}
+func NewManager(socket string, meta MetaStore, log *slog.Logger) *Manager {
+	return &Manager{c: NewClient(socket), meta: meta, log: log, cacheFor: 3 * time.Second}
+}
+
+func (m *Manager) metaFor(name string) map[string]store.ConfigMeta {
+	if m.meta == nil {
+		return nil
+	}
+	return m.meta.ContainerMeta(name)
+}
+
+// Options returns the choices the container dialog offers.
+func (m *Manager) Options(ctx context.Context) Options {
+	gpus := DetectGPUs()
+	opts := Options{
+		Networks:     []string{"bridge", "host", "none"},
+		GPUs:         gpus,
+		GPUAvailable: gpuAvailable(gpus),
+	}
+	var nets []struct {
+		Name string `json:"Name"`
+	}
+	if err := m.c.getJSON(ctx, "/networks", nil, &nets); err == nil {
+		var custom []string
+		for _, n := range nets {
+			if isCustomNetwork(n.Name) {
+				custom = append(custom, n.Name)
+			}
+		}
+		sort.Strings(custom)
+		opts.Networks = append(opts.Networks, custom...)
+	}
+	return opts
 }
 
 // Status reports whether Docker is installed, running and reachable.
@@ -98,29 +145,33 @@ func (m *Manager) Containers(ctx context.Context) ([]Container, error) {
 	}
 
 	out := make([]Container, len(raw))
-	running := 0
+	host := hostIP()
 	for i, rc := range raw {
-		out[i] = toContainer(rc)
-		if out[i].State == "running" {
-			running++
-		}
+		out[i] = toContainer(rc, host)
 	}
 
-	// Fetch stats concurrently for running containers; a slow or failing
-	// stat must not sink the whole list.
-	if running > 0 {
-		statCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	// Fill in the per-container details concurrently; a slow or failing
+	// lookup must not sink the whole list.
+	//   running: live CPU and memory.
+	//   stopped: the ports it is set up to publish. Docker only reports ports
+	//            for running containers, but a stopped one still lays claim
+	//            to its ports, which matters when choosing one for another.
+	if len(out) > 0 {
+		detailCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 		defer cancel()
 		var wg sync.WaitGroup
 		for i := range out {
-			if out[i].State != "running" {
-				continue
-			}
 			wg.Add(1)
 			go func(c *Container) {
 				defer wg.Done()
-				if st, err := m.stat(statCtx, c.ID); err == nil {
-					c.CPUPct, c.MemUsed, c.MemLimit = st.cpu, st.mem, st.memLimit
+				if c.State == "running" {
+					if st, err := m.stat(detailCtx, c.ID); err == nil {
+						c.CPUPct, c.MemUsed, c.MemLimit = st.cpu, st.mem, st.memLimit
+					}
+					return
+				}
+				if in, err := m.inspect(detailCtx, c.ID); err == nil {
+					c.Ports = configuredPorts(in)
 				}
 			}(&out[i])
 		}
@@ -131,7 +182,34 @@ func (m *Manager) Containers(ctx context.Context) ([]Container, error) {
 	return out, nil
 }
 
-func toContainer(rc apiContainer) Container {
+// configuredPorts returns the host ports a container is set up to publish,
+// whether or not it is running.
+func configuredPorts(in *inspectContainer) []Port {
+	ports := []Port{}
+	for key, v := range mapOf(in.HostConfig["PortBindings"]) {
+		portStr, proto, _ := strings.Cut(key, "/")
+		cport, err := strconv.Atoi(portStr)
+		if err != nil {
+			continue
+		}
+		if proto == "" {
+			proto = "tcp"
+		}
+		list, _ := v.([]any)
+		for _, b := range list {
+			hport, _ := strconv.Atoi(strOf(mapOf(b)["HostPort"]))
+			if hport > 0 {
+				ports = append(ports, Port{Host: hport, Container: cport, Proto: proto})
+			}
+		}
+	}
+	sort.Slice(ports, func(i, j int) bool { return ports[i].Host < ports[j].Host })
+	return ports
+}
+
+// toContainer converts a list entry for the UI. hostAddr is this server's
+// address, shown for containers that answer on it (bridge and host modes).
+func toContainer(rc apiContainer, hostAddr string) Container {
 	c := Container{
 		ID:      shortID(rc.ID),
 		Name:    cleanName(rc.Names),
@@ -140,7 +218,43 @@ func toContainer(rc apiContainer) Container {
 		Status:  rc.Status,
 		Created: rc.Created,
 		Managed: rc.Labels[ManagedLabel] == "true",
+		Compose: rc.Labels[composeLabel] != "",
+		GPU:     rc.Labels[GPULabel] == "true",
+		IPs:     []string{},
 	}
+
+	// Where the container can be reached. On the default bridge and in host
+	// mode that is the server's own address; on a user-defined network the
+	// container has an address of its own.
+	mode := rc.HostConfig.NetworkMode
+	if mode == "" || mode == "default" {
+		mode = "bridge"
+	}
+	var names []string
+	for name := range rc.NetworkSettings.Networks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	switch {
+	case mode == "host" || mode == "bridge":
+		c.Network = mode
+		if hostAddr != "" {
+			c.IPs = []string{hostAddr}
+		}
+	case mode == "none" || strings.HasPrefix(mode, "container:"):
+		c.Network = mode
+	default:
+		c.Network = strings.Join(names, ", ")
+		if c.Network == "" {
+			c.Network = mode
+		}
+		for _, name := range names {
+			if ip := rc.NetworkSettings.Networks[name].IPAddress; ip != "" {
+				c.IPs = append(c.IPs, ip)
+			}
+		}
+	}
+
 	seen := map[string]bool{}
 	for _, p := range rc.Ports {
 		if p.PublicPort == 0 {
@@ -179,11 +293,56 @@ func (m *Manager) Restart(ctx context.Context, id string) error {
 
 // Remove deletes a container. It must be stopped unless force is set.
 func (m *Manager) Remove(ctx context.Context, id string, force bool) error {
+	// Look the name up first so its stored setting names can be forgotten.
+	name := ""
+	if in, err := m.inspect(ctx, id); err == nil {
+		name = strings.TrimPrefix(in.Name, "/")
+	}
 	q := url.Values{}
 	if force {
 		q.Set("force", "1")
 	}
-	return m.c.do2(ctx, "DELETE", "/containers/"+esc(id), q)
+	if err := m.c.do2(ctx, "DELETE", "/containers/"+esc(id), q); err != nil {
+		return err
+	}
+	if name != "" && m.meta != nil {
+		_ = m.meta.DeleteContainerMeta(name)
+	}
+	return nil
+}
+
+// hostIP returns this server's primary LAN address, or "" if none is found.
+func hostIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		skip := false
+		for _, p := range []string{"docker", "veth", "br-", "virbr"} {
+			if strings.HasPrefix(ifc.Name, p) {
+				skip = true
+			}
+		}
+		if skip {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok {
+				if ip4 := ipnet.IP.To4(); ip4 != nil && ip4.IsPrivate() {
+					return ip4.String()
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // Images lists local images that have a tag, largest first.

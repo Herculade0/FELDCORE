@@ -5,6 +5,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  Pencil,
   Play,
   Plus,
   RotateCw,
@@ -17,7 +18,8 @@ import { api, errorMessage } from "../../lib/api";
 import { ago, bytes } from "../../lib/format";
 import { Card, IconBadge } from "../ui";
 import { Alert, Button, IconButton, Modal } from "../form";
-import CreateDialog from "./CreateDialog";
+import Allocations from "./Allocations";
+import ContainerDialog from "./ContainerDialog";
 import LogsDialog from "./LogsDialog";
 import { stateStyle, type Container, type DockerStatus } from "./types";
 
@@ -27,7 +29,9 @@ export default function DockerPage() {
   const [host, setHost] = useState("localhost");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  // The container open in the dialog, "new" to create one, or null when closed.
+  const [editing, setEditing] = useState<Container | "new" | null>(null);
+  const setCreating = (on: boolean) => setEditing(on ? "new" : null);
   const [logsFor, setLogsFor] = useState<Container | null>(null);
   const [removing, setRemoving] = useState<Container | null>(null);
 
@@ -116,6 +120,7 @@ export default function DockerPage() {
                   onAction={changed}
                   onError={setError}
                   onLogs={() => setLogsFor(c)}
+                  onEdit={() => setEditing(c)}
                   onRemove={() => setRemoving(c)}
                 />
               ))}
@@ -134,15 +139,18 @@ export default function DockerPage() {
               </Button>
             </Card>
           )}
+
+          {containers.length > 0 && <Allocations containers={containers} />}
         </>
       )}
 
-      {creating && (
-        <CreateDialog
-          onClose={() => setCreating(false)}
-          onCreated={(name) => {
-            setCreating(false);
-            changed(`${name} was created.`);
+      {editing && (
+        <ContainerDialog
+          container={editing === "new" ? undefined : editing}
+          onClose={() => setEditing(null)}
+          onSaved={(name, edited) => {
+            setEditing(null);
+            changed(edited ? `${name} was updated.` : `${name} was created.`);
           }}
         />
       )}
@@ -168,6 +176,7 @@ function ContainerRow({
   onAction,
   onError,
   onLogs,
+  onEdit,
   onRemove,
 }: {
   c: Container;
@@ -175,6 +184,7 @@ function ContainerRow({
   onAction: (msg: string) => void;
   onError: (msg: string) => void;
   onLogs: () => void;
+  onEdit: () => void;
   onRemove: () => void;
 }) {
   const [busy, setBusy] = useState("");
@@ -206,6 +216,11 @@ function ContainerRow({
             {c.managed && (
               <span className="rounded-full bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
                 FELDCORE
+              </span>
+            )}
+            {c.gpu && (
+              <span className="rounded-full bg-ok/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ok">
+                GPU
               </span>
             )}
           </div>
@@ -246,6 +261,9 @@ function ContainerRow({
         )}
         <IconButton label="View logs" onClick={onLogs}>
           <FileText size={16} />
+        </IconButton>
+        <IconButton label="Edit" onClick={onEdit} disabled={!!busy}>
+          <Pencil size={16} />
         </IconButton>
         {running ? (
           <>

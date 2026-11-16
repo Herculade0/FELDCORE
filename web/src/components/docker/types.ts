@@ -15,7 +15,11 @@ export interface Container {
   created: number;
   ports: Port[];
   managed: boolean;
+  compose: boolean;
+  gpu: boolean;
   webUrl: string;
+  network: string;
+  ips: string[];
   cpuPct: number;
   memUsed: number;
   memLimit: number;
@@ -38,31 +42,93 @@ export interface DockerStatus {
   message?: string;
 }
 
-export interface PortMapping {
-  host: number;
-  container: number;
-  proto: string;
-}
+export type ConfigType = "path" | "port" | "variable" | "label" | "device";
 
-export interface VolumeMapping {
+/** One container setting. Which fields matter depends on `type`. */
+export interface ConfigItem {
+  type: ConfigType;
+  name: string;
+  description: string;
   host: string;
   container: string;
-  readOnly: boolean;
-}
-
-export interface EnvVar {
+  mode: string;
+  hostPort: number;
+  containerPort: number;
+  proto: string;
+  hostIp: string;
   key: string;
   value: string;
 }
 
-export interface CreateRequest {
+export interface Spec {
   name: string;
   image: string;
-  ports: PortMapping[];
-  volumes: VolumeMapping[];
-  env: EnvVar[];
+  network: string;
   restartPolicy: string;
+  gpu: boolean;
+  configs: ConfigItem[];
   autostart: boolean;
+}
+
+export interface SpecInfo {
+  spec: Spec;
+  editable: boolean;
+  reason?: string;
+  running: boolean;
+}
+
+export interface Gpu {
+  vendor: string;
+  name: string;
+  supported: boolean;
+  note?: string;
+}
+
+export interface Options {
+  networks: string[];
+  gpus: Gpu[];
+  gpuAvailable: boolean;
+}
+
+export const CONFIG_TYPES: { key: ConfigType; label: string }[] = [
+  { key: "path", label: "Path" },
+  { key: "port", label: "Port" },
+  { key: "variable", label: "Variable" },
+  { key: "label", label: "Label" },
+  { key: "device", label: "Device" },
+];
+
+export function blankConfig(type: ConfigType): ConfigItem {
+  return {
+    type,
+    name: "",
+    description: "",
+    host: "",
+    container: "",
+    mode: type === "device" ? "rwm" : "rw",
+    hostPort: 0,
+    containerPort: 0,
+    proto: "tcp",
+    hostIp: "",
+    key: "",
+    value: "",
+  };
+}
+
+/** The one-line "what this setting does" shown in the settings list. */
+export function configSummary(c: ConfigItem): { left: string; right: string } {
+  switch (c.type) {
+    case "path":
+    case "device":
+      return { left: c.host, right: c.container };
+    case "port":
+      return {
+        left: c.hostPort ? String(c.hostPort) : "auto",
+        right: `${c.containerPort}/${c.proto}`,
+      };
+    default:
+      return { left: c.key, right: c.value };
+  }
 }
 
 // How each container state should read and colour in the UI.

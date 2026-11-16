@@ -19,16 +19,24 @@ type apiPort struct {
 
 // apiContainer is one entry from GET /containers/json.
 type apiContainer struct {
-	ID      string            `json:"Id"`
-	Names   []string          `json:"Names"`
-	Image   string            `json:"Image"`
-	ImageID string            `json:"ImageID"`
-	Command string            `json:"Command"`
-	Created int64             `json:"Created"`
-	State   string            `json:"State"`
-	Status  string            `json:"Status"`
-	Ports   []apiPort         `json:"Ports"`
-	Labels  map[string]string `json:"Labels"`
+	ID         string            `json:"Id"`
+	Names      []string          `json:"Names"`
+	Image      string            `json:"Image"`
+	ImageID    string            `json:"ImageID"`
+	Command    string            `json:"Command"`
+	Created    int64             `json:"Created"`
+	State      string            `json:"State"`
+	Status     string            `json:"Status"`
+	Ports      []apiPort         `json:"Ports"`
+	Labels     map[string]string `json:"Labels"`
+	HostConfig struct {
+		NetworkMode string `json:"NetworkMode"`
+	} `json:"HostConfig"`
+	NetworkSettings struct {
+		Networks map[string]struct {
+			IPAddress string `json:"IPAddress"`
+		} `json:"Networks"`
+	} `json:"NetworkSettings"`
 }
 
 // apiImage is one entry from GET /images/json.
@@ -38,6 +46,23 @@ type apiImage struct {
 	Size       int64    `json:"Size"`
 	Created    int64    `json:"Created"`
 	Containers int64    `json:"Containers"`
+}
+
+// inspectContainer is GET /containers/{id}/json. Config and HostConfig are
+// kept as raw maps so that recreating a container preserves every setting,
+// including the many FELDCORE does not model.
+type inspectContainer struct {
+	ID    string `json:"Id"`
+	Name  string `json:"Name"`
+	Image string `json:"Image"` // image id
+	State struct {
+		Running bool `json:"Running"`
+	} `json:"State"`
+	Config          map[string]any `json:"Config"`
+	HostConfig      map[string]any `json:"HostConfig"`
+	NetworkSettings struct {
+		Networks map[string]map[string]any `json:"Networks"`
+	} `json:"NetworkSettings"`
 }
 
 // --- View types: what the API hands the front-end. ---
@@ -51,18 +76,22 @@ type Port struct {
 
 // Container is a container in a shape the UI can render directly.
 type Container struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Image    string  `json:"image"`
-	State    string  `json:"state"`  // running, exited, paused, created, ...
-	Status   string  `json:"status"` // human text, e.g. "Up 3 hours"
-	Created  int64   `json:"created"`
-	Ports    []Port  `json:"ports"`
-	Managed  bool    `json:"managed"` // created by FELDCORE
-	WebURL   string  `json:"webUrl"`  // best guess at a browser URL, if any
-	CPUPct   float64 `json:"cpuPct"`  // live, 0 when not running
-	MemUsed  int64   `json:"memUsed"`
-	MemLimit int64   `json:"memLimit"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Image    string   `json:"image"`
+	State    string   `json:"state"`  // running, exited, paused, created, ...
+	Status   string   `json:"status"` // human text, e.g. "Up 3 hours"
+	Created  int64    `json:"created"`
+	Ports    []Port   `json:"ports"`
+	Managed  bool     `json:"managed"` // created by FELDCORE
+	Compose  bool     `json:"compose"` // owned by Docker Compose
+	GPU      bool     `json:"gpu"`     // has GPU access granted by FELDCORE
+	WebURL   string   `json:"webUrl"`  // best guess at a browser URL, if any
+	Network  string   `json:"network"` // network name(s)
+	IPs      []string `json:"ips"`     // address(es) the container answers on
+	CPUPct   float64  `json:"cpuPct"`  // live, 0 when not running
+	MemUsed  int64    `json:"memUsed"`
+	MemLimit int64    `json:"memLimit"`
 }
 
 // Image is an available local image.
@@ -84,61 +113,86 @@ type Status struct {
 	Message    string `json:"message,omitempty"` // why it is not usable, if so
 }
 
-// CreateRequest is the UI's request to run a new container.
-type CreateRequest struct {
-	Name          string            `json:"name"`
-	Image         string            `json:"image"`
-	Ports         []PortMapping     `json:"ports"`
-	Volumes       []VolumeMapping   `json:"volumes"`
-	Env           []EnvVar          `json:"env"`
-	RestartPolicy string            `json:"restartPolicy"` // no, unless-stopped, always, on-failure
-	Autostart     bool              `json:"autostart"`     // start immediately after create
-	Labels        map[string]string `json:"labels,omitempty"`
-}
+// Config types, mirroring Unraid's "Add Configuration" dialog.
+const (
+	TypePath     = "path"
+	TypePort     = "port"
+	TypeVariable = "variable"
+	TypeLabel    = "label"
+	TypeDevice   = "device"
+)
 
-// PortMapping publishes a container port on the host.
-type PortMapping struct {
-	Host      int    `json:"host"`
-	Container int    `json:"container"`
-	Proto     string `json:"proto"` // tcp or udp
-}
+// Config is one container setting. Which fields matter depends on Type:
+//
+//	path      Host, Container, Mode ("rw" / "ro")
+//	port      HostPort, ContainerPort, Proto, HostIP
+//	variable  Key, Value
+//	label     Key, Value
+//	device    Host, Container, Mode (cgroup permissions, default "rwm")
+type Config struct {
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 
-// VolumeMapping bind-mounts a host path into the container.
-type VolumeMapping struct {
 	Host      string `json:"host"`
 	Container string `json:"container"`
-	ReadOnly  bool   `json:"readOnly"`
-}
+	Mode      string `json:"mode"`
 
-// EnvVar is one environment variable.
-type EnvVar struct {
+	HostPort      int    `json:"hostPort"`
+	ContainerPort int    `json:"containerPort"`
+	Proto         string `json:"proto"`
+	HostIP        string `json:"hostIp"`
+
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
+// Spec is the editable definition of a container: what the create/edit dialog
+// shows and submits.
+type Spec struct {
+	Name          string   `json:"name"`
+	Image         string   `json:"image"`
+	Network       string   `json:"network"`       // bridge, host, none or a named network
+	RestartPolicy string   `json:"restartPolicy"` // no, unless-stopped, always, on-failure
+	GPU           bool     `json:"gpu"`
+	Configs       []Config `json:"configs"`
+	Autostart     bool     `json:"autostart"` // start after creating
+}
+
+// SpecInfo is a container's current Spec plus whether it may be edited.
+type SpecInfo struct {
+	Spec     Spec   `json:"spec"`
+	Editable bool   `json:"editable"`
+	Reason   string `json:"reason,omitempty"` // why not, when Editable is false
+	Running  bool   `json:"running"`
+}
+
+// GPU is a graphics device found on the host.
+type GPU struct {
+	Vendor    string `json:"vendor"` // amd, intel, nvidia or generic
+	Name      string `json:"name"`
+	Supported bool   `json:"supported"`      // FELDCORE can share it with containers
+	Note      string `json:"note,omitempty"` // why not, or what is needed
+}
+
+// Options are the choices the container dialog offers.
+type Options struct {
+	Networks     []string `json:"networks"`
+	GPUs         []GPU    `json:"gpus"`
+	GPUAvailable bool     `json:"gpuAvailable"`
+}
+
 // --- Wire types for creating a container (POST /containers/create). ---
-
-type createBody struct {
-	Image        string              `json:"Image"`
-	Env          []string            `json:"Env,omitempty"`
-	Labels       map[string]string   `json:"Labels,omitempty"`
-	ExposedPorts map[string]struct{} `json:"ExposedPorts,omitempty"`
-	HostConfig   createHostConfig    `json:"HostConfig"`
-}
-
-type createHostConfig struct {
-	Binds         []string                 `json:"Binds,omitempty"`
-	PortBindings  map[string][]portBinding `json:"PortBindings,omitempty"`
-	RestartPolicy restartPolicy            `json:"RestartPolicy"`
-}
 
 type portBinding struct {
 	HostIP   string `json:"HostIp"`
 	HostPort string `json:"HostPort"`
 }
 
-type restartPolicy struct {
-	Name string `json:"Name"`
+type deviceMapping struct {
+	PathOnHost        string `json:"PathOnHost"`
+	PathInContainer   string `json:"PathInContainer"`
+	CgroupPermissions string `json:"CgroupPermissions"`
 }
 
 type createdResponse struct {

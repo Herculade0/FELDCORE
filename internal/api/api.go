@@ -84,6 +84,7 @@ func (s *Server) Router() http.Handler {
 			// Installing Docker and pulling images can take minutes.
 			r.Post("/docker/install", s.handleDockerInstall)
 			r.Post("/docker/containers", s.handleDockerCreate)
+			r.Put("/docker/containers/{id}", s.handleDockerUpdate)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -100,8 +101,12 @@ func (s *Server) Router() http.Handler {
 				r.Put("/shares/users/{name}/password", s.handleShareUserPassword)
 				r.Delete("/shares/users/{name}", s.handleShareUserDelete)
 
+				r.Get("/fs/suggest", s.handleFSSuggest)
+
 				r.Get("/docker/status", s.handleDockerStatus)
+				r.Get("/docker/options", s.handleDockerOptions)
 				r.Get("/docker/containers", s.handleDockerContainers)
+				r.Get("/docker/containers/{id}/spec", s.handleDockerSpec)
 				r.Get("/docker/images", s.handleDockerImages)
 				r.Get("/docker/containers/{id}/logs", s.handleDockerLogs)
 				r.Post("/docker/containers/{id}/start", s.handleDockerStart)

@@ -139,6 +139,25 @@ type Overview struct {
 
 func (m *Manager) dir(name string) string { return filepath.Join(m.p.SharesRoot, name) }
 
+// Folder is a share's name and where it lives on disk.
+type Folder struct {
+	Name string
+	Path string
+}
+
+// Folders lists every share's folder, sorted by name.
+func (m *Manager) Folders() []Folder {
+	shares := m.st.Snapshot().Shares
+	out := make([]Folder, 0, len(shares))
+	for _, sh := range shares {
+		out = append(out, Folder{Name: sh.Name, Path: m.dir(sh.Name)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out
+}
+
 // Overview returns all shares with their current status.
 func (m *Manager) Overview(ctx context.Context) Overview {
 	st := m.st.Snapshot()
