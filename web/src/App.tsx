@@ -8,13 +8,13 @@ import { LogoMark, Wordmark } from "./components/Logo";
 import { IconButton } from "./components/form";
 import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import AuditPage from "./components/AuditPage";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
-import AuditPage from "./components/AuditPage";
-import ComingSoon from "./components/ComingSoon";
 import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
 import AppsPage from "./components/apps/AppsPage";
+import VMsPage from "./components/vms/VMsPage";
 import Wizard from "./components/setup/Wizard";
 import { TerminalProvider } from "./components/Terminal";
 
@@ -119,13 +119,13 @@ function Shell() {
             <DockerPage onOpenApps={() => setActive("apps")} />
           ) : active === "apps" ? (
             <AppsPage />
+          ) : active === "vms" ? (
+            <VMsPage />
           ) : active === "audit" ? (
             <AuditPage />
           ) : active === "settings" ? (
             <SettingsPage onOpenAudit={() => setActive("audit")} />
-          ) : (
-            <ComingSoon nav={active} />
-          )}
+          ) : null}
         </ErrorBoundary>
       </main>
 

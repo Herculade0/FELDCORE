@@ -218,7 +218,7 @@ export function Modal({
   onSubmit?: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
 }) {
   const id = useId();
   // Keep the latest onClose without re-registering, which would reorder the stack.
@@ -265,7 +265,7 @@ export function Modal({
   // min-w-0 lets the panel shrink inside the viewport. overflow-hidden keeps a
   // long unbreakable string from opening a horizontal scrollbar; children wrap.
   const panel = `panel relative flex max-h-[92vh] w-full min-w-0 max-w-full flex-col overflow-hidden rounded-t-3xl sm:rounded-3xl ${
-    size === "lg" ? "sm:max-w-2xl" : "sm:max-w-lg"
+    size === "xl" ? "sm:max-w-5xl" : size === "lg" ? "sm:max-w-2xl" : "sm:max-w-lg"
   }`;
 
   return (

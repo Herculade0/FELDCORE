@@ -171,7 +171,10 @@ func scopeFor(method, path string) string {
 	if p == "" {
 		p = "/"
 	}
-	if p == "/terminal" || strings.HasSuffix(p, "/terminal") {
+	// The host terminal, a container console, and a VM's VNC console are a
+	// shell. Agent tokens cannot open them; the handlers also require the
+	// administrator's session cookie.
+	if p == "/terminal" || strings.HasSuffix(p, "/terminal") || strings.HasSuffix(p, "/console") {
 		return "shell"
 	}
 	if method == http.MethodGet || method == http.MethodHead {

@@ -84,7 +84,3 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		"maxEvents":     auth.MaxAuditEvents,
 	})
 }
-
-func (s *Server) handleVMs(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.vmProbe.List(r.Context()))
-}

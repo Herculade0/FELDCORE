@@ -87,6 +87,15 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 - [ ] The queue records who asked, which token, the exact action, and the decision in the audit log
 - [ ] A token still cannot open a shell on its own. If a shell is ever offered to an agent, that request waits for approval like the other destructive actions
 
+## M2e — Internal Affairs
+A locked cabinet of Markdown case files. Agents file a report when they change something, hit an error, or write up what they found. Design only: [INTERNAL-AFFAIRS.md](INTERNAL-AFFAIRS.md).
+- [ ] Locked share of Obsidian-compatible Markdown under the shares root. Agents append; they cannot rewrite or delete
+- [ ] Token scopes `ia:file` and `ia:read`, not included in `admin`
+- [ ] MCP and REST: file a report, append, search, get, list recent. Scrub secrets before saving. Also file an incident stub when a token call errors
+- [ ] Internal Affairs page: timeline, filters, report viewer, and a note the administrator can file
+- [ ] Keep every report until Proton Drive backups exist. Pruning after that requires a backed-up copy; the age window is not chosen yet
+- Later: SMB reading room, withdrawing a report, git history, Proton Drive backup (the cabinet is in the first backup set)
+
 ## M3 — Settings
 - [ ] Users & authentication management
 - [ ] Network overview / hostname
@@ -94,10 +103,12 @@ Write tools, behind an approval queue. Phase 1 tokens and the read-only MCP serv
 - [ ] Appearance (theme)
 - [ ] Self-update
 
-## M4 — VMs (later)
-- [ ] libvirt/KVM domain list + lifecycle
-- [ ] Create VM wizard (ISO, disk, CPU, RAM, virtio)
-- [ ] Browser console (VNC/SPICE)
+## M4 — VMs
+- [x] libvirt/KVM domain list + lifecycle (start, stop, pause, force stop, autostart)
+- [x] Create / edit form (CPU pinning, RAM, i440fx/Q35, SeaBIOS/OVMF, TPM, disks, ISO, VirtIO ISO, passthrough, networking)
+- [x] Browser console (noVNC over an authenticated WebSocket)
+- [x] Snapshots, optional cloud-init, virtio-fs, VirtIO driver ISO download
+- [ ] One-click OS templates (a later catalogue, not this daemon)
 
 ## FELDCORE-STORE
 
