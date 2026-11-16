@@ -16,14 +16,14 @@ import { api } from "../lib/api";
 import { HISTORY_SIZE, useStatsStream } from "../lib/useStream";
 import { bytes, bytesPerSec, duration, greeting, shortCpu } from "../lib/format";
 import { Bar, Card, CardTitle, IconBadge, StatusPill } from "./ui";
-import { TerminalButton, TerminalModal } from "./Terminal";
+import { TerminalButton, useTerminal } from "./Terminal";
 import { Gauge } from "./Gauge";
 import { Sparkline } from "./Sparkline";
 
 export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => void }) {
   const { stats, history, status } = useStatsStream();
   const [info, setInfo] = useState<Info | null>(null);
-  const [terminal, setTerminal] = useState(false);
+  const { openHost } = useTerminal();
 
   useEffect(() => {
     api<Info>("/system/info")
@@ -63,11 +63,10 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
         </div>
         <div className="flex items-center gap-3">
           <Clock />
-          <TerminalButton label="Host terminal" onClick={() => setTerminal(true)} />
+          <TerminalButton label="Host terminal" onClick={openHost} />
           <StatusPill status={status} />
         </div>
       </header>
-      {terminal && <TerminalModal title="Host terminal" path="/terminal" onClose={() => setTerminal(false)} />}
 
       {/* Vital signs */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
