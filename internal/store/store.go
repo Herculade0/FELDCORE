@@ -147,6 +147,9 @@ type State struct {
 	VPN    VPN    `json:"vpn,omitempty"`
 	Backup Backup `json:"backup,omitempty"`
 	Notify Notify `json:"notify,omitempty"`
+	// Health holds the marks for the health page. Readings themselves are
+	// not stored here; they live in a ring file beside state.json.
+	Health HealthConfig `json:"health,omitempty"`
 }
 
 // PublicRoute publishes one container through the Cloudflare Tunnel.
@@ -343,6 +346,74 @@ type Notify struct {
 	OnUpdate        bool          `json:"onUpdate"`
 	NotifiedVersion string        `json:"notifiedVersion,omitempty"`
 	Events          []NotifyEvent `json:"events,omitempty"`
+	// Channels, routes, and quiet hours are the rest of the notification
+	// system. Webhook URLs and tokens are not stored here.
+	Channels      []NotifyChannel `json:"channels,omitempty"`
+	Routes        []NotifyRoute   `json:"routes,omitempty"`
+	Quiet         NotifyQuiet     `json:"quiet,omitempty"`
+	DedupeSeconds int             `json:"dedupeSeconds,omitempty"`
+	RatePerHour   int             `json:"ratePerHour,omitempty"`
+	InAppSet      bool            `json:"inAppSet,omitempty"`
+	InAppEnabled  bool            `json:"inAppEnabled,omitempty"`
+}
+
+// NotifyChannel is one delivery target other than the SMTP settings above.
+// Kind is ntfy, gotify, discord, slack, or webhook. A Discord or Slack
+// address is a secret and is not kept in this struct.
+type NotifyChannel struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Enabled   bool   `json:"enabled"`
+	URL       string `json:"url,omitempty"`
+	Topic     string `json:"topic,omitempty"`
+	HasSecret bool   `json:"hasSecret"`
+}
+
+// NotifyRoute sends matching events to the named channels. Event is an exact
+// name, "*" , or a prefix such as "backup.*".
+type NotifyRoute struct {
+	ID          string   `json:"id"`
+	Event       string   `json:"event"`
+	MinSeverity string   `json:"minSeverity"`
+	Channels    []string `json:"channels"`
+}
+
+// NotifyQuiet is a daily window during which info and warning are held.
+// Critical still sends when AllowCritical is set.
+type NotifyQuiet struct {
+	Enabled       bool   `json:"enabled"`
+	Start         string `json:"start,omitempty"`
+	End           string `json:"end,omitempty"`
+	AllowCritical bool   `json:"allowCritical"`
+}
+
+// HealthConfig is the administrator's health marks. Zero means the default.
+type HealthConfig struct {
+	Thresholds HealthThresholds `json:"thresholds,omitempty"`
+}
+
+// HealthThresholds is the stored form of those marks.
+type HealthThresholds struct {
+	CPUWarn          float64 `json:"cpuWarn,omitempty"`
+	CPUCrit          float64 `json:"cpuCrit,omitempty"`
+	MemWarn          float64 `json:"memWarn,omitempty"`
+	MemCrit          float64 `json:"memCrit,omitempty"`
+	LoadWarn         float64 `json:"loadWarn,omitempty"`
+	LoadCrit         float64 `json:"loadCrit,omitempty"`
+	DiskWarn         float64 `json:"diskWarn,omitempty"`
+	DiskCrit         float64 `json:"diskCrit,omitempty"`
+	CPUTempWarn      float64 `json:"cpuTempWarn,omitempty"`
+	CPUTempCrit      float64 `json:"cpuTempCrit,omitempty"`
+	DiskTempWarn     float64 `json:"diskTempWarn,omitempty"`
+	DiskTempCrit     float64 `json:"diskTempCrit,omitempty"`
+	GPUTempWarn      float64 `json:"gpuTempWarn,omitempty"`
+	GPUTempCrit      float64 `json:"gpuTempCrit,omitempty"`
+	CertWarnDays     int     `json:"certWarnDays,omitempty"`
+	CertCritDays     int     `json:"certCritDays,omitempty"`
+	RestartWarn      int     `json:"restartWarn,omitempty"`
+	RestartCrit      int     `json:"restartCrit,omitempty"`
+	RestartWindowMin int     `json:"restartWindowMin,omitempty"`
 }
 
 // NotifyEvent is one notification FELDCORE tried to send.
@@ -443,6 +514,14 @@ func (s State) clone() State {
 		c.VPN.Tunnels[i] = t
 	}
 	c.Notify.Events = append([]NotifyEvent(nil), s.Notify.Events...)
+	c.Notify.Channels = append([]NotifyChannel(nil), s.Notify.Channels...)
+	if s.Notify.Routes != nil {
+		c.Notify.Routes = make([]NotifyRoute, len(s.Notify.Routes))
+		for i, r := range s.Notify.Routes {
+			r.Channels = append([]string(nil), r.Channels...)
+			c.Notify.Routes[i] = r
+		}
+	}
 	return c
 }
 

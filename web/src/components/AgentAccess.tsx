@@ -25,7 +25,7 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
   {
     key: "read",
     label: "Read",
-    hint: "System, shares, the App Store, containers and VMs. The MCP server needs this.",
+    hint: "System, shares, the App Store, containers, VMs, health, and the notification inbox. The MCP server needs this.",
   },
   {
     key: "containers",
