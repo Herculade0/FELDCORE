@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Info as InfoIcon, Monitor, Moon, Palette, Sun, type LucideIcon } from "lucide-react";
+import AppdataSetting from "./apps/AppdataSetting";
 import type { Info } from "../types";
 import { VERSION } from "../version";
 import { api } from "../lib/api";
@@ -89,6 +90,8 @@ export default function SettingsPage() {
           </fieldset>
         </div>
       </Card>
+
+      <AppdataSetting />
 
       <Card>
         <CardTitle icon={InfoIcon} title="About" />

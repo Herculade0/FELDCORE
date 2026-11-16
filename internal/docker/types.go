@@ -145,6 +145,12 @@ type Config struct {
 
 	Key   string `json:"key"`
 	Value string `json:"value"`
+
+	// Display, Required and Mask come from an Unraid template. Display is
+	// "always", "advanced" or "hidden". Mask keeps a value out of the UI.
+	Display  string `json:"display,omitempty"`
+	Required bool   `json:"required,omitempty"`
+	Mask     bool   `json:"mask,omitempty"`
 }
 
 // Spec is the editable definition of a container: what the create/edit dialog
@@ -157,6 +163,12 @@ type Spec struct {
 	GPU           bool     `json:"gpu"`
 	Configs       []Config `json:"configs"`
 	Autostart     bool     `json:"autostart"` // start after creating
+
+	// Filled in from an Unraid template. Empty for a container created by hand.
+	WebUI       string `json:"webUi,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	ExtraParams string `json:"extraParams,omitempty"`
+	Privileged  bool   `json:"privileged,omitempty"`
 }
 
 // SpecInfo is a container's current Spec plus whether it may be edited.

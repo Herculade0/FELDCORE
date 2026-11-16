@@ -10,6 +10,7 @@ import {
   Plus,
   RotateCw,
   Square,
+  Store,
   Trash2,
   X,
 } from "lucide-react";
@@ -23,7 +24,7 @@ import ContainerDialog from "./ContainerDialog";
 import LogsDialog from "./LogsDialog";
 import { stateStyle, type Container, type DockerStatus } from "./types";
 
-export default function DockerPage() {
+export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
   const [containers, setContainers] = useState<Container[]>([]);
   const [host, setHost] = useState("localhost");
@@ -76,10 +77,18 @@ export default function DockerPage() {
           </p>
         </div>
         {status?.running && (
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus size={16} strokeWidth={2.75} />
-            Run container
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {onOpenApps && (
+              <Button onClick={onOpenApps}>
+                <Store size={16} strokeWidth={2.4} />
+                App Store
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <Plus size={16} strokeWidth={2.75} />
+              Run container
+            </Button>
+          </div>
         )}
       </header>
 

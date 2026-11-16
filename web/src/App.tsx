@@ -13,6 +13,7 @@ import SettingsPage from "./components/SettingsPage";
 import ComingSoon from "./components/ComingSoon";
 import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
+import AppsPage from "./components/apps/AppsPage";
 
 export default function App() {
   return (
@@ -111,7 +112,9 @@ function Shell() {
           ) : active === "shares" ? (
             <SharesPage />
           ) : active === "docker" ? (
-            <DockerPage />
+            <DockerPage onOpenApps={() => setActive("apps")} />
+          ) : active === "apps" ? (
+            <AppsPage />
           ) : active === "settings" ? (
             <SettingsPage />
           ) : (

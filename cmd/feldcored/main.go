@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Herculade0/feldcore/internal/api"
+	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
@@ -69,6 +71,20 @@ func main() {
 		Auth:    auth.New(st),
 		Shares:  shareMgr,
 		Docker:  docker.NewManager(cfg.DockerSocket, st, log),
+		Apps: apps.New(apps.Deps{
+			DataDir:    cfg.DataDir,
+			SharesRoot: cfg.SharesRoot,
+			Log:        log,
+			Appdata:    st.Appdata,
+			SetAppdata: st.SetAppdata,
+			SharePaths: func() map[string]string {
+				out := map[string]string{}
+				for _, f := range shareMgr.Folders() {
+					out[strings.ToLower(f.Name)] = f.Path
+				}
+				return out
+			},
+		}),
 		WebRoot: webRoot,
 		Log:     log,
 	})
