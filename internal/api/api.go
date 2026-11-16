@@ -131,6 +131,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/docker/install", s.handleDockerInstall)
 			r.Post("/docker/containers", s.handleDockerCreate)
 			r.Put("/docker/containers/{id}", s.handleDockerUpdate)
+			r.Post("/docker/review", s.handleDockerReview)
 			// The catalogue is about 20MB; a refresh must not sit under the
 			// short request timeout.
 			r.Post("/apps/refresh", s.handleAppsRefresh)

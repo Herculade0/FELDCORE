@@ -31,6 +31,7 @@ func TestScopeFor(t *testing.T) {
 		{http.MethodPost, "/api/v1/docker/containers/abc/start", auth.ScopeContainers},
 		{http.MethodDelete, "/api/v1/docker/containers/abc", auth.ScopeContainers},
 		{http.MethodPost, "/api/v1/docker/containers", auth.ScopeContainers},
+		{http.MethodPost, "/api/v1/docker/review", auth.ScopeContainers},
 		{http.MethodPost, "/api/v1/docker/install", auth.ScopeAdmin},
 		{http.MethodGet, "/api/v1/installs", auth.ScopeAdmin},
 		{http.MethodGet, "/api/v1/installs/abc", auth.ScopeAdmin},
