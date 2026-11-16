@@ -203,7 +203,7 @@ func TestPublishContainerRoute(t *testing.T) {
 	if err := svc.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(ingress, "http://plex:32400") || !strings.Contains(dns, "tun.cfargotunnel.com") {
+	if !strings.Contains(ingress, "http://host.docker.internal:8791") || strings.Contains(ingress, "http://plex:32400") || !strings.Contains(dns, "tun.cfargotunnel.com") {
 		t.Fatalf("ingress %s dns %s", ingress, dns)
 	}
 	if len(eng.connected) == 0 || eng.connected[0] != "plex" {
@@ -217,6 +217,50 @@ func TestPublishContainerRoute(t *testing.T) {
 	}
 	if len(svc.View(context.Background()).Routes) != 0 {
 		t.Fatal("route still published")
+	}
+}
+
+func TestPublishGatewayOrigin(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	svc.GatewayPort = 8791
+	payload, _ := json.Marshal(map[string]string{"a": "acc", "t": "tun", "s": "nope"})
+	token := base64.StdEncoding.EncodeToString(payload)
+	const apiTok = "super-secret-api-token-value"
+	var ingress string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/configurations"):
+			raw, _ := io.ReadAll(r.Body)
+			ingress = string(raw)
+			_, _ = w.Write([]byte(`{"success":true,"result":{}}`))
+		case r.URL.Path == "/zones":
+			if r.URL.Query().Get("name") == "example.com" {
+				_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"zone","name":"example.com"}]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"result":[]}`))
+		case strings.Contains(r.URL.Path, "/dns_records") && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"success":true,"result":[]}`))
+		case strings.Contains(r.URL.Path, "/dns_records") && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"success":true,"result":{"id":"rec"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"success":true,"result":{"id":"tun","connections":[{"id":"c"}]}}`))
+		}
+	}))
+	defer srv.Close()
+	svc.NewCF = func(tok string) *cfapi.Client { return &cfapi.Client{Base: srv.URL, Token: tok} }
+	if err := svc.Save(context.Background(), SaveInput{Mode: "token", TunnelToken: token, APIToken: apiTok}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetPublicInput(PublicInput{Container: "plex", Hostname: "plex.example.com", Port: 32400, Enabled: true, Gateway: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ingress, "http://host.docker.internal:8791") || strings.Contains(ingress, "http://plex:32400") {
+		t.Fatalf("ingress %s", ingress)
 	}
 }
 

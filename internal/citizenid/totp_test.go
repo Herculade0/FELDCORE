@@ -56,8 +56,19 @@ func TestTOTPLogin(t *testing.T) {
 	if !errors.Is(err, ErrInvalidCode) {
 		t.Fatalf("wrong code: %v", err)
 	}
+	_, err = g.Login(httptest.NewRecorder(), loginReq("192.0.2.63:1"), "ada", "correct horse", code)
+	if !errors.Is(err, ErrInvalidCode) {
+		t.Fatalf("replayed code: %v", err)
+	}
+	fresh, err := totp.GenerateCode(setup.Secret, time.Now().Add(30*time.Second))
+	if err != nil || fresh == code {
+		fresh, err = totp.GenerateCode(setup.Secret, time.Now().Add(60*time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	rec := httptest.NewRecorder()
-	signed, err := g.Login(rec, loginReq("192.0.2.63:1"), "ada", "correct horse", code)
+	signed, err := g.Login(rec, loginReq("192.0.2.63:1"), "ada", "correct horse", fresh)
 	if err != nil || signed.Username != "ada" {
 		t.Fatalf("good code: %v %+v", err, signed)
 	}
@@ -94,8 +105,19 @@ func TestAdminLegacyPasswordStillWorksWithTOTP(t *testing.T) {
 	if err := g.ConfirmTOTP(id, code); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := accounts.Login("192.0.2.70:1", "admin", "correct horse"); err != nil {
-		t.Fatalf("legacy login: %v", err)
+	accounts.SetSecondFactor(g.AdminFactor)
+	if _, _, err := accounts.Login("192.0.2.70:1", "admin", "correct horse"); !errors.Is(err, ErrSecondFactor) {
+		t.Fatalf("legacy login without a code: %v", err)
+	}
+	next, err := totp.GenerateCode(setup.Secret, time.Now().Add(30*time.Second))
+	if err != nil || next == code {
+		next, err = totp.GenerateCode(setup.Secret, time.Now().Add(60*time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := accounts.LoginCode("192.0.2.70:1", "admin", "correct horse", next); err != nil {
+		t.Fatalf("legacy login with the authenticator: %v", err)
 	}
 	_, err = g.Login(httptest.NewRecorder(), loginReq("192.0.2.71:1"), "admin", "correct horse", "")
 	if !errors.Is(err, ErrSecondFactor) {

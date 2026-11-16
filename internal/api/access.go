@@ -55,18 +55,8 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: user})))
 			return
 		}
-		// A Citizen ID session may also be the administrator. Other accounts
-		// are refused here so the management API stays administrator-only.
-		if s.citizen != nil {
-			if id, ok := s.citizen.Identity(r); ok {
-				if !id.Admin {
-					writeError(w, http.StatusForbidden, "This page is for the administrator.")
-					return
-				}
-				next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: id.Username})))
-				return
-			}
-		}
+		// The parent-domain Citizen ID cookie is not a management session.
+		// A published app must not be able to replay it against /api/v1.
 		if raw, ok := bearerToken(r.Header); ok {
 			if s.auth == nil {
 				writeError(w, http.StatusUnauthorized, "Sign in to continue.")
@@ -140,6 +130,41 @@ func (s *Server) enforceScope(next http.Handler) http.Handler {
 	})
 }
 
+func actorOf(r *http.Request) (string, string) {
+	p, ok := principalFrom(r.Context())
+	if !ok {
+		return "admin", ""
+	}
+	if p.ViaToken {
+		name := p.TokenName
+		if name == "" {
+			name = "agent"
+		}
+		return name, p.TokenID
+	}
+	if p.Username != "" {
+		return p.Username, ""
+	}
+	return "admin", ""
+}
+
+// auditFile records a share change made by a signed-in administrator or by an
+// agent token. Reads are not recorded here; enforceScope already logs token calls.
+func (s *Server) auditFile(r *http.Request, action, target, result string) {
+	if s.auth == nil {
+		return
+	}
+	name, id := actorOf(r)
+	if err := s.auth.Record(id, store.AuditEvent{
+		TokenName: name,
+		Action:    action,
+		Target:    clip(target, 200),
+		Result:    result,
+	}); err != nil && s.log != nil {
+		s.log.Warn("audit log write failed", "err", err)
+	}
+}
+
 func (s *Server) record(p principal, action, target, result string) {
 	if s.auth == nil || !p.ViaToken {
 		return
@@ -189,6 +214,9 @@ func scopeFor(method, path string) string {
 	if p == "/terminal" || strings.HasSuffix(p, "/terminal") || strings.HasSuffix(p, "/console") {
 		return "shell"
 	}
+	if scope, ok := fileScope(method, p); ok {
+		return scope
+	}
 	if method == http.MethodGet || method == http.MethodHead {
 		if isReadPath(p) {
 			return auth.ScopeRead
@@ -202,6 +230,31 @@ func scopeFor(method, path string) string {
 		return auth.ScopeVMs
 	}
 	return auth.ScopeAdmin
+}
+
+// fileScope classifies the share file browser. A zip download is a POST so
+// the browser can send the selection, but it does not change the share.
+// files:write includes files:read; admin includes both.
+func fileScope(method, p string) (string, bool) {
+	rest, ok := strings.CutPrefix(p, "/shares/")
+	if !ok {
+		return "", false
+	}
+	_, sub, ok := strings.Cut(rest, "/")
+	if !ok {
+		return "", false
+	}
+	switch {
+	case sub == "files" || strings.HasPrefix(sub, "files/"):
+	case sub == "uploads" || strings.HasPrefix(sub, "uploads/"):
+	case sub == "fetch" || strings.HasPrefix(sub, "fetch/"):
+	default:
+		return "", false
+	}
+	if method == http.MethodGet || method == http.MethodHead || (method == http.MethodPost && sub == "files/zip") {
+		return auth.ScopeFilesRead, true
+	}
+	return auth.ScopeFilesWrite, true
 }
 
 func isReadPath(p string) bool {
@@ -228,6 +281,9 @@ func isReadPath(p string) bool {
 
 func isContainerWrite(method, p string) bool {
 	if p == "/docker/containers" && method == http.MethodPost {
+		return true
+	}
+	if p == "/docker/review" && method == http.MethodPost {
 		return true
 	}
 	rest, ok := strings.CutPrefix(p, "/docker/containers/")

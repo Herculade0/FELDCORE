@@ -30,7 +30,7 @@ type User struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"passwordHash"`
 	// TOTP is set once an authenticator is enrolled. The secret is in the
-	// secrets box. The original administrator sign-in does not ask for it.
+	// secrets box. The administrator sign-in asks for the code when this is set.
 	TOTP bool `json:"totp,omitempty"`
 	// SessionVersion invalidates Citizen ID sessions when it changes.
 	// The original session cookie does not consult it.
@@ -85,6 +85,26 @@ type CitizenSession struct {
 	TokenHash string    `json:"tokenHash"`
 	Data      string    `json:"data"`
 	ExpiresAt time.Time `json:"expiresAt"`
+	UserID    string    `json:"userId,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitempty"`
+}
+
+// BrandLink is one footer link on a Citizen ID sign-in page.
+type BrandLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+// SignInBrand is the sign-in page for one published app, or the Citizen ID
+// default when no app supplies its own. Empty fields fall back to the default.
+type SignInBrand struct {
+	Title      string      `json:"title,omitempty"`
+	Welcome    string      `json:"welcome,omitempty"`
+	Logo       string      `json:"logo,omitempty"`
+	Accent     string      `json:"accent,omitempty"`
+	Background string      `json:"background,omitempty"`
+	Footer     string      `json:"footer,omitempty"`
+	Links      []BrandLink `json:"links,omitempty"`
 }
 
 // Session is a logged-in browser session. Only a hash of the token is stored.
@@ -110,15 +130,22 @@ type APIToken struct {
 	Revoked    bool       `json:"revoked,omitempty"`
 }
 
-// AuditEvent is one call made with an agent token.
+// AuditEvent is one recorded action. Agent-token calls and blocks from the
+// publish proxy share this log so a SIEM such as Wazuh can ingest one JSON
+// array. A publish block sets Action to "publish.block", Result to "denied",
+// and Detail["reason"] to rate, country, geo-unavailable, bot, empty-ua or
+// scanner. IP, Host and Detail are omitted for ordinary token calls.
 type AuditEvent struct {
-	ID        string    `json:"id"`
-	Time      time.Time `json:"time"`
-	TokenID   string    `json:"tokenId,omitempty"`
-	TokenName string    `json:"tokenName"`
-	Action    string    `json:"action"`
-	Target    string    `json:"target,omitempty"`
-	Result    string    `json:"result"`
+	ID        string            `json:"id"`
+	Time      time.Time         `json:"time"`
+	TokenID   string            `json:"tokenId,omitempty"`
+	TokenName string            `json:"tokenName"`
+	Action    string            `json:"action"`
+	Target    string            `json:"target,omitempty"`
+	Result    string            `json:"result"`
+	IP        string            `json:"ip,omitempty"`
+	Host      string            `json:"host,omitempty"`
+	Detail    map[string]string `json:"detail,omitempty"`
 }
 
 // SMB is a share's Windows file sharing configuration.
@@ -186,6 +213,9 @@ type State struct {
 	Remote RemoteConfig `json:"remote,omitempty"`
 	// Web is the built-in name and HTTPS proxy.
 	Web WebConfig `json:"web,omitempty"`
+	// Publish is the one-switch exposure of a container. Access levels are
+	// stored here; Citizen ID enforces them. Empty means nothing is published.
+	Publish Publish `json:"publish,omitempty"`
 	// Snapshots is retention and where container copies are kept.
 	Snapshots SnapshotConfig `json:"snapshots,omitempty"`
 	// VPN, Backup and Notify stay off until an administrator turns them on.
@@ -201,6 +231,9 @@ type State struct {
 	AppGrants       []AppGrant       `json:"appGrants,omitempty"`
 	Passkeys        []Passkey        `json:"passkeys,omitempty"`
 	CitizenSessions []CitizenSession `json:"citizenSessions,omitempty"`
+	// CitizenBrand is the default Citizen ID sign-in page. A published app
+	// can replace it with its own Brand.
+	CitizenBrand SignInBrand `json:"citizenBrand,omitempty"`
 }
 
 // PublicRoute publishes one container through the Cloudflare Tunnel.
@@ -211,6 +244,9 @@ type PublicRoute struct {
 	Port      int    `json:"port"`
 	Enabled   bool   `json:"enabled"`
 	RecordID  string `json:"recordId,omitempty"`
+	// Gateway means the tunnel dials FELDCORE's publish listener, which
+	// applies protection and Citizen ID before proxying to the container.
+	Gateway bool `json:"gateway,omitempty"`
 }
 
 // RemoteConfig is the tunnel. Mode is "off", "token" or "api".
@@ -235,6 +271,51 @@ type WebRoute struct {
 	Port      int    `json:"port"`
 	TLS       string `json:"tls"`
 	Enabled   bool   `json:"enabled"`
+	// Gateway means Caddy sends the request to FELDCORE's publish listener
+	// instead of straight to the container. Caddy still terminates TLS.
+	Gateway bool `json:"gateway,omitempty"`
+}
+
+// Publish is the one-switch publish feature and the protection policy that
+// sits in front of every published app. Tokens and the GeoLite2 licence key
+// are not stored here.
+type Publish struct {
+	// BaseDomain overrides the web-address domain for new names. Empty means
+	// use Web.Domain, or home.arpa when that is empty too.
+	BaseDomain string         `json:"baseDomain,omitempty"`
+	Apps       []PublishedApp `json:"apps,omitempty"`
+	Protect    ProtectPolicy  `json:"protect,omitempty"`
+}
+
+// PublishedApp is one container exposed as subdomain.<base domain>.
+// Access is "public", "signed-in", "groups" or "admins". Groups is only
+// meaningful when Access is "groups". Citizen ID enforces Access; this
+// record only stores it.
+type PublishedApp struct {
+	Container string      `json:"container"`
+	Subdomain string      `json:"subdomain"`
+	Hostname  string      `json:"hostname"`
+	Port      int         `json:"port"`
+	Access    string      `json:"access"`
+	Groups    []string    `json:"groups,omitempty"`
+	Enabled   bool        `json:"enabled"`
+	Brand     SignInBrand `json:"brand,omitempty"`
+}
+
+// ProtectPolicy is the per-request check in front of every published app.
+// Zero means "not chosen yet": the proxy then uses its built-in defaults
+// (a modest rate limit and bot blocking, no country list).
+type ProtectPolicy struct {
+	Configured bool `json:"configured,omitempty"`
+	// RatePerSec is requests per second for one client IP on one app.
+	RatePerSec float64 `json:"ratePerSec,omitempty"`
+	RateBurst  int     `json:"rateBurst,omitempty"`
+	// CountryMode is "off", "allow" or "block".
+	CountryMode   string   `json:"countryMode,omitempty"`
+	Countries     []string `json:"countries,omitempty"`
+	GeoEnabled    bool     `json:"geoEnabled,omitempty"`
+	BlockBots     bool     `json:"blockBots,omitempty"`
+	BlockScanners bool     `json:"blockScanners,omitempty"`
 }
 
 // WebConfig is the reverse proxy. Disabled, with no routes, is the default.
@@ -273,6 +354,9 @@ type Prefs struct {
 	// Empty means the domains and isos shares under the shares root.
 	VMDomains string `json:"vmDomains,omitempty"`
 	VMISOs    string `json:"vmISOs,omitempty"`
+	// AllowLANURLs lets a URL download reach private network addresses.
+	// Localhost, link-local and cloud metadata addresses stay blocked.
+	AllowLANURLs bool `json:"allowLANURLs,omitempty"`
 }
 
 // VPN is the WireGuard feature. Enabled is the master switch and defaults off.
@@ -399,7 +483,19 @@ func (s State) clone() State {
 			c.APITokens[i] = t
 		}
 	}
-	c.Audit = append([]AuditEvent(nil), s.Audit...)
+	if s.Audit != nil {
+		c.Audit = make([]AuditEvent, len(s.Audit))
+		for i, ev := range s.Audit {
+			if ev.Detail != nil {
+				d := make(map[string]string, len(ev.Detail))
+				for k, v := range ev.Detail {
+					d[k] = v
+				}
+				ev.Detail = d
+			}
+			c.Audit[i] = ev
+		}
+	}
 	c.Shares = make([]Share, len(s.Shares))
 	for i, sh := range s.Shares {
 		sh.SMB.Users = append([]string(nil), sh.SMB.Users...)
@@ -423,6 +519,14 @@ func (s State) clone() State {
 	}
 	c.Remote.Routes = append([]PublicRoute(nil), s.Remote.Routes...)
 	c.Web.Routes = append([]WebRoute(nil), s.Web.Routes...)
+	c.Publish.Apps = make([]PublishedApp, len(s.Publish.Apps))
+	for i, app := range s.Publish.Apps {
+		app.Groups = append([]string(nil), app.Groups...)
+		app.Brand.Links = append([]BrandLink(nil), app.Brand.Links...)
+		c.Publish.Apps[i] = app
+	}
+	c.CitizenBrand.Links = append([]BrandLink(nil), s.CitizenBrand.Links...)
+	c.Publish.Protect.Countries = append([]string(nil), s.Publish.Protect.Countries...)
 	c.VPN.Tunnels = make([]VPNTunnel, len(s.VPN.Tunnels))
 	for i, t := range s.VPN.Tunnels {
 		t.Forwards = append([]VPNForward(nil), t.Forwards...)

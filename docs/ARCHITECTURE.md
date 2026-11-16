@@ -82,8 +82,8 @@ behind authentication:
   only offers the setup endpoint; afterwards setup is refused. A fresh install
   should be set up promptly, since whoever reaches it first claims it.
 - **The administrator password** is hashed with bcrypt. Failed sign-ins are
-  rate limited per client address. That sign-in is unchanged: it does not ask
-  for a second factor.
+  rate limited per client address. When an authenticator is enrolled, that
+  sign-in asks for the code as well.
 - **Citizen ID** (`internal/citizenid`) adds users, groups, and per-app access
   for published hostnames. New passwords are argon2id. Sessions use a separate
   parent-domain cookie. See [CITIZEN-ID.md](CITIZEN-ID.md).
@@ -102,7 +102,8 @@ behind authentication:
   is not accepted. Phase 1 tools are read-only. There is no shell or exec tool.
 - **Audit**: every call authenticated with a token is recorded (token name,
   action, target, time, result), and so are Citizen ID sign-ins, failures,
-  and access denials. The newest 1,000 entries are kept, and anything older
+  and access denials. Failures for an unknown username are aggregated so they
+  cannot push security events out of the newest 1,000 entries. Anything older
   than 90 days is dropped.
 - **Cross-site requests**: state-changing requests whose Origin does not match
   the Host are refused, and the WebSocket handshake enforces the same.

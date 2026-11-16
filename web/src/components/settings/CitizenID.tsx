@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Fingerprint, KeyRound, Shield, Users } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { passkeysAvailable, registerPasskey } from "../../lib/webauthn";
+import { asBrand, BrandFields, type SignInBrand } from "../citizen/SignInBrand";
 import { Card, CardTitle } from "../ui";
 import { Alert, Button, SelectField, TextField } from "../form";
 
@@ -36,6 +37,7 @@ interface Directory {
   groups: GroupInfo[];
   apps: AppInfo[];
   domain: string;
+  brand?: SignInBrand;
 }
 
 interface Profile {
@@ -64,6 +66,8 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [setup, setSetup] = useState<TOTPSetup | null>(null);
   const [code, setCode] = useState("");
+  const [proof, setProof] = useState("");
+  const [proofCode, setProofCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -83,7 +87,12 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
     setBusy(true);
     setError(null);
     try {
-      setSetup(await api<TOTPSetup>("/citizen/totp/begin", { method: "POST" }));
+      setSetup(
+        await api<TOTPSetup>("/citizen/totp/begin", {
+          method: "POST",
+          body: profile?.totp ? { password: proof, totp: proofCode } : {},
+        }),
+      );
       setCode("");
     } catch (e) {
       setError(errorMessage(e));
@@ -112,7 +121,7 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
     setBusy(true);
     setError(null);
     try {
-      await api("/citizen/users/admin/totp/reset", { method: "POST" });
+      await api("/citizen/users/admin/totp/reset", { method: "POST", body: { password: proof, totp: proofCode } });
       setSetup(null);
       await load();
     } catch (e) {
@@ -139,7 +148,7 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
     setBusy(true);
     setError(null);
     try {
-      await api(`/citizen/passkeys/${id}`, { method: "DELETE" });
+      await api(`/citizen/passkeys/${id}`, { method: "DELETE", body: { password: proof, totp: proofCode } });
       await load();
     } catch (e) {
       setError(errorMessage(e));
@@ -152,8 +161,8 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
     <Card>
       <CardTitle icon={KeyRound} title="Your sign-in" hint={profile?.username} />
       <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
-        An authenticator adds a 6-digit code to Citizen ID sign-in. The original administrator
-        sign-in still accepts the password on its own.
+        An authenticator adds a 6-digit code to every sign-in, including the administrator
+        password. Replacing or removing a sign-in method asks for your password and the current code.
       </p>
       {error && (
         <div className="mt-4">
@@ -162,6 +171,26 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
       )}
       {profile?.totp && !setup && (
         <p className="mt-4 text-sm font-semibold text-ink">An authenticator is enrolled.</p>
+      )}
+      {(profile?.totp || (profile?.passkeys.length ?? 0) > 0) && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <TextField
+            label="Your password"
+            type="password"
+            value={proof}
+            onChange={(e) => setProof(e.target.value)}
+            autoComplete="current-password"
+          />
+          {profile?.totp && (
+            <TextField
+              label="Current authenticator code"
+              value={proofCode}
+              onChange={(e) => setProofCode(e.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+            />
+          )}
+        </div>
       )}
       <div className="mt-4 flex flex-wrap gap-2">
         <Button size="sm" onClick={() => void begin()} loading={busy && !setup}>
@@ -249,8 +278,8 @@ export default function CitizenID() {
       <Card>
         <CardTitle icon={Shield} title="Citizen ID" />
         <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
-          Users, groups, and who may open each published app. The original administrator sign-in is
-          unchanged and does not ask for a second factor. Citizen ID does, once an authenticator is enrolled.
+          Users, groups, and who may open each published app. Once an authenticator is enrolled,
+          the administrator sign-in asks for the code as well.
         </p>
         <p className="mt-2 text-xs font-medium leading-relaxed text-ink-3">
           {dir?.domain
@@ -260,12 +289,13 @@ export default function CitizenID() {
       </Card>
 
       {error && <Alert>{error}</Alert>}
+      <Defaults brand={asBrand(dir?.brand)} onChanged={load} />
       <OwnSignIn allowReset />
 
       {dir && (
         <>
           <Groups groups={dir.groups} onChanged={load} />
-          <People users={dir.users} groups={dir.groups} onChanged={load} />
+          <People users={dir.users} groups={dir.groups} callerTotp={dir.admin.totp} onChanged={load} />
           <Apps apps={dir.apps} groups={dir.groups} onChanged={load} />
         </>
       )}
@@ -341,7 +371,64 @@ function Groups({ groups, onChanged }: { groups: GroupInfo[]; onChanged: () => v
   );
 }
 
-function People({ users, groups, onChanged }: { users: UserInfo[]; groups: GroupInfo[]; onChanged: () => void }) {
+function Defaults({ brand, onChanged }: { brand: SignInBrand; onChanged: () => void }) {
+  const stamp = JSON.stringify(brand);
+  const [value, setValue] = useState(brand);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setValue(asBrand(JSON.parse(stamp) as SignInBrand));
+  }, [stamp]);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/citizen/defaults", { method: "PUT", body: value });
+      onChanged();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardTitle icon={Shield} title="Sign-in page" hint="Defaults for every app" />
+      <div className="mt-4">
+        <BrandFields
+          value={value}
+          onChange={setValue}
+          hint="This is the landing page, and the fallback when a published app leaves a field blank."
+        />
+      </div>
+      {error && (
+        <div className="mt-4">
+          <Alert>{error}</Alert>
+        </div>
+      )}
+      <div className="mt-4 flex justify-end">
+        <Button variant="primary" size="sm" loading={busy} onClick={() => void save()}>
+          Save defaults
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function People({
+  users,
+  groups,
+  callerTotp,
+  onChanged,
+}: {
+  users: UserInfo[];
+  groups: GroupInfo[];
+  callerTotp: boolean;
+  onChanged: () => void;
+}) {
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -399,7 +486,7 @@ function People({ users, groups, onChanged }: { users: UserInfo[]; groups: Group
       ) : (
         <ul className="mt-5 space-y-3">
           {users.map((u) => (
-            <UserRow key={u.id} user={u} groups={groups} onChanged={onChanged} />
+            <UserRow key={u.id} user={u} groups={groups} callerTotp={callerTotp} onChanged={onChanged} />
           ))}
         </ul>
       )}
@@ -434,9 +521,21 @@ function GroupChecks({
   );
 }
 
-function UserRow({ user, groups, onChanged }: { user: UserInfo; groups: GroupInfo[]; onChanged: () => void }) {
+function UserRow({
+  user,
+  groups,
+  callerTotp,
+  onChanged,
+}: {
+  user: UserInfo;
+  groups: GroupInfo[];
+  callerTotp: boolean;
+  onChanged: () => void;
+}) {
   const [groupIds, setGroupIds] = useState(user.groupIds);
   const [password, setPassword] = useState("");
+  const [proof, setProof] = useState("");
+  const [proofCode, setProofCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -514,13 +613,40 @@ function UserRow({ user, groups, onChanged }: { user: UserInfo; groups: GroupInf
           Reset password
         </Button>
         {user.totp && (
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={() => void run(() => api(`/citizen/users/${user.id}/totp/reset`, { method: "POST" }))}
-          >
-            Reset authenticator
-          </Button>
+          <>
+            <TextField
+              className="w-48"
+              label="Your password"
+              type="password"
+              value={proof}
+              onChange={(e) => setProof(e.target.value)}
+              autoComplete="current-password"
+            />
+            {callerTotp && (
+              <TextField
+                className="w-44"
+                label="Your code"
+                value={proofCode}
+                onChange={(e) => setProofCode(e.target.value)}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+            )}
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void run(() =>
+                  api(`/citizen/users/${user.id}/totp/reset`, {
+                    method: "POST",
+                    body: { password: proof, totp: proofCode },
+                  }),
+                )
+              }
+            >
+              Reset authenticator
+            </Button>
+          </>
         )}
         {confirmRemove ? (
           <Button size="sm" variant="danger" disabled={busy} onClick={() => void run(() => api(`/citizen/users/${user.id}`, { method: "DELETE" }))}>

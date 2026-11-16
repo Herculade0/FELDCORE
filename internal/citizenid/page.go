@@ -71,11 +71,18 @@ func originOK(r *http.Request) bool {
 }
 
 type signInView struct {
-	CSRF     string
-	Error    string
-	Next     string
-	Username string
-	TOTP     bool
+	CSRF       string
+	Error      string
+	Next       string
+	Username   string
+	TOTP       bool
+	Title      string
+	Welcome    string
+	Footer     string
+	Logo       template.URL
+	CSS        template.CSS
+	Links      []struct{ Label, URL string }
+	AccentStop string
 }
 
 // ServeSignIn is the Citizen ID page. A proxy sends browsers here when an
@@ -142,6 +149,21 @@ func (g *Gateway) ServeSignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view.CSRF = token
+	brand := g.brandForRequest(r, next)
+	view.Title = brand.Title
+	view.Welcome = brand.Welcome
+	view.Footer = brand.Footer
+	view.CSS = brandCSS(brand)
+	view.AccentStop = defaultAccent
+	if colorRe.MatchString(brand.Accent) {
+		view.AccentStop = brand.Accent
+	}
+	if strings.HasPrefix(brand.Logo, "data:image/") {
+		view.Logo = template.URL(brand.Logo)
+	}
+	for _, link := range brand.Links {
+		view.Links = append(view.Links, struct{ Label, URL string }{Label: link.Label, URL: link.URL})
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	status := http.StatusOK
 	if view.Error != "" && !view.TOTP {
@@ -184,9 +206,10 @@ var signInTmpl = template.Must(template.New("signin").Parse(`<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Citizen ID · FELDCORE</title>
+<title>{{.Title}} · FELDCORE</title>
 <style>
   :root { color-scheme: light; --bg:#f4f7fd; --ink:#0a1633; --ink2:#43506b; --ink3:#8592ad; --line:rgba(11,40,110,.12); --accent:#0b5cff; --accent2:#38bdf8; --bad:#f04438; }
+  {{.CSS}}
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px 16px;
     font-family: Manrope, ui-rounded, ui-sans-serif, system-ui, sans-serif; color:var(--ink); background:
@@ -210,9 +233,9 @@ var signInTmpl = template.Must(template.New("signin").Parse(`<!DOCTYPE html>
 <body>
 <form method="post" action="/citizen/signin" data-next="{{.Next}}">
   <div class="brand">
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0b5cff"/><stop offset="100%" stop-color="#38bdf8"/></linearGradient></defs><polygon points="16,1.5 28.6,8.75 28.6,23.25 16,30.5 3.4,23.25 3.4,8.75" fill="url(#g)"/><polygon points="16,10.5 20.76,13.25 20.76,18.75 16,21.5 11.24,18.75 11.24,13.25" fill="#fff"/></svg>
+    {{if .Logo}}<img class="mark" src="{{.Logo}}" alt="">{{else}}<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="{{.AccentStop}}"/><stop offset="100%" stop-color="#38bdf8"/></linearGradient></defs><polygon points="16,1.5 28.6,8.75 28.6,23.25 16,30.5 3.4,23.25 3.4,8.75" fill="url(#g)"/><polygon points="16,10.5 20.76,13.25 20.76,18.75 16,21.5 11.24,18.75 11.24,13.25" fill="#fff"/></svg>{{end}}
     <div>
-      <h1>Citizen ID</h1>
+      <h1>{{.Title}}</h1>
       <p class="eyebrow">FELDCORE</p>
     </div>
   </div>
@@ -222,7 +245,7 @@ var signInTmpl = template.Must(template.New("signin").Parse(`<!DOCTYPE html>
   <label for="code">Authenticator code</label>
   <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,8}" required autofocus>
   {{else}}
-  <p class="lead">One sign-in for this server and the apps published on it.</p>
+  <p class="lead">{{.Welcome}}</p>
   <label for="username">Username</label>
   <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus value="{{.Username}}">
   <label for="password">Password</label>
@@ -232,6 +255,8 @@ var signInTmpl = template.Must(template.New("signin").Parse(`<!DOCTYPE html>
   <input type="hidden" name="next" value="{{.Next}}">
   {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
   <button type="submit">{{if .TOTP}}Verify{{else}}Sign in{{end}}</button>
+  {{if .Footer}}<p class="lead">{{.Footer}}</p>{{end}}
+  {{range .Links}}<p class="lead"><a href="{{.URL}}">{{.Label}}</a></p>{{end}}
   {{if not .TOTP}}
   <button class="secondary" type="button" id="passkey">Sign in with a passkey</button>
   {{end}}

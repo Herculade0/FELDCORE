@@ -26,6 +26,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
+	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
 	"github.com/Herculade0/feldcore/internal/runtime"
 	"github.com/Herculade0/feldcore/internal/secrets"
@@ -126,17 +127,26 @@ func main() {
 		Store: st, Secrets: box, Bridge: runtime.Bridge{D: rt},
 		DataDir: cfg.DataDir, Version: version.Current, Log: log,
 	}
+	authSvc := auth.New(st)
+	pubPort := publishListenPort()
 	remoteSvc := &remote.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
-		Binary:     &remote.HostCloudflared{Dir: filepath.Join(cfg.DataDir, "bin")},
-		DataDir:    cfg.DataDir,
-		ListenPort: listenPort(cfg.ListenAddr),
-		Log:        log,
+		Binary:      &remote.HostCloudflared{Dir: filepath.Join(cfg.DataDir, "bin")},
+		DataDir:     cfg.DataDir,
+		ListenPort:  listenPort(cfg.ListenAddr),
+		GatewayPort: pubPort,
+		Log:         log,
 	}
 	proxySvc := &proxy.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
-		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), Log: log,
+		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), GatewayPort: pubPort, Log: log,
 	}
+	pubSvc := &publish.Service{
+		Store: st, Secrets: box, Proxy: proxySvc, Remote: remoteSvc,
+		Resolve: dockerMgr, Trust: dockerMgr.TrustedPeer,
+		DataDir: cfg.DataDir, GatewayPort: pubPort, Log: log, Audit: authSvc,
+	}
+	pubSvc.OpenGeo()
 	snapSvc := snapshots.Open(st, dockerMgr, cfg.DataDir, func() string {
 		return filepath.Join(cfg.SharesRoot, "system", "snapshots")
 	})
@@ -173,12 +183,13 @@ func main() {
 		}
 	}()
 
-	accounts := auth.New(st)
-	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: accounts, Log: log})
+	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: authSvc, Log: log, Trust: dockerMgr.TrustedPeer})
+	authSvc.SetSecondFactor(cid.AdminFactor)
+	pubSvc.SetAuth(publish.CitizenAuth(cid))
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
-		Auth:    accounts,
+		Auth:    authSvc,
 		Citizen: cid,
 		Shares:  shareMgr,
 		Docker:  dockerMgr,
@@ -215,6 +226,7 @@ func main() {
 		VPN:        vpnSvc,
 		Backups:    backups,
 		Mail:       mail,
+		Publish:    pubSvc,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -222,11 +234,22 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	pubHTTP := &http.Server{
+		Addr:              publishListenAddr(),
+		Handler:           pubSvc.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	go func() {
 		log.Info("feldcored listening", "addr", cfg.ListenAddr, "data", cfg.DataDir)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http server error", "err", err)
 			stop()
+		}
+	}()
+	go func() {
+		log.Info("publish proxy listening", "addr", pubHTTP.Addr)
+		if err := pubHTTP.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("publish proxy error", "err", err)
 		}
 	}()
 
@@ -237,6 +260,29 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
 	}
+	if err := pubHTTP.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error("publish proxy shutdown failed", "err", err)
+	}
+}
+
+// publishListenAddr is the listener Caddy and cloudflared dial. It is not
+// only loopback: the containers reach the host through the Docker bridge.
+// FELDCORE_PUBLISH_PORT overrides the port. Nothing is published until a
+// container's Publish switch is turned on.
+func publishListenAddr() string {
+	return fmt.Sprintf(":%d", publishListenPort())
+}
+
+func publishListenPort() int {
+	p := strings.TrimSpace(os.Getenv("FELDCORE_PUBLISH_PORT"))
+	if p == "" {
+		return 8791
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n < 1 || n > 65535 {
+		return 8791
+	}
+	return n
 }
 
 func listenPort(addr string) int {

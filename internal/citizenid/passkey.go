@@ -47,7 +47,7 @@ func (g *Gateway) BeginPasskeyLogin(w http.ResponseWriter, r *http.Request) (any
 	if err != nil {
 		return nil, err
 	}
-	opts, session, err := wa.BeginDiscoverableLogin()
+	opts, session, err := wa.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationRequired))
 	if err != nil {
 		if g.log != nil {
 			g.log.Warn("passkey login could not start", "err", err)
@@ -74,7 +74,7 @@ func (g *Gateway) FinishPasskeyLogin(w http.ResponseWriter, r *http.Request) (Id
 	var cred *webauthn.Credential
 	cred, err = wa.FinishDiscoverableLogin(g.discover, c.Data, r)
 	if err != nil {
-		g.lim.fail("ip:"+clientIP(r), g.now())
+		g.lim.fail("ip:"+g.clientIP(r), g.now())
 		g.record("", "sign-in failed", "passkey", "denied")
 		if g.log != nil {
 			g.log.Warn("passkey login failed", "err", err)
@@ -217,7 +217,7 @@ func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
 		AttestationPreference:       protocol.PreferNoAttestation,
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			ResidentKey:      protocol.ResidentKeyRequirementPreferred,
-			UserVerification: protocol.VerificationPreferred,
+			UserVerification: protocol.VerificationRequired,
 		},
 	})
 	if err != nil {
@@ -411,8 +411,21 @@ func (g *Gateway) stash(w http.ResponseWriter, r *http.Request, c ceremony) erro
 			delete(g.ceremonies, k)
 		}
 	}
-	if len(g.ceremonies) > 256 {
-		g.ceremonies = map[string]ceremony{}
+	// Drop the ceremony that expires soonest. Never wipe the map: another
+	// person's in-flight sign-in has to survive a burst of new ones.
+	for len(g.ceremonies) >= 256 {
+		var oldest string
+		var when time.Time
+		for k, existing := range g.ceremonies {
+			if oldest == "" || existing.Expires.Before(when) {
+				oldest = k
+				when = existing.Expires
+			}
+		}
+		if oldest == "" {
+			break
+		}
+		delete(g.ceremonies, oldest)
 	}
 	g.ceremonies[hashKey(token)] = c
 	g.mu.Unlock()

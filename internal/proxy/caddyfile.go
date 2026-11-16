@@ -15,6 +15,10 @@ type Site struct {
 	// Gate, when set, is the Citizen ID forward_auth upstream (host:port).
 	// Empty leaves the site public, which is the default.
 	Gate string
+	// KeepCookies is set when Upstream is the publish listener. That listener
+	// still needs the citizen cookie, and it strips the cookie itself before
+	// the request reaches the container. A direct upstream always strips.
+	KeepCookies bool
 }
 
 // Build renders a Caddyfile. The Cloudflare token is never written here;
@@ -58,10 +62,11 @@ func Build(email string, sites []Site) (string, error) {
 // writeProxy emits the upstream. A gated site asks Citizen ID first, and
 // still serves the sign-in page itself so the browser can authenticate on
 // this hostname. route keeps that order; Caddy would otherwise reorder
-// the directives.
+// the directives. The app upstream drops the Citizen ID cookie and
+// Authorization so a published app cannot replay them.
 func writeProxy(b *strings.Builder, site Site) {
 	if site.Gate == "" {
-		fmt.Fprintf(b, "\treverse_proxy %s\n", site.Upstream)
+		writeAppProxy(b, site, "\t")
 		return
 	}
 	fmt.Fprintf(b, "\troute {\n")
@@ -73,8 +78,39 @@ func writeProxy(b *strings.Builder, site Site) {
 	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Uri {http.request.uri}\n")
 	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Proto {http.request.scheme}\n")
 	fmt.Fprintf(b, "\t\t}\n")
-	fmt.Fprintf(b, "\t\treverse_proxy %s\n", site.Upstream)
+	writeAppProxy(b, site, "\t\t")
 	fmt.Fprintf(b, "\t}\n")
+}
+
+func writeAppProxy(b *strings.Builder, site Site, pad string) {
+	if site.KeepCookies {
+		fmt.Fprintf(b, "%sreverse_proxy %s\n", pad, site.Upstream)
+		return
+	}
+	writeCookieScrub(b, pad)
+	fmt.Fprintf(b, "%sreverse_proxy %s {\n", pad, site.Upstream)
+	fmt.Fprintf(b, "%s\theader_up -Authorization\n", pad)
+	fmt.Fprintf(b, "%s\theader_up Cookie {clean_cookie}\n", pad)
+	fmt.Fprintf(b, "%s}\n", pad)
+}
+
+// writeCookieScrub removes only the Citizen ID and management cookies.
+// Other cookies belong to the app and are forwarded.
+func writeCookieScrub(b *strings.Builder, pad string) {
+	names := []string{"feldcore_citizen", "feldcore_desk", "feldcore_session"}
+	in := "{http.request.header.Cookie}"
+	for i, name := range names {
+		out := fmt.Sprintf("{c%d}", i)
+		if i == len(names)-1 {
+			out = "{clean_cookie}"
+		}
+		fmt.Fprintf(b, "%smap %s %s {\n", pad, in, out)
+		fmt.Fprintf(b, "%s\t~(?i)^(?:__Host-)?%s=[^;]*(?:;\\s*(.*))?$ \"{1}\"\n", pad, name)
+		fmt.Fprintf(b, "%s\t~(?i)^(.*?);\\s*(?:__Host-)?%s=[^;]*(?:;\\s*(.*))?$ \"{1}; {2}\"\n", pad, name)
+		fmt.Fprintf(b, "%s\tdefault %s\n", pad, in)
+		fmt.Fprintf(b, "%s}\n", pad)
+		in = out
+	}
 }
 
 // dockerfile builds Caddy with the Cloudflare DNS challenge module.

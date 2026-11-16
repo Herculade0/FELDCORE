@@ -93,7 +93,7 @@ All of them are read-only. There is no shell, exec, or terminal tool.
 
 ## Audit
 
-**Audit** in the sidebar lists every call authenticated with a token, and Citizen ID sign-ins, failures, and access denials. A row shows the name, action, target, time and result (`ok`, `denied` or `error`). The original administrator password sign-in is not listed. The log keeps the newest 1,000 entries, and drops anything older than 90 days.
+**Audit** in the sidebar lists every call authenticated with a token, every package install started from the UI, every published request the protection layer blocked, and Citizen ID sign-ins, failures, and access denials. A row shows the name, action, target, time and result (`ok`, `denied` or `error`). An install writes `install started`, then `install finished` or `install failed`. A block writes `publish.block`. Anonymous sign-in noise is aggregated so it cannot push those entries out of the log.
 
 ## If a token leaks
 

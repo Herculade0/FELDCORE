@@ -69,7 +69,12 @@ type Service struct {
 	Binary     Binary
 	DataDir    string
 	ListenPort int
-	Log        *slog.Logger
+	// GatewayPort is feldcored's publish listener. A route with Gateway set
+	// is published at that port instead of at the container, so the tunnel
+	// passes through protection and Citizen ID. The host binary dials
+	// loopback; the container dials host.docker.internal.
+	GatewayPort int
+	Log         *slog.Logger
 	// NewCF overrides the Cloudflare client. Tests point it at a fake server.
 	NewCF func(token string) *cfapi.Client
 }
@@ -210,42 +215,60 @@ func (s *Service) Save(ctx context.Context, in SaveInput) error {
 	return s.Sync(ctx)
 }
 
+// PublicInput is one container's tunnel hostname.
+// Gateway sends the tunnel to FELDCORE's publish listener instead of the
+// container, so protection and Citizen ID run before the app.
+type PublicInput struct {
+	Container string
+	Hostname  string
+	Port      int
+	Enabled   bool
+	Gateway   bool
+}
+
 // SetPublic records one container's public hostname. Sync publishes it.
 func (s *Service) SetPublic(container, host string, port int, enabled bool) error {
-	host = names.Normalise(host)
-	if enabled {
+	return s.SetPublicInput(PublicInput{Container: container, Hostname: host, Port: port, Enabled: enabled})
+}
+
+// SetPublicInput is SetPublic with the option to enter through the publish proxy.
+func (s *Service) SetPublicInput(in PublicInput) error {
+	host := names.Normalise(in.Hostname)
+	if in.Enabled {
 		if err := names.Hostname(host); err != nil {
 			return input(err.Error() + ".")
 		}
 		if names.Local(host) {
 			return input(host + " only works on your home network. To expose it, use a domain Cloudflare manages.")
 		}
-		if err := names.Port(port); err != nil {
+		if err := names.Port(in.Port); err != nil {
 			return input(err.Error() + ".")
 		}
 	}
-	if container == "" {
+	if in.Container == "" {
 		return input("Choose a container.")
 	}
 	return s.Store.Update(func(st *store.State) error {
 		var next []store.PublicRoute
 		for _, r := range st.Remote.Routes {
-			if r.Container != container {
+			if r.Container != in.Container {
 				next = append(next, r)
 				continue
 			}
-			if enabled && r.Hostname != host && r.RecordID != "" {
+			if in.Enabled && r.Hostname != host && r.RecordID != "" {
 				old := r
 				old.Enabled = false
 				next = append(next, old)
 			}
-			if !enabled {
+			if !in.Enabled {
 				r.Enabled = false
 				next = append(next, r)
 			}
 		}
-		if enabled {
-			next = append(next, store.PublicRoute{Container: container, Hostname: host, Port: port, Enabled: true})
+		if in.Enabled {
+			next = append(next, store.PublicRoute{
+				Container: in.Container, Hostname: host, Port: in.Port, Enabled: true, Gateway: in.Gateway,
+			})
 		}
 		st.Remote.Routes = next
 		return nil
@@ -361,6 +384,21 @@ func (s *Service) ensureTunnel(ctx context.Context) error {
 	})
 }
 
+// appOrigin is the publish listener every tunnel hostname dials. A
+// containerised connector uses host.docker.internal. A cloudflared binary
+// on this machine uses loopback. The port defaults to the publish listener.
+func (s *Service) appOrigin(ctx context.Context) string {
+	port := s.GatewayPort
+	if port <= 0 {
+		port = 8791
+	}
+	dial := "127.0.0.1"
+	if s.Engine != nil && s.Engine.Ready(ctx) {
+		dial = "host.docker.internal"
+	}
+	return fmt.Sprintf("http://%s:%d", dial, port)
+}
+
 func (s *Service) publish(ctx context.Context, apiToken string) error {
 	cfg := s.Store.Snapshot().Remote
 	if cfg.AccountID == "" || cfg.TunnelID == "" {
@@ -391,21 +429,22 @@ func (s *Service) publish(ctx context.Context, apiToken string) error {
 			return input(r.Hostname + " is already used by another container.")
 		}
 		seenHost[r.Hostname] = true
-		origin := fmt.Sprintf("http://%s:%d", r.Container, r.Port)
+		// The connector still joins the app to the proxy network so the
+		// publish listener can reach it. The hostname itself always dials
+		// that listener, never the container, so a gated app cannot skip
+		// Citizen ID from the internet.
 		if s.Engine != nil {
 			mode, err := s.Engine.NetworkMode(ctx, r.Container)
 			switch {
-			case err == nil && mode == "host":
-				origin = fmt.Sprintf("http://host.docker.internal:%d", r.Port)
 			case err == nil && mode == "none":
 				return input(r.Container + " has no network, so a public name cannot reach it.")
-			case err == nil:
+			case err == nil && mode != "host":
 				if err := s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, r.Container); err != nil && s.Log != nil {
 					s.Log.Warn("could not attach container to the tunnel network", "container", r.Container, "err", err)
 				}
 			}
 		}
-		rules = append(rules, cfapi.Rule{Hostname: r.Hostname, Service: origin})
+		rules = append(rules, cfapi.Rule{Hostname: r.Hostname, Service: s.appOrigin(ctx)})
 		want = append(want, pub{host: r.Hostname, container: r.Container, port: r.Port, record: r.RecordID})
 	}
 	rules = append(rules, cfapi.Rule{Service: "http_status:404"})

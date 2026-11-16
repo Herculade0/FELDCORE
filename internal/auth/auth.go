@@ -35,6 +35,11 @@ var (
 	ErrRateLimited        = errors.New("too many failed attempts; wait a few minutes and try again")
 )
 
+// SecondFactor runs after the administrator password matches. The wizard
+// enrols the authenticator; this hook enforces it. A nil hook keeps
+// password-only login for an account that has not enrolled.
+type SecondFactor func(username, code string) error
+
 // InputError is a validation failure whose message is safe to show the user.
 type InputError struct{ Msg string }
 
@@ -48,6 +53,7 @@ type Service struct {
 	now  func() time.Time
 
 	dummyOnce sync.Once
+	factor    SecondFactor
 	dummy     []byte
 }
 
@@ -92,9 +98,21 @@ func (a *Service) Setup(username, password string) error {
 	})
 }
 
+// SetSecondFactor installs the authenticator check used by Login.
+// The hook is nil until Citizen ID is wired in.
+func (a *Service) SetSecondFactor(fn SecondFactor) {
+	a.factor = fn
+}
+
 // Login checks credentials and, on success, returns a new session token.
 // clientKey identifies the caller for rate limiting (normally its IP).
 func (a *Service) Login(clientKey, username, password string) (token string, expires time.Time, err error) {
+	return a.LoginCode(clientKey, username, password, "")
+}
+
+// LoginCode is Login with the authenticator code. An empty code is rejected
+// once an authenticator is enrolled.
+func (a *Service) LoginCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
 	now := a.now()
 	if a.lim.blocked(clientKey, now) {
 		return "", time.Time{}, ErrRateLimited
@@ -114,8 +132,31 @@ func (a *Service) Login(clientKey, username, password string) (token string, exp
 		a.lim.fail(clientKey, now)
 		return "", time.Time{}, ErrInvalidCredentials
 	}
+	if a.factor != nil {
+		if ferr := a.factor(username, code); ferr != nil {
+			if !factorPending(ferr) {
+				a.lim.fail(clientKey, now)
+			}
+			return "", time.Time{}, ferr
+		}
+	}
 	a.lim.reset(clientKey)
 	return a.issue(username)
+}
+
+// IssueSession starts an administrator session after Citizen ID has already
+// checked the password and the authenticator. It does not check them again.
+func (a *Service) IssueSession(username string) (string, time.Time, error) {
+	admin := a.st.Snapshot().Admin
+	if admin == nil || subtle.ConstantTimeCompare([]byte(admin.Username), []byte(username)) != 1 {
+		return "", time.Time{}, ErrInvalidCredentials
+	}
+	return a.issue(username)
+}
+
+func factorPending(err error) bool {
+	var p interface{ SecondFactorPending() bool }
+	return errors.As(err, &p) && p.SecondFactorPending()
 }
 
 // issue creates and stores a session for username.
@@ -190,6 +231,20 @@ func (a *Service) SessionHours() int {
 		return int(SessionTTL / time.Hour)
 	}
 	return h
+}
+
+// AllowLANURLs reports whether a share may fetch a URL on a private network.
+// Loopback, link-local and metadata addresses stay blocked either way.
+func (a *Service) AllowLANURLs() bool {
+	return a.st.Snapshot().Prefs.AllowLANURLs
+}
+
+// SetAllowLANURLs stores the file browser's LAN download switch.
+func (a *Service) SetAllowLANURLs(on bool) error {
+	return a.st.Update(func(s *store.State) error {
+		s.Prefs.AllowLANURLs = on
+		return nil
+	})
 }
 
 // SetSessionHours stores how long new sign-ins last. Existing sessions keep

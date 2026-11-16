@@ -36,6 +36,7 @@ type extraEffect struct {
 	cgroupns        string
 	entrypoint      string
 	pidMode         string
+	ipcMode         string
 	readOnly        bool
 	init            bool
 	noHealth        bool
@@ -118,6 +119,9 @@ func undoExtra(cfg, host map[string]any, e extraEffect) {
 	}
 	if e.pidMode != "" {
 		delete(host, "PidMode")
+	}
+	if e.ipcMode != "" {
+		delete(host, "IpcMode")
 	}
 	if e.readOnly {
 		delete(host, "ReadonlyRootfs")
@@ -213,6 +217,9 @@ func setExtra(cfg, host map[string]any, e extraEffect) {
 	}
 	if e.pidMode != "" {
 		host["PidMode"] = e.pidMode
+	}
+	if e.ipcMode != "" {
+		host["IpcMode"] = e.ipcMode
 	}
 	if e.readOnly {
 		host["ReadonlyRootfs"] = true
@@ -506,6 +513,10 @@ func parseExtra(raw string) extraEffect {
 		case "pid":
 			if v, ok := take(); ok {
 				e.pidMode = v
+			}
+		case "ipc":
+			if v, ok := take(); ok {
+				e.ipcMode = v
 			}
 		case "read-only":
 			e.readOnly = true
