@@ -214,12 +214,11 @@ func TestCatalogueCacheAndOffline(t *testing.T) {
 		t.Fatalf("offline with no cache: %+v apps %d", cat.Message, len(cat.Apps))
 	}
 
-	st, err := svc.SetAppdata("/var/lib/apps")
-	if err != nil || !st.AppdataCustom || st.Appdata != "/var/lib/apps" {
-		t.Fatalf("set appdata: %v %+v", err, st)
+	if err := svc.SetFeedURL("notaurl"); err == nil {
+		t.Fatal("bad feed url accepted")
 	}
-	if _, err := svc.SetAppdata("relative"); err == nil {
-		t.Fatal("relative appdata accepted")
+	if err := svc.SetFeedURL("https://example.com/feed.json"); err != nil || svc.FeedURL() != "https://example.com/feed.json" {
+		t.Fatalf("feed url: %v %s", err, svc.FeedURL())
 	}
 	id := catIDOf(t, svc, "Plex Media Server")
 	_, spec, _, err := svc.Spec(id)
@@ -227,8 +226,8 @@ func TestCatalogueCacheAndOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range spec.Configs {
-		if c.Type == docker.TypePath && c.Host != "/var/lib/apps/plex" {
-			t.Errorf("custom appdata not applied: %+v", c)
+		if c.Type == docker.TypePath && c.Host != "/srv/feldcore/appdata/plex" {
+			t.Errorf("appdata share not used: %+v", c)
 		}
 	}
 	if _, _, _, err := svc.Spec("nope"); err != ErrNotFound {

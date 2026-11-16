@@ -98,6 +98,8 @@ func (s *Server) Router() http.Handler {
 			// short request timeout.
 			r.Post("/apps/refresh", s.handleAppsRefresh)
 			r.Post("/setup/wizard", s.handleWizard)
+			r.Put("/settings/services", s.handleSettingsService)
+			r.Put("/settings/updates", s.handleSettingsUpdates)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -119,9 +121,17 @@ func (s *Server) Router() http.Handler {
 				r.Get("/setup/wizard", s.handleWizardStatus)
 
 				r.Get("/apps", s.handleApps)
-				r.Get("/apps/settings", s.handleAppsSettings)
-				r.Put("/apps/settings", s.handleAppsSettingsPut)
 				r.Get("/apps/{id}", s.handleAppSpec)
+
+				r.Get("/settings", s.handleSettings)
+				r.Put("/settings/system", s.handleSettingsSystem)
+				r.Put("/settings/network", s.handleSettingsNetwork)
+				r.Put("/settings/firewall", s.handleSettingsFirewall)
+				r.Put("/settings/password", s.handleSettingsPassword)
+				r.Put("/settings/session", s.handleSettingsSession)
+				r.Put("/settings/feed", s.handleSettingsFeed)
+				r.Put("/settings/defaults", s.handleSettingsDefaults)
+				r.Post("/settings/shares", s.handleSettingsShares)
 
 				r.Get("/docker/status", s.handleDockerStatus)
 				r.Get("/docker/options", s.handleDockerOptions)

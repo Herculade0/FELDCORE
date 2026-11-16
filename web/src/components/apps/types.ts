@@ -37,12 +37,6 @@ export interface Catalogue {
   apps: AppSummary[];
 }
 
-export interface AppSettings {
-  appdata: string;
-  appdataDefault: string;
-  appdataCustom: boolean;
-}
-
 export interface AppSpec {
   app: AppSummary;
   spec: Spec;
