@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Cpu, Loader2, Pencil, Plus, X } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
-import { Alert, Button, IconButton, Modal, SelectField, TextField, Toggle } from "../form";
+import { Alert, Button, IconButton, Modal, SelectField, TextField, Toggle, inputClass } from "../form";
 import ConfigDialog from "./ConfigDialog";
 import {
+  blankConfig,
   configSummary,
   type ConfigItem,
   type Container,
@@ -36,7 +37,33 @@ const NEW_SPEC: Spec = {
   gpu: false,
   configs: [],
   autostart: true,
+  webUi: "",
+  icon: "",
+  extraParams: "",
+  privileged: false,
 };
+
+/** Fill fields the server omits when they are empty. */
+function hydrate(s: Spec): Spec {
+  return {
+    ...NEW_SPEC,
+    ...s,
+    configs: (s.configs ?? []).map((c) => ({ ...blankConfig(c.type), ...c })),
+  };
+}
+
+function configFilled(c: ConfigItem): boolean {
+  switch (c.type) {
+    case "path":
+      return c.host.trim() !== "" && c.container.trim() !== "";
+    case "port":
+      return c.containerPort > 0 && c.hostPort > 0;
+    case "device":
+      return c.host.trim().startsWith("/dev/");
+    default:
+      return c.key.trim() !== "" && c.value.trim() !== "";
+  }
+}
 
 /**
  * Create a container, or edit an existing one. Editing loads the container's
@@ -45,16 +72,27 @@ const NEW_SPEC: Spec = {
  */
 export default function ContainerDialog({
   container,
+  preset,
+  notes,
+  heading,
   onClose,
   onSaved,
 }: {
   /** The container to edit, or undefined to create one. */
   container?: Container;
+  /** A template to create from. Nothing is installed until the form is submitted. */
+  preset?: Spec;
+  notes?: string[];
+  heading?: string;
   onClose: () => void;
   onSaved: (name: string, edited: boolean) => void;
 }) {
   const editing = !!container;
-  const [spec, setSpec] = useState<Spec | null>(editing ? null : NEW_SPEC);
+  const fromApp = preset !== undefined;
+  const [spec, setSpec] = useState<Spec | null>(editing ? null : hydrate(preset ?? NEW_SPEC));
+  const [advanced, setAdvanced] = useState(() =>
+    (preset?.configs ?? []).some((c) => c.required && c.display && c.display !== "always" && !configFilled(c)),
+  );
   const [info, setInfo] = useState<SpecInfo | null>(null);
   const [options, setOptions] = useState<Options | null>(null);
   const [images, setImages] = useState<Image[]>([]);
@@ -78,7 +116,7 @@ export default function ContainerDialog({
     api<SpecInfo>(`/docker/containers/${encodeURIComponent(container.id)}/spec`)
       .then((res) => {
         setInfo(res);
-        setSpec({ ...res.spec, configs: res.spec.configs ?? [] });
+        setSpec(hydrate(res.spec));
       })
       .catch((e) => setLoadError(errorMessage(e)));
   }, [container]);
@@ -98,6 +136,12 @@ export default function ContainerDialog({
 
   const submit = async () => {
     if (!spec || locked) return;
+    const missing = spec.configs.find((c) => c.required && !configFilled(c));
+    if (missing) {
+      if (missing.display && missing.display !== "always") setAdvanced(true);
+      setError(`${missing.name || missing.key || "A setting"} is required.`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -120,7 +164,12 @@ export default function ContainerDialog({
   const networks = [...(options?.networks ?? ["bridge", "host", "none"])];
   if (spec && !networks.includes(spec.network)) networks.push(spec.network);
 
-  const title = container ? `Edit ${container.name}` : "Run a container";
+  const title = container ? `Edit ${container.name}` : (heading ?? "Run a container");
+  const showTemplate =
+    fromApp || !!(spec && (spec.webUi || spec.icon || spec.extraParams || spec.privileged));
+  const hiddenCount = spec
+    ? spec.configs.filter((c) => c.display === "advanced" || c.display === "hidden").length
+    : 0;
 
   return (
     <>
@@ -220,17 +269,26 @@ export default function ContainerDialog({
               </SelectField>
             </div>
 
+            {showTemplate && <TemplateFields spec={spec} notes={fromApp ? notes : undefined} onChange={set} />}
+
             <GpuRow spec={spec} options={options} onChange={(gpu) => set({ gpu })} />
 
             <section>
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex items-center justify-between gap-3">
                 <h3 className="text-xs font-bold text-ink-2">
                   Paths, ports, variables, labels and devices
                 </h3>
-                <Button size="sm" onClick={() => setConfigAt(-1)}>
-                  <Plus size={13} strokeWidth={2.75} />
-                  Add configuration
-                </Button>
+                <div className="flex items-center gap-2">
+                  {hiddenCount > 0 && (
+                    <Button size="sm" onClick={() => setAdvanced((v) => !v)}>
+                      {advanced ? "Hide advanced" : `Show advanced (${hiddenCount})`}
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={() => setConfigAt(-1)}>
+                    <Plus size={13} strokeWidth={2.75} />
+                    Add configuration
+                  </Button>
+                </div>
               </div>
               {spec.configs.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-line px-4 py-5 text-center text-xs font-medium text-ink-3">
@@ -239,14 +297,17 @@ export default function ContainerDialog({
                 </p>
               ) : (
                 <ul className="space-y-2">
-                  {spec.configs.map((c, i) => (
-                    <ConfigRow
-                      key={i}
-                      item={c}
-                      onEdit={() => setConfigAt(i)}
-                      onRemove={() => set({ configs: spec.configs.filter((_, j) => j !== i) })}
-                    />
-                  ))}
+                  {spec.configs.map((c, i) => {
+                    if (!advanced && (c.display === "advanced" || c.display === "hidden")) return null;
+                    return (
+                      <ConfigRow
+                        key={i}
+                        item={c}
+                        onEdit={() => setConfigAt(i)}
+                        onRemove={() => set({ configs: spec.configs.filter((_, j) => j !== i) })}
+                      />
+                    );
+                  })}
                 </ul>
               )}
             </section>
@@ -279,6 +340,84 @@ export default function ContainerDialog({
   );
 }
 
+function TemplateFields({
+  spec,
+  notes,
+  onChange,
+}: {
+  spec: Spec;
+  notes?: string[];
+  onChange: (patch: Partial<Spec>) => void;
+}) {
+  const [iconOk, setIconOk] = useState(true);
+  return (
+    <section className="space-y-4 rounded-2xl border border-line p-4">
+      <div className="flex items-center gap-3">
+        {spec.icon && iconOk ? (
+          <img
+            src={spec.icon}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded-2xl bg-surface-2 object-contain"
+            referrerPolicy="no-referrer"
+            onError={() => setIconOk(false)}
+          />
+        ) : null}
+        <div>
+          <h3 className="text-sm font-bold text-ink">From the template</h3>
+          <p className="text-xs font-medium text-ink-3">
+            Review these settings, then apply. Nothing is installed until you do.
+          </p>
+        </div>
+      </div>
+      {notes && notes.length > 0 && (
+        <Alert tone="info">
+          <ul className="space-y-1">
+            {notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+      <TextField
+        label="WebUI"
+        value={spec.webUi}
+        onChange={(e) => onChange({ webUi: e.target.value })}
+        placeholder="http://[IP]:[PORT:8080]/"
+        hint="Unraid's link template. [IP] is this server and [PORT:n] is the published port."
+        autoCapitalize="none"
+        spellCheck={false}
+      />
+      <div>
+        <label htmlFor="feldcore-extra" className="mb-1.5 block text-xs font-bold text-ink-2">
+          Extra parameters
+        </label>
+        <textarea
+          id="feldcore-extra"
+          value={spec.extraParams}
+          onChange={(e) => onChange({ extraParams: e.target.value })}
+          rows={2}
+          spellCheck={false}
+          placeholder="--cap-add=NET_ADMIN"
+          className={`${inputClass} resize-y font-mono text-xs`}
+        />
+        <p className="mt-1.5 text-xs font-medium text-ink-3">
+          Capabilities, memory, shared memory, DNS, tmpfs and logging options here are applied.
+          Anything else is kept so you can see it.
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-sm font-bold text-ink">Privileged</div>
+          <p className="text-xs font-medium text-ink-3">
+            Gives the container full access to this server. Leave this off unless the app needs it.
+          </p>
+        </div>
+        <Toggle checked={spec.privileged} onChange={(privileged) => onChange({ privileged })} label="Privileged" />
+      </div>
+    </section>
+  );
+}
+
 const NETWORK_HINT: Record<string, string> = {
   bridge: "Isolated from your network; reachable through the ports you map.",
   host: "Shares this server's network directly. Port mappings are ignored.",
@@ -303,7 +442,12 @@ function ConfigRow({
         {TYPE_CHIP[item.type]}
       </span>
       <div className="min-w-0 flex-1">
-        {item.name && <div className="truncate text-sm font-bold text-ink">{item.name}</div>}
+        {item.name && (
+          <div className="truncate text-sm font-bold text-ink">
+            {item.name}
+            {item.required && <span className="text-bad"> *</span>}
+          </div>
+        )}
         <div className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-ink-2">
           <span className="truncate">{left}</span>
           <span className="shrink-0 text-ink-3">{sep}</span>
@@ -311,6 +455,11 @@ function ConfigRow({
           {readOnly && (
             <span className="shrink-0 rounded bg-track px-1 py-px font-sans text-[9px] font-bold text-ink-3">
               READ ONLY
+            </span>
+          )}
+          {item.display === "hidden" && (
+            <span className="shrink-0 rounded bg-track px-1 py-px font-sans text-[9px] font-bold text-ink-3">
+              HIDDEN
             </span>
           )}
         </div>

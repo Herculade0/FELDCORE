@@ -42,10 +42,10 @@ Follow-ups
 - [x] GPU sharing switch for AMD/Intel-style GPUs (/dev/dri)
 - [x] Allocations table: network, address and host ports per container
 
-### M2b — Docker app store 🔜
-- [ ] Ingest the Unraid Community Applications template catalogue
-- [ ] Browse / search apps, with icons and categories
-- [ ] One-click install from a template → running container
+### M2b — App Store ✅
+- [x] Cache the Unraid Community Applications catalogue on the server, with refresh
+- [x] Browse / search apps, with icons, categories and descriptions
+- [x] Choosing an app opens the container setup page, prefilled from the template
 - [ ] Update notifications for managed containers
 
 Follow-ups

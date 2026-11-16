@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -268,7 +269,11 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		c.Ports = append(c.Ports, Port{Host: p.PublicPort, Container: p.PrivatePort, Proto: p.Type})
 	}
 	sort.Slice(c.Ports, func(i, j int) bool { return c.Ports[i].Host < c.Ports[j].Host })
-	c.WebURL = guessWebURL(c.Ports)
+	if web := resolveWebUI(rc.Labels[webUILabel], c.Ports); web != "" {
+		c.WebURL = web
+	} else {
+		c.WebURL = guessWebURL(c.Ports)
+	}
 	if c.Ports == nil {
 		// A nil slice marshals to JSON null; the UI expects an array. A
 		// stopped container has no published ports, so this is the common path.
@@ -415,6 +420,45 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// webUIPort matches Unraid's [PORT:32400] placeholder.
+var webUIPort = regexp.MustCompile(`\[PORT:(\d+)\]`)
+
+// resolveWebUI turns an Unraid WebUI template into a link the UI can open.
+// [IP] becomes the HOST token the front-end replaces with this server's name,
+// and [PORT:n] becomes the published host port for container port n.
+// Anything still unresolved is dropped, so a half-filled template is not
+// offered as a link.
+func resolveWebUI(tmpl string, ports []Port) string {
+	tmpl = strings.TrimSpace(tmpl)
+	if tmpl == "" {
+		return ""
+	}
+	out := strings.ReplaceAll(tmpl, "[IP]", "HOST")
+	out = webUIPort.ReplaceAllStringFunc(out, func(m string) string {
+		sub := webUIPort.FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		cport, _ := strconv.Atoi(sub[1])
+		for _, p := range ports {
+			if p.Container == cport && p.Proto == "tcp" && p.Host > 0 {
+				return strconv.Itoa(p.Host)
+			}
+		}
+		if cport > 0 {
+			return strconv.Itoa(cport)
+		}
+		return m
+	})
+	if strings.ContainsAny(out, "[]") {
+		return ""
+	}
+	if !strings.HasPrefix(out, "http://") && !strings.HasPrefix(out, "https://") {
+		return ""
+	}
+	return out
 }
 
 // guessWebURL offers a browser link for a published HTTP-ish port. It is a

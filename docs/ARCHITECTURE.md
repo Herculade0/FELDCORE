@@ -28,8 +28,10 @@ The whole product ships as one executable with the web UI embedded via
   stream; all other paths serve the embedded SPA with an index.html fallback.
 - **`internal/shares`** *(wip)* — model a share as a managed directory; render
   Samba and NFS config fragments; reload services.
-- **`internal/dockermgr`** *(wip)* — talk to the Docker Engine API over its unix
-  socket; ingest Unraid Community Applications templates into the app store.
+- **`internal/docker`** — talk to the Docker Engine API over its unix socket.
+- **`internal/apps`** — the App Store. It caches the public Community
+  Applications feed (the same JSON Unraid's CA plugin downloads, which already
+  contains each template) and turns a chosen template into a container spec.
 
 ### Web UI (React + TypeScript + Vite + Tailwind)
 A single-page app. Live data arrives over the `/api/v1/system/stream`
@@ -55,11 +57,12 @@ embedded in the binary, so there is no separate web server to run.
   `systemctl reload smbd`. Enabling NFS writes an `/etc/exports.d/feldcore.exports`
   entry and runs `exportfs -ra`.
 
-### Docker + app store
+### Docker + App Store
 - Container lifecycle via the Docker Engine API (list/create/start/stop/logs).
-- The "store" ingests the Unraid **Community Applications** template feed
-  (XML: image, ports, volumes, env, icon, categories) and converts a chosen
-  template into a container create request.
+- The App Store reads the public Community Applications JSON feed, caches it,
+  and converts a chosen template into the container setup form. The user
+  reviews it and applies; nothing is installed automatically. Unraid paths
+  such as `/mnt/user/appdata` are rewritten onto this server's app-data folder.
 
 ### VMs (later)
 - libvirt/KVM domains managed through the libvirt API; VNC/SPICE console in the

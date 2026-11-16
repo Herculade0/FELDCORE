@@ -61,10 +61,15 @@ type Share struct {
 }
 
 // ConfigMeta is the human labelling of one container setting (a path, port,
-// variable...). Docker has nowhere to keep it, so FELDCORE does.
+// variable...). Docker has nowhere to keep it, so FELDCORE does. Display,
+// Required and Mask are copied from an Unraid template so a later edit still
+// knows which values to hide.
 type ConfigMeta struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
+	Display     string `json:"display,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Mask        bool   `json:"mask,omitempty"`
 }
 
 // State is everything FELDCORE persists.
@@ -78,6 +83,9 @@ type State struct {
 	// ContainerMeta holds setting names/descriptions per container name,
 	// keyed by a stable id for the setting (e.g. "path:/config").
 	ContainerMeta map[string]map[string]ConfigMeta `json:"containerMeta,omitempty"`
+	// Appdata is the host folder Unraid's /mnt/user/appdata paths are rewritten
+	// to. Empty means "a share named appdata, or <shares root>/appdata".
+	Appdata string `json:"appdata,omitempty"`
 }
 
 func (s State) clone() State {
@@ -122,6 +130,19 @@ func (s *Store) SetContainerMeta(name string, meta map[string]ConfigMeta) error 
 			st.ContainerMeta = map[string]map[string]ConfigMeta{}
 		}
 		st.ContainerMeta[name] = meta
+		return nil
+	})
+}
+
+// Appdata returns the configured app-data folder, or "" for the default.
+func (s *Store) Appdata() string {
+	return s.Snapshot().Appdata
+}
+
+// SetAppdata stores the app-data folder. An empty path clears it.
+func (s *Store) SetAppdata(path string) error {
+	return s.Update(func(st *State) error {
+		st.Appdata = path
 		return nil
 	})
 }

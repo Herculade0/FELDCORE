@@ -33,7 +33,7 @@ func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDockerCreate(w http.ResponseWriter, r *http.Request) {
 	var spec docker.Spec
-	if !readJSON(w, r, &spec) {
+	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
 	id, err := s.docker.Create(r.Context(), spec)
@@ -57,7 +57,7 @@ func (s *Server) handleDockerSpec(w http.ResponseWriter, r *http.Request) {
 // handleDockerUpdate applies edited settings by recreating the container.
 func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 	var spec docker.Spec
-	if !readJSON(w, r, &spec) {
+	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
 	id, err := s.docker.Update(r.Context(), chi.URLParam(r, "id"), spec)

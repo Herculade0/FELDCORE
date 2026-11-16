@@ -17,6 +17,9 @@ import (
 const (
 	GPULabel       = "feldcore.gpu"        // "true" when GPU access was granted
 	gpuGroupsLabel = "feldcore.gpu.groups" // group ids added for GPU access
+	webUILabel     = "feldcore.webui"      // Unraid-style WebUI template
+	iconLabel      = "feldcore.icon"
+	extraLabel     = "feldcore.extra" // extra parameters, so an edit can show them again
 	labelPrefix    = "feldcore."
 	composeLabel   = "com.docker.compose.project"
 )
@@ -106,6 +109,9 @@ func normaliseSpec(s *Spec) error {
 			if c.HostPort < 0 || c.HostPort > 65535 {
 				return invalid("%s needs a host port between 1 and 65535.", label)
 			}
+			if c.Required && c.HostPort == 0 {
+				return invalid("%s is required.", label)
+			}
 		case TypeVariable, TypeLabel:
 			c.Key = strings.TrimSpace(c.Key)
 			if c.Key == "" || strings.ContainsAny(c.Key, "= \t\r\n") {
@@ -116,6 +122,9 @@ func normaliseSpec(s *Spec) error {
 			}
 			if c.Type == TypeLabel && strings.HasPrefix(c.Key, labelPrefix) {
 				return invalid("Labels starting with %q are reserved for FELDCORE.", labelPrefix)
+			}
+			if c.Required && strings.TrimSpace(c.Value) == "" {
+				return invalid("%s is required.", label)
 			}
 		case TypeDevice:
 			c.Host = strings.TrimSpace(c.Host)
@@ -184,8 +193,11 @@ func describeKey(c Config) string {
 func metaOf(s Spec) map[string]store.ConfigMeta {
 	out := map[string]store.ConfigMeta{}
 	for _, c := range s.Configs {
-		if c.Name != "" || c.Description != "" {
-			out[configKey(c)] = store.ConfigMeta{Name: c.Name, Description: c.Description}
+		if c.Name != "" || c.Description != "" || c.Display != "" || c.Required || c.Mask {
+			out[configKey(c)] = store.ConfigMeta{
+				Name: c.Name, Description: c.Description,
+				Display: c.Display, Required: c.Required, Mask: c.Mask,
+			}
 		}
 	}
 	return out
@@ -201,7 +213,9 @@ type gpuGrant struct {
 // HostConfig maps, leaving every other key as it was. For a new container the
 // maps start empty; for an edit they come from the existing container.
 func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
-	prevGroups := strings.Split(strMapOf(cfg["Labels"])[gpuGroupsLabel], ",")
+	prevLabels := strMapOf(cfg["Labels"])
+	prevGroups := strings.Split(prevLabels[gpuGroupsLabel], ",")
+	prevExtra := prevLabels[extraLabel]
 
 	env := []string{}
 	labels := map[string]string{ManagedLabel: "true"}
@@ -249,6 +263,15 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 			}
 		}
 	}
+	if s.WebUI != "" {
+		labels[webUILabel] = strings.TrimSpace(s.WebUI)
+	}
+	if s.Icon != "" {
+		labels[iconLabel] = strings.TrimSpace(s.Icon)
+	}
+	if s.ExtraParams != "" {
+		labels[extraLabel] = strings.TrimSpace(s.ExtraParams)
+	}
 
 	cfg["Image"] = s.Image
 	cfg["Env"] = env
@@ -265,6 +288,15 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 		policy = "" // the API wants "no" expressed as an empty name
 	}
 	host["RestartPolicy"] = map[string]any{"Name": policy, "MaximumRetryCount": 0}
+	// Privileged is a template flag. Only write it when it is on, or when it
+	// was on and the user turned it off — otherwise an edit would clear a
+	// value FELDCORE never stored.
+	if s.Privileged {
+		host["Privileged"] = true
+	} else if b, ok := host["Privileged"].(bool); ok && b {
+		host["Privileged"] = false
+	}
+	applyExtra(cfg, host, s.ExtraParams, prevExtra)
 }
 
 // specFromInspect derives the editable Spec of an existing container.
@@ -283,6 +315,10 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 		Network:       strOf(host["NetworkMode"]),
 		RestartPolicy: strOf(mapOf(host["RestartPolicy"])["Name"]),
 		GPU:           gpu,
+		WebUI:         labels[webUILabel],
+		Icon:          labels[iconLabel],
+		ExtraParams:   labels[extraLabel],
+		Privileged:    host["Privileged"] == true,
 		Configs:       []Config{},
 	}
 	if s.Network == "" || s.Network == "default" {
@@ -379,6 +415,7 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 	for i := range s.Configs {
 		if m, ok := meta[configKey(s.Configs[i])]; ok {
 			s.Configs[i].Name, s.Configs[i].Description = m.Name, m.Description
+			s.Configs[i].Display, s.Configs[i].Required, s.Configs[i].Mask = m.Display, m.Required, m.Mask
 		}
 	}
 	return s
@@ -477,6 +514,13 @@ func strSliceOf(v any) []string {
 }
 
 func strMapOf(v any) map[string]string {
+	if m, ok := v.(map[string]string); ok {
+		out := make(map[string]string, len(m))
+		for k, val := range m {
+			out[k] = val
+		}
+		return out
+	}
 	out := map[string]string{}
 	for k, val := range mapOf(v) {
 		if s, ok := val.(string); ok {

@@ -224,7 +224,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
         <h2 className="mb-3 px-1 text-[11px] font-bold uppercase tracking-[0.2em] text-ink-3">
           Modules
         </h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {NAV.filter((n) => n.key !== "dashboard").map((item) => (
             <button
               key={item.key}

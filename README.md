@@ -5,8 +5,8 @@ experience that are useful on *any* Linux box, minus the array/parity storage
 model. Drop one binary onto a Debian (or any systemd) machine and you get a
 clean web UI to manage the system, shares, Docker, and later VMs.
 
-> **Status: pre-alpha.** The dashboard, sign-in, Shares and Docker work. The
-> Docker app store and VM management are next — see
+> **Status: pre-alpha.** The dashboard, sign-in, Shares, Docker and the App
+> Store work. VM management is next — see
 > [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why
@@ -34,7 +34,7 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **Sign-in** — administrator account, sessions, everything behind a login | ✅ working |
 | **Shares** — create a folder, expose it over SMB (public, read-only or private with users) and NFS; installs Samba/NFS for you | ✅ working |
 | **Docker** — run, edit and manage containers (state, live stats, logs, lifecycle); Unraid-style paths/ports/variables/labels/devices, a folder picker, GPU sharing and an allocations table; installs Docker for you | ✅ working |
-| **Docker app store** — one-click installs from the Unraid Community Applications catalogue | 🔜 next |
+| **App Store** — browse and search the Unraid Community Applications catalogue; choosing an app opens the container setup prefilled from its template | ✅ working |
 | **Settings** — users/auth, network, services, appearance | 🔜 planned |
 | **VMs** — KVM/libvirt management | 🧭 later |
 
@@ -115,6 +115,13 @@ or a disposable VM.
   or variables in place. The original is kept until the replacement has
   started, and is restored if it does not. Files in mapped folders survive;
   data stored only inside the container does not.
+- The App Store keeps a copy of the Unraid Community Applications catalogue in
+  the data directory (`ca-feed.json`) and only downloads it when you refresh,
+  or the first time, if nothing is saved. Picking an app fills in the
+  container form; it does not install it.
+- Template paths under `/mnt/user/appdata` are rewritten to the app data
+  folder: a share named `appdata` if you have one, otherwise
+  `<shares root>/appdata`, or whatever folder you set under Settings.
 - GPU sharing passes `/dev/dri` into the container and adds the groups that
   own it. Nothing is installed for this.
 
@@ -128,6 +135,7 @@ internal/auth      administrator account + sessions
 internal/store     JSON state file (atomic writes)
 internal/shares    SMB/NFS share management
 internal/docker    Docker Engine API client + container management
+internal/apps      App Store: cached Community Applications catalogue
 scripts/           integration tests
 web/               React front-end (Vite + Tailwind), embedded via go:embed
 deploy/            install.sh + systemd unit
