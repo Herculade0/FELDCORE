@@ -52,6 +52,12 @@ func SelectSources(dataDir, appdata string, includeSnap, includeApp bool, exists
 			out = append(out, Source{Name: "appdata", Note: "No appdata folder was found, so it was not included."})
 		}
 	}
+	// Compose stacks live in <data-dir>/compose. See docs/COMPOSE.md.
+	// Each stack is a subdirectory with docker-compose.yml and an optional .env.
+	comp := filepath.Join(dataDir, "compose")
+	if exists(comp) {
+		out = append(out, Source{Path: comp, Name: "compose"})
+	}
 	return out
 }
 

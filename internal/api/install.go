@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Herculade0/feldcore/internal/compose"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/store"
 )
@@ -65,6 +66,14 @@ func (s *Server) wireInstalls() {
 			},
 		})
 	}
+	s.installs.Register("compose", install.Spec{
+		Label: "Docker Compose",
+		Apt:   true,
+		Run: func(ctx context.Context, rep install.Reporter) error {
+			rep.Step("Installing Docker Compose")
+			return compose.InstallCLI(ctx)
+		},
+	})
 	if s.remote != nil {
 		rem := s.remote
 		s.installs.Register("cloudflared", install.Spec{

@@ -13,6 +13,7 @@ import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
 import DockerPage from "./components/docker/DockerPage";
+import StacksPage from "./components/stacks/StacksPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
 import Wizard from "./components/setup/Wizard";
@@ -47,6 +48,7 @@ function Gate() {
 
 function Shell() {
   const [active, setActive] = useState<NavKey>("dashboard");
+  const [stackFocus, setStackFocus] = useState<string | null>(null);
   const { username } = useAuth();
 
   return (
@@ -116,7 +118,15 @@ function Shell() {
           ) : active === "shares" ? (
             <SharesPage />
           ) : active === "docker" ? (
-            <DockerPage onOpenApps={() => setActive("apps")} />
+            <DockerPage
+              onOpenApps={() => setActive("apps")}
+              onOpenStack={(name) => {
+                setStackFocus(name);
+                setActive("stacks");
+              }}
+            />
+          ) : active === "stacks" ? (
+            <StacksPage focus={stackFocus} onFocusHandled={() => setStackFocus(null)} />
           ) : active === "apps" ? (
             <AppsPage />
           ) : active === "vms" ? (

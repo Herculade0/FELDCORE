@@ -20,6 +20,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/compose"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/files"
 	"github.com/Herculade0/feldcore/internal/install"
@@ -55,6 +56,10 @@ type Deps struct {
 	Backups    *backup.Service
 	Mail       *notify.Service
 	Publish    *publish.Service
+	// DataDir and SharesRoot enable Compose stacks. Tests that leave DataDir
+	// empty keep the previous API and get 404 for /stacks.
+	DataDir    string
+	SharesRoot string
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -82,6 +87,7 @@ type Server struct {
 	fetcher    *files.Fetcher
 	installs   *install.Runner
 	publish    *publish.Service
+	stacks     *compose.Service
 }
 
 // New returns a Server.
@@ -92,6 +98,35 @@ func New(d Deps) *Server {
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
+	}
+	if d.DataDir != "" {
+		dataDir, sharesRoot := d.DataDir, d.SharesRoot
+		s.stacks = compose.New(compose.Deps{
+			DataDir: dataDir, SharesRoot: sharesRoot, Log: d.Log,
+			Paths: func() compose.PathInfo {
+				info := compose.PathInfo{SharesRoot: sharesRoot}
+				if s.shares != nil {
+					info.Shares = map[string]string{}
+					for _, f := range s.shares.Folders() {
+						info.Shares[strings.ToLower(f.Name)] = f.Path
+					}
+				}
+				return info
+			},
+			Inspect: func(ctx context.Context, id string) (docker.SpecInfo, error) {
+				if s.docker == nil {
+					return docker.SpecInfo{}, &docker.OpError{Msg: "Docker is not available."}
+				}
+				return s.docker.Spec(ctx, id)
+			},
+			Remove: func(ctx context.Context, id string) error {
+				if s.docker == nil {
+					return &docker.OpError{Msg: "Docker is not available."}
+				}
+				_, err := s.docker.Remove(ctx, id, true, false)
+				return err
+			},
+		})
 	}
 	s.uploads = files.NewUploads()
 	s.fetcher = files.NewFetcher(func() bool {
@@ -177,6 +212,8 @@ func (s *Server) Router() http.Handler {
 			r.Post("/shares/{name}/files/zip", s.handleFileZip)
 			r.Post("/shares/{name}/uploads", s.handleUploadCreate)
 			r.Patch("/shares/{name}/uploads/{id}", s.handleUploadPatch)
+			// Cloning a repository can take longer than the short timeout.
+			r.Post("/stacks/import", s.handleStackImport)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -284,6 +321,20 @@ func (s *Server) Router() http.Handler {
 				r.Post("/docker/containers/{id}/stop", s.handleDockerStop)
 				r.Post("/docker/containers/{id}/restart", s.handleDockerRestart)
 				r.Delete("/docker/containers/{id}", s.handleDockerRemove)
+
+				r.Get("/stacks", s.handleStacks)
+				r.Post("/stacks", s.handleStackCreate)
+				r.Post("/stacks/preview", s.handleStackPreview)
+				r.Post("/stacks/from-container", s.handleStackFromContainer)
+				r.Get("/stacks/jobs/{id}", s.handleStackJob)
+				r.Get("/stacks/{name}", s.handleStackGet)
+				r.Put("/stacks/{name}", s.handleStackSave)
+				r.Post("/stacks/{name}/diff", s.handleStackDiff)
+				r.Post("/stacks/{name}/deploy", s.handleStackDeploy)
+				r.Post("/stacks/{name}/update", s.handleStackUpdate)
+				r.Post("/stacks/{name}/stop", s.handleStackStop)
+				r.Delete("/stacks/{name}", s.handleStackRemove)
+				r.Get("/stacks/{name}/logs", s.handleStackLogs)
 			})
 		})
 
@@ -401,6 +452,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		fileOp       *files.OpError
 		fileConflict *files.ConflictError
 		fileForbid   *files.ForbiddenURL
+		stackInput   *compose.InputError
+		stackOp      *compose.OpError
+		stackGate    *compose.Gate
 	)
 	switch {
 	case errors.As(err, &authInput):
@@ -431,6 +485,16 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, snapInput.Msg)
 	case errors.As(err, &fileInput):
 		writeError(w, http.StatusBadRequest, fileInput.Msg)
+	case errors.As(err, &stackInput):
+		writeError(w, http.StatusBadRequest, stackInput.Msg)
+	case errors.As(err, &stackGate):
+		if stackGate.Findings == nil {
+			stackGate.Findings = []compose.Finding{}
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": stackGate.Error(), "findings": stackGate.Findings,
+			"diff": stackGate.Diff, "confirm": stackGate.Confirm, "ack": stackGate.Ack,
+		})
 	case errors.As(err, &fileForbid):
 		writeError(w, http.StatusBadRequest, fileForbid.Error())
 	case errors.As(err, &fileConflict):
@@ -479,6 +543,11 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		}
 		writeError(w, http.StatusInternalServerError, fileOp.Msg)
+	case errors.As(err, &stackOp):
+		if s.log != nil {
+			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, stackOp.Msg)
 	case errors.Is(err, apps.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):
