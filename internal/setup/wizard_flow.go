@@ -28,20 +28,20 @@ type View struct {
 	Zones    []string `json:"zones,omitempty"`
 	NTP      string   `json:"ntp"`
 
-	Iface         string         `json:"iface"`
-	IP            string         `json:"ip"`
-	Gateway       string         `json:"gateway"`
-	DNS           []string       `json:"dns"`
-	NetMode       string         `json:"netMode"`
-	Backend       string         `json:"backend"`
-	NewURL        string         `json:"newUrl,omitempty"`
-	Mounts        []Mount        `json:"mounts"`
-	Disks         []storage.Disk `json:"disks,omitempty"`
-	SharesRoot    string         `json:"sharesRoot"`
-	OnOSDisk      bool           `json:"onOsDisk"`
-	Destructive   bool           `json:"destructive,omitempty"`
-	ConfirmPhrase string         `json:"confirmPhrase,omitempty"`
-	Connectivity  *ConnStatus    `json:"connectivity,omitempty"`
+	Iface         string              `json:"iface"`
+	IP            string              `json:"ip"`
+	Gateway       string              `json:"gateway"`
+	DNS           []string            `json:"dns"`
+	NetMode       string              `json:"netMode"`
+	Backend       string              `json:"backend"`
+	NewURL        string              `json:"newUrl,omitempty"`
+	Mounts        []Mount             `json:"mounts"`
+	Disks         []storage.SetupDisk `json:"disks,omitempty"`
+	SharesRoot    string              `json:"sharesRoot"`
+	OnOSDisk      bool                `json:"onOsDisk"`
+	Destructive   bool                `json:"destructive,omitempty"`
+	ConfirmPhrase string              `json:"confirmPhrase,omitempty"`
+	Connectivity  *ConnStatus         `json:"connectivity,omitempty"`
 
 	Virt     bool   `json:"virt"`
 	Samba    bool   `json:"samba"`

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/secrets"
@@ -215,4 +216,98 @@ func writeDisk(t *testing.T, root string) {
 	must(filepath.Join(root, "sys", "block", "sda", "sda1", "size"), "134217728\n")
 	must(filepath.Join(root, "sys", "block", "sdb", "size"), "2147483648\n")
 	must(filepath.Join(root, "sys", "block", "sdb", "device", "model"), "Data\n")
+}
+
+// The wizard storage step calls *storage.Service, the same controller the
+// Storage page uses. An existing pool is selected without formatting, and a
+// new pool name is still only a folder.
+func TestWizardStorageStepUsesController(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &volRun{}
+	disks, err := storage.Open(storage.Deps{
+		DataDir: dir,
+		Probe: func(context.Context) ([]storage.Disk, error) {
+			return []storage.Disk{
+				{ID: "sda", Name: "sda", Path: "/dev/sda", SizeBytes: 64 << 30, OS: true, Mountpoint: "/"},
+				{ID: "sdb", Name: "sdb", Path: "/dev/sdb", SizeBytes: 1 << 40, Model: "Data", Serial: "SER"},
+			}, nil
+		},
+		Run: run,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "storage.json"), []byte(`{
+	  "version": 1,
+	  "pools": [{
+	    "name": "data",
+	    "fs": "btrfs",
+	    "layout": "single",
+	    "uuid": "01234567-89ab-cdef-0123-456789abcdef",
+	    "mount": "/mnt/data",
+	    "members": [{"id": "sdb", "path": "/dev/sdb"}]
+	  }]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Open already loaded an empty file. Re-open so the pool is visible.
+	disks, err = storage.Open(storage.Deps{
+		DataDir: dir,
+		Probe: func(context.Context) ([]storage.Disk, error) {
+			return []storage.Disk{
+				{ID: "sda", Name: "sda", Path: "/dev/sda", SizeBytes: 64 << 30, OS: true, Mountpoint: "/"},
+				{ID: "sdb", Name: "sdb", Path: "/dev/sdb", SizeBytes: 1 << 40, Model: "Data", Serial: "SER"},
+			}, nil
+		},
+		Run: run,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(Deps{Store: st, DataDir: dir, Cmd: &fakeCmd{}, Root: func() bool { return true }})
+	s.UseVolume(disks)
+	ctx := context.Background()
+	lines, _, _, destructive, err := s.planStorage(ctx, Request{StorageMode: "pool", StoragePool: "data", StorageMount: "/srv/ignored"})
+	if err != nil || destructive || len(lines) == 0 {
+		t.Fatalf("plan %+v %v %v", lines, destructive, err)
+	}
+	mount, err := s.applyStorage(ctx, Request{StorageMode: "pool", StoragePool: "data", StorageMount: "/srv/ignored"})
+	if err != nil || mount != "/mnt/data" {
+		t.Fatalf("apply %s %v", mount, err)
+	}
+	if st.Snapshot().SharesRoot != "/mnt/data" {
+		t.Fatalf("shares root %s", st.Snapshot().SharesRoot)
+	}
+	if strings.Contains(strings.Join(run.calls, "\n"), "mkfs") {
+		t.Fatal(strings.Join(run.calls, "\n"))
+	}
+	listed, err := disks.Disks(ctx)
+	if err != nil || len(listed) != 2 || listed[1].Serial != "SER" || listed[1].Model != "Data" {
+		t.Fatalf("inventory %+v %v", listed, err)
+	}
+	keep := filepath.Join(t.TempDir(), "keep")
+	lines, _, _, destructive, err = s.planStorage(ctx, Request{StorageMode: "pool", StoragePool: "fresh", StorageMount: keep})
+	if err != nil || destructive {
+		t.Fatalf("new name %+v %v", lines, err)
+	}
+	if _, _, _, _, err := s.planStorage(ctx, Request{StorageMode: "disk", StorageDevice: "/dev/sda", StorageFormat: true, StorageMount: keep, StorageConfirm: "ERASE sda"}); err == nil {
+		t.Fatal("wizard planned a format of the operating-system disk")
+	}
+}
+
+type volRun struct{ calls []string }
+
+func (v *volRun) Look(string) bool { return false }
+
+func (v *volRun) Run(_ context.Context, _ time.Duration, name string, args ...string) (string, error) {
+	joined := name + " " + strings.Join(args, " ")
+	v.calls = append(v.calls, joined)
+	if name == "findmnt" && strings.Contains(joined, "/mnt/data") {
+		return `UUID="01234567-89ab-cdef-0123-456789abcdef" FSTYPE="btrfs" SOURCE="/dev/sdb" TARGET="/mnt/data"`, nil
+	}
+	return "", nil
 }

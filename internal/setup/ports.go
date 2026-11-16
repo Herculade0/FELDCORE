@@ -16,13 +16,15 @@ import (
 // The concrete services satisfy the wizard's seams. A signature change in
 // those packages fails here instead of only when the daemon is wired.
 var (
-	_ Auditor        = (*auth.Service)(nil)
-	_ TunnelSaver    = (*remote.Service)(nil)
-	_ VPNSaver       = (*vpn.Service)(nil)
-	_ MailSaver      = (*notify.Service)(nil)
-	_ DriveSaver     = (*backup.Service)(nil)
-	_ secretBox      = (*secrets.Box)(nil)
-	_ storage.Volume = (*storage.Linux)(nil)
+	_ Auditor            = (*auth.Service)(nil)
+	_ TunnelSaver        = (*remote.Service)(nil)
+	_ VPNSaver           = (*vpn.Service)(nil)
+	_ MailSaver          = (*notify.Service)(nil)
+	_ DriveSaver         = (*backup.Service)(nil)
+	_ secretBox          = (*secrets.Box)(nil)
+	_ storage.Volume     = (*storage.Linux)(nil)
+	_ storage.Volume     = (*storage.Service)(nil)
+	_ storage.Controller = (*storage.Service)(nil)
 )
 
 // Auditor records a state change. *auth.Service satisfies it.
@@ -64,7 +66,11 @@ func (s *Service) UseAccounts(a *auth.Service) { s.accounts = a }
 // UseAudit records wizard changes in the audit log.
 func (s *Service) UseAudit(a Auditor) { s.auditor = a }
 
-// UseVolume connects disk inventory. A nil volume only accepts a folder path.
+// UseVolume connects the wizard's storage step. The daemon passes
+// *storage.Service, which is also storage.Controller, so the step lists the
+// same disks as the Storage page and mounts a pool that already exists. A
+// nil volume only accepts a folder path. *storage.Linux remains for tests
+// that read a fake sysfs tree.
 func (s *Service) UseVolume(v storage.Volume) { s.disks = v }
 
 // UseTunnel connects Cloudflare Tunnel quick setup.

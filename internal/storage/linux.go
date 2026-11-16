@@ -36,7 +36,7 @@ func New(root string, cmd Exec) *Linux {
 	return &Linux{root: root, cmd: cmd}
 }
 
-func (l *Linux) Disks(ctx context.Context) ([]Disk, error) {
+func (l *Linux) Disks(ctx context.Context) ([]SetupDisk, error) {
 	return readDisks(l.root)
 }
 
@@ -114,6 +114,13 @@ func (l *Linux) appendFstab(spec, mount string) error {
 	if l.root == "/" {
 		path = "/etc/fstab"
 	}
+	return writeFstab(path, spec, mount)
+}
+
+// writeFstab adds one ext4 line for the wizard's single-disk choice. An
+// existing line for the same folder is left alone. Pools created on the
+// Storage page do not use this; they mount by UUID through systemd.
+func writeFstab(path, spec, mount string) error {
 	existing, _ := os.ReadFile(path)
 	if strings.Contains(string(existing), " "+mount+" ") || strings.Contains(string(existing), "\t"+mount+"\t") {
 		return nil
@@ -133,24 +140,24 @@ func (l *Linux) appendFstab(spec, mount string) error {
 	return nil
 }
 
-func readDisks(root string) ([]Disk, error) {
+func readDisks(root string) ([]SetupDisk, error) {
 	block := filepath.Join(root, "sys", "block")
 	entries, err := os.ReadDir(block)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []Disk{}, nil
+			return []SetupDisk{}, nil
 		}
 		return nil, op("Could not list disks.")
 	}
 	mounts := parseMounts(readFile(filepath.Join(root, "proc", "mounts")))
-	var out []Disk
+	var out []SetupDisk
 	for _, e := range entries {
 		name := e.Name()
 		if skipDisk(name) {
 			continue
 		}
 		base := filepath.Join(block, name)
-		d := Disk{
+		d := SetupDisk{
 			Name:       name,
 			Path:       "/dev/" + name,
 			Size:       sectorSize(readFile(filepath.Join(base, "size"))),
@@ -168,7 +175,7 @@ func readDisks(root string) ([]Disk, error) {
 			if !strings.HasPrefix(k.Name(), name) {
 				continue
 			}
-			p := Part{
+			p := SetupPart{
 				Name: k.Name(),
 				Path: "/dev/" + k.Name(),
 				Size: sectorSize(readFile(filepath.Join(base, k.Name(), "size"))),

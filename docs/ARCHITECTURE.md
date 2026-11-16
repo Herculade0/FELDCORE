@@ -35,6 +35,9 @@ The whole product ships as one executable with the web UI embedded via
   embedded SPA with an index.html fallback.
 - **`internal/shares`** *(wip)* — model a share as a managed directory; render
   Samba and NFS config fragments; reload services.
+- **`internal/storage`** — disk inventory, pools (btrfs, ZFS, XFS), UUID mounts,
+  and scrub, balance and trim on the install job runner. The first-run wizard
+  calls the same Go API. See [STORAGE.md](STORAGE.md).
 - **`internal/docker`** — talk to the Docker Engine API over its unix socket.
 - **`internal/apps`** — the App Store. It caches the public Community
   Applications feed (the same JSON Unraid's CA plugin downloads, which already
@@ -100,7 +103,7 @@ behind authentication:
   leaked state file does not yield usable sessions. The cookie is HttpOnly and
   SameSite=Strict, and Secure when served over TLS.
 - **Agent tokens** are a second credential, for the owner's own agents. Each
-  is named, scoped (`read`, `containers`, `vms`, `files:read`, `files:write`, `admin`), and optional
+  is named, scoped (`read`, `containers`, `vms`, `files:read`, `files:write`, `storage`, `admin`), and optional
   expiry. The secret is shown once. Only a SHA-256 hash is stored. Callers
   send `Authorization: Bearer`. A session cookie is still the administrator
   and is not limited by scopes. A token is. Admin does not include a shell:

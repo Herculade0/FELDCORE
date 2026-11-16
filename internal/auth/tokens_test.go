@@ -53,8 +53,11 @@ func TestTokenHashIsSHA256AndSecretIsNotStored(t *testing.T) {
 
 func TestTokenExpiryRevokeAndScopes(t *testing.T) {
 	a := newTestService(t)
-	if !Allows([]string{ScopeAdmin}, ScopeVMs) || !Allows([]string{ScopeAdmin}, ScopeRead) || !Allows([]string{ScopeAdmin}, ScopeFilesWrite) {
+	if !Allows([]string{ScopeAdmin}, ScopeVMs) || !Allows([]string{ScopeAdmin}, ScopeRead) || !Allows([]string{ScopeAdmin}, ScopeFilesWrite) || !Allows([]string{ScopeAdmin}, ScopeStorage) {
 		t.Fatal("admin should include the other scopes")
+	}
+	if Allows([]string{ScopeRead}, ScopeStorage) {
+		t.Fatal("read should not include storage")
 	}
 	if !Allows([]string{ScopeFilesWrite}, ScopeFilesRead) || Allows([]string{ScopeFilesRead}, ScopeFilesWrite) {
 		t.Fatal("files:write should include files:read, and not the other way round")

@@ -1,10 +1,10 @@
-// Package storage is the disk surface the setup wizard calls.
+// Package storage is FELDCORE's disk and pool control.
 //
-// Disk management (pools, replacement, scrubbing) is owned elsewhere. This
-// package only lists disks and applies one choice: keep a folder, use a
-// disk that is already mounted, or format a single empty disk after the
-// caller repeats an explicit confirmation phrase. Multi-disk pool assembly
-// is not performed here. A pool choice records a name and a folder.
+// The setup wizard also uses this package. SetupDisk, Choice and Volume are
+// the wizard's keep / one-disk / pool-name step. *Service implements Volume
+// and Controller: the wizard lists the same disks as the Storage page, and
+// naming a pool that already exists mounts that pool. Creating a multi-disk
+// pool stays on Controller, because that requires each disk serial.
 package storage
 
 import (
@@ -14,35 +14,27 @@ import (
 	"strings"
 )
 
-// InputError is a validation failure safe to show.
-type InputError struct{ Msg string }
-
-func (e *InputError) Error() string { return e.Msg }
-
-// OpError is a failed operation safe to show.
-type OpError struct{ Msg string }
-
-func (e *OpError) Error() string { return e.Msg }
-
-func input(msg string) error { return &InputError{Msg: msg} }
-func op(msg string) error    { return &OpError{Msg: msg} }
-
-// Disk is one whole disk. Children are partitions when sysfs lists them.
-type Disk struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Size       int64  `json:"size"`
-	Model      string `json:"model,omitempty"`
-	Rotational bool   `json:"rotational"`
-	Removable  bool   `json:"removable"`
-	FS         string `json:"fs,omitempty"`
-	Mount      string `json:"mount,omitempty"`
-	OS         bool   `json:"os"`
-	Children   []Part `json:"children,omitempty"`
+// SetupDisk is one whole disk as the setup wizard shows it. Children are
+// partitions when sysfs lists them. The Storage page uses Disk, which carries
+// serial, SMART and pool membership; the wizard maps those into this shape.
+type SetupDisk struct {
+	Name       string      `json:"name"`
+	Path       string      `json:"path"`
+	Size       int64       `json:"size"`
+	Model      string      `json:"model,omitempty"`
+	Rotational bool        `json:"rotational"`
+	Removable  bool        `json:"removable"`
+	FS         string      `json:"fs,omitempty"`
+	Mount      string      `json:"mount,omitempty"`
+	OS         bool        `json:"os"`
+	Serial     string      `json:"serial,omitempty"`
+	ByID       string      `json:"byId,omitempty"`
+	UsedFor    string      `json:"usedFor,omitempty"`
+	Children   []SetupPart `json:"children,omitempty"`
 }
 
-// Part is one partition of a disk.
-type Part struct {
+// SetupPart is one partition of a disk in the wizard inventory.
+type SetupPart struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	Size  int64  `json:"size"`
@@ -76,17 +68,18 @@ type Plan struct {
 	Mount         string
 }
 
-// Volume is the wizard's disk dependency. Another disk manager can replace
-// the Linux implementation by providing the same three methods.
+// Volume is the wizard's disk dependency. *Linux serves tests that read a
+// fake sysfs tree. *Service is what the daemon passes: it implements
+// Controller as well, so the wizard and the Storage page share one inventory.
 type Volume interface {
-	Disks(ctx context.Context) ([]Disk, error)
+	Disks(ctx context.Context) ([]SetupDisk, error)
 	Plan(ctx context.Context, in Choice) (Plan, error)
 	Apply(ctx context.Context, in Choice) (mount string, err error)
 }
 
 // Describe builds a plan from an already-loaded inventory. It does not
 // touch the machine.
-func Describe(disks []Disk, in Choice) (Plan, error) {
+func Describe(disks []SetupDisk, in Choice) (Plan, error) {
 	mode := strings.TrimSpace(in.Mode)
 	if mode == "" {
 		mode = "keep"
@@ -116,7 +109,7 @@ func Describe(disks []Disk, in Choice) (Plan, error) {
 
 // Confirm checks a choice, including the erase phrase, and returns the
 // folder it would use. It does not run mkfs or mount.
-func Confirm(disks []Disk, in Choice) (string, error) {
+func Confirm(disks []SetupDisk, in Choice) (string, error) {
 	p, err := Describe(disks, in)
 	if err != nil {
 		return "", err
@@ -127,7 +120,7 @@ func Confirm(disks []Disk, in Choice) (string, error) {
 	return p.Mount, nil
 }
 
-func describePool(disks []Disk, in Choice) (Plan, error) {
+func describePool(disks []SetupDisk, in Choice) (Plan, error) {
 	if in.Format {
 		return Plan{}, input("Setup does not format a multi-disk pool. Choose one empty disk, or use a pool that is already mounted.")
 	}
@@ -152,7 +145,7 @@ func describePool(disks []Disk, in Choice) (Plan, error) {
 	return p, nil
 }
 
-func describeDisk(disks []Disk, in Choice) (Plan, error) {
+func describeDisk(disks []SetupDisk, in Choice) (Plan, error) {
 	disk, part, ok := findDevice(disks, in.Device)
 	if !ok {
 		return Plan{}, input("That disk is not on this server.")
@@ -212,14 +205,14 @@ func describeDisk(disks []Disk, in Choice) (Plan, error) {
 	}, nil
 }
 
-func findDevice(disks []Disk, device string) (Disk, Part, bool) {
+func findDevice(disks []SetupDisk, device string) (SetupDisk, SetupPart, bool) {
 	device = strings.TrimSpace(device)
 	if device == "" {
-		return Disk{}, Part{}, false
+		return SetupDisk{}, SetupPart{}, false
 	}
 	for _, d := range disks {
 		if d.Path == device || "/dev/"+d.Name == device || d.Name == device {
-			return d, Part{}, true
+			return d, SetupPart{}, true
 		}
 		for _, p := range d.Children {
 			if p.Path == device || "/dev/"+p.Name == device || p.Name == device {
@@ -227,10 +220,10 @@ func findDevice(disks []Disk, device string) (Disk, Part, bool) {
 			}
 		}
 	}
-	return Disk{}, Part{}, false
+	return SetupDisk{}, SetupPart{}, false
 }
 
-func mounted(d Disk) bool {
+func mounted(d SetupDisk) bool {
 	if d.Mount != "" {
 		return true
 	}
@@ -242,7 +235,7 @@ func mounted(d Disk) bool {
 	return false
 }
 
-func onOS(mount string, disks []Disk) bool {
+func onOS(mount string, disks []SetupDisk) bool {
 	mount = strings.TrimRight(mount, "/")
 	if mount == "" {
 		mount = "/"
