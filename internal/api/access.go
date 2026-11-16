@@ -215,6 +215,12 @@ func scopeFor(method, path string) string {
 	if scope, ok := fileScope(method, p); ok {
 		return scope
 	}
+	if strings.HasPrefix(p, "/storage") {
+		if method == http.MethodGet || method == http.MethodHead {
+			return auth.ScopeRead
+		}
+		return auth.ScopeStorage
+	}
 	if method == http.MethodGet || method == http.MethodHead {
 		if isReadPath(p) {
 			return auth.ScopeRead
@@ -340,6 +346,11 @@ func targetFrom(path string) string {
 	case strings.HasPrefix(p, "/vms/"):
 		id, _, _ := strings.Cut(strings.TrimPrefix(p, "/vms/"), "/")
 		return id
+	case strings.HasPrefix(p, "/storage/pools/"):
+		name, _, _ := strings.Cut(strings.TrimPrefix(p, "/storage/pools/"), "/")
+		return name
+	case strings.HasPrefix(p, "/storage/shares/"):
+		return strings.Trim(strings.TrimPrefix(p, "/storage/shares/"), "/")
 	default:
 		return ""
 	}
