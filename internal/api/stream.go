@@ -7,15 +7,18 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+
+	"github.com/Herculade0/feldcore/internal/system"
 )
 
-// streamInterval is how often a live sample is pushed to the dashboard.
-const streamInterval = 2 * time.Second
+// writeTimeout bounds how long one frame may take to reach a client.
+const writeTimeout = 5 * time.Second
 
-// handleSystemStream pushes a Stats sample over a WebSocket every streamInterval.
+// handleSystemStream replays the recent history window to a new client, then
+// pushes each live sample as the sampler produces it.
 func (s *Server) handleSystemStream(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Dev server runs on a different origin (Vite); allow same-site use.
+		// The Vite dev server runs on a different origin.
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
@@ -23,32 +26,32 @@ func (s *Server) handleSystemStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.CloseNow()
 
-	ctx := r.Context()
-	ticker := time.NewTicker(streamInterval)
-	defer ticker.Stop()
+	// We never expect client frames; CloseRead handles pings/close for us and
+	// cancels ctx when the peer goes away.
+	ctx := c.CloseRead(r.Context())
 
-	// Send one immediately so the UI paints without waiting a full interval.
-	if err := s.push(ctx, c); err != nil {
-		return
+	history, live, cancel := s.sampler.Subscribe()
+	defer cancel()
+
+	for _, st := range history {
+		if err := send(ctx, c, st); err != nil {
+			return
+		}
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if err := s.push(ctx, c); err != nil {
+		case st := <-live:
+			if err := send(ctx, c, st); err != nil {
 				return
 			}
 		}
 	}
 }
 
-func (s *Server) push(ctx context.Context, c *websocket.Conn) error {
-	st, err := s.sys.Sample(ctx)
-	if err != nil {
-		return err
-	}
-	writeCtx, cancel := context.WithTimeout(ctx, streamInterval)
+func send(ctx context.Context, c *websocket.Conn, st *system.Stats) error {
+	writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
 	return wsjson.Write(writeCtx, c, st)
 }

@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import type { Stats } from "../types";
 
-type Status = "connecting" | "live" | "offline";
+export type StreamStatus = "connecting" | "live" | "offline";
+
+/** How many samples of history the dashboard keeps (2s apart ≈ 2 minutes). */
+export const HISTORY_SIZE = 60;
 
 /**
  * useStatsStream subscribes to the daemon's /api/v1/system/stream WebSocket and
- * returns the latest sample plus connection status. It auto-reconnects with a
- * short backoff so the dashboard recovers if the daemon restarts.
+ * returns the latest sample, a rolling history for graphs, and connection
+ * status. It auto-reconnects with a short backoff so the dashboard recovers if
+ * the daemon restarts.
  */
-export function useStatsStream(): { stats: Stats | null; status: Status } {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [status, setStatus] = useState<Status>("connecting");
+export function useStatsStream(): {
+  stats: Stats | null;
+  history: Stats[];
+  status: StreamStatus;
+} {
+  const [history, setHistory] = useState<Stats[]>([]);
+  const [status, setStatus] = useState<StreamStatus>("connecting");
   const retry = useRef<number>(0);
 
   useEffect(() => {
@@ -28,7 +36,14 @@ export function useStatsStream(): { stats: Stats | null; status: Status } {
       };
       ws.onmessage = (ev) => {
         try {
-          setStats(JSON.parse(ev.data) as Stats);
+          const sample = JSON.parse(ev.data) as Stats;
+          // The daemon replays its history window on every (re)connect, so
+          // skip anything we already hold.
+          setHistory((h) =>
+            h.length && sample.timestamp <= h[h.length - 1].timestamp
+              ? h
+              : [...h.slice(-(HISTORY_SIZE - 1)), sample],
+          );
         } catch {
           /* ignore malformed frame */
         }
@@ -51,5 +66,6 @@ export function useStatsStream(): { stats: Stats | null; status: Status } {
     };
   }, []);
 
-  return { stats, status };
+  const stats = history.length ? history[history.length - 1] : null;
+  return { stats, history, status };
 }

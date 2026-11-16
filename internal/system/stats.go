@@ -7,6 +7,7 @@ package system
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,15 +21,15 @@ import (
 
 // Info is static-ish host information that rarely changes.
 type Info struct {
-	Hostname     string `json:"hostname"`
-	OS           string `json:"os"`
-	Platform     string `json:"platform"`
-	PlatformVer  string `json:"platformVersion"`
-	Kernel       string `json:"kernel"`
-	Arch         string `json:"arch"`
-	CPUModel     string `json:"cpuModel"`
-	CPUCores     int    `json:"cpuCores"`
-	BootTime     int64  `json:"bootTime"`
+	Hostname    string `json:"hostname"`
+	OS          string `json:"os"`
+	Platform    string `json:"platform"`
+	PlatformVer string `json:"platformVersion"`
+	Kernel      string `json:"kernel"`
+	Arch        string `json:"arch"`
+	CPUModel    string `json:"cpuModel"`
+	CPUCores    int    `json:"cpuCores"`
+	BootTime    int64  `json:"bootTime"`
 }
 
 // DiskUsage describes one mounted filesystem.
@@ -141,7 +142,10 @@ func (c *Collector) disks(ctx context.Context) []DiskUsage {
 	if err != nil {
 		return nil
 	}
+	// The same block device can be mounted in several places (bind mounts,
+	// WSL's /mnt/wslg/distro). Report each device once, at its first mount.
 	seen := map[string]bool{}
+	seenDev := map[string]bool{}
 	var out []DiskUsage
 	for _, p := range parts {
 		if skipFstype(p.Fstype) {
@@ -151,6 +155,12 @@ func (c *Collector) disks(ctx context.Context) []DiskUsage {
 			continue
 		}
 		seen[p.Mountpoint] = true
+		if strings.HasPrefix(p.Device, "/dev/") {
+			if seenDev[p.Device] {
+				continue
+			}
+			seenDev[p.Device] = true
+		}
 		u, err := disk.UsageWithContext(ctx, p.Mountpoint)
 		if err != nil || u.Total == 0 {
 			continue

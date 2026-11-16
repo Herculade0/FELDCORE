@@ -1,97 +1,125 @@
 import { useState } from "react";
-import {
-  LayoutDashboard,
-  FolderTree,
-  Container,
-  MonitorPlay,
-  Settings as SettingsIcon,
-} from "lucide-react";
+import { Moon, Sun } from "lucide-react";
+import { NAV, type NavKey } from "./nav";
+import { VERSION } from "./version";
+import { ThemeProvider, useTheme } from "./lib/theme";
+import { LogoMark, Wordmark } from "./components/Logo";
 import Dashboard from "./components/Dashboard";
-
-type NavKey = "dashboard" | "shares" | "docker" | "vms" | "settings";
-
-const NAV: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "shares", label: "Shares", icon: FolderTree },
-  { key: "docker", label: "Docker", icon: Container },
-  { key: "vms", label: "VMs", icon: MonitorPlay },
-  { key: "settings", label: "Settings", icon: SettingsIcon },
-];
+import SettingsPage from "./components/SettingsPage";
+import ComingSoon from "./components/ComingSoon";
 
 export default function App() {
+  return (
+    <ThemeProvider>
+      <Shell />
+    </ThemeProvider>
+  );
+}
+
+function Shell() {
   const [active, setActive] = useState<NavKey>("dashboard");
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-60 flex-col border-r border-white/5 bg-[#0d131c]">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-300">
-            <span className="text-sm font-bold">F</span>
-          </div>
-          <span className="text-sm font-semibold tracking-wide text-slate-100">
-            FELDCORE
-          </span>
+    <div className="min-h-screen md:pl-[17.5rem]">
+      {/* Desktop: floating glass rail */}
+      <aside className="glass fixed inset-y-4 left-4 z-20 hidden w-60 flex-col rounded-3xl p-4 md:flex">
+        <div className="flex items-center gap-3 px-2 py-2">
+          <LogoMark />
+          <Wordmark />
         </div>
-        <nav className="mt-2 flex-1 space-y-1 px-3">
-          {NAV.map(({ key, label, icon: Icon }) => (
+        <nav className="mt-6 flex-1 space-y-1.5" aria-label="Main">
+          {NAV.map(({ key, label, icon: Icon, ready }) => {
+            const on = active === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setActive(key)}
+                aria-current={on ? "page" : undefined}
+                className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm font-semibold transition-colors ${
+                  on
+                    ? "accent-gradient text-white shadow-lg shadow-accent/30"
+                    : "text-ink-2 hover:bg-accent/8 hover:text-ink"
+                }`}
+              >
+                <Icon size={18} strokeWidth={2.1} />
+                {label}
+                {!ready && (
+                  <span
+                    className={`ml-auto rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                      on ? "bg-white/20 text-white" : "bg-track text-ink-3"
+                    }`}
+                  >
+                    Soon
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="flex items-center justify-between px-2">
+          <span className="text-[10px] font-semibold tracking-wider text-ink-3">
+            v{VERSION} · pre-alpha
+          </span>
+          <ThemeToggle />
+        </div>
+      </aside>
+
+      {/* Mobile: top bar */}
+      <header className="flex items-center justify-between px-4 pt-4 md:hidden">
+        <div className="flex items-center gap-3">
+          <LogoMark size={32} />
+          <Wordmark />
+        </div>
+        <ThemeToggle />
+      </header>
+
+      <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-10 md:pt-8">
+        {active === "dashboard" ? (
+          <Dashboard onNavigate={setActive} />
+        ) : active === "settings" ? (
+          <SettingsPage />
+        ) : (
+          <ComingSoon nav={active} />
+        )}
+      </main>
+
+      {/* Mobile: bottom dock */}
+      <nav
+        className="glass fixed inset-x-3 bottom-3 z-20 flex justify-around rounded-3xl p-1.5 md:hidden"
+        aria-label="Main"
+      >
+        {NAV.map(({ key, label, icon: Icon }) => {
+          const on = active === key;
+          return (
             <button
               key={key}
               onClick={() => setActive(key)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                active === key
-                  ? "bg-white/10 text-slate-100"
-                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+              aria-current={on ? "page" : undefined}
+              className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold transition-colors ${
+                on ? "accent-gradient text-white" : "text-ink-3"
               }`}
             >
-              <Icon size={18} />
-              {label}
+              <Icon size={19} strokeWidth={2.1} />
+              <span className="truncate">{label}</span>
             </button>
-          ))}
-        </nav>
-        <div className="px-5 py-4 text-xs text-slate-600">v0.1.0 · pre-alpha</div>
-      </aside>
-
-      <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl px-6 py-6">
-          {active === "dashboard" ? (
-            <Dashboard />
-          ) : (
-            <ComingSoon nav={active} />
-          )}
-        </div>
-      </main>
+          );
+        })}
+      </nav>
     </div>
   );
 }
 
-const ROADMAP: Record<Exclude<NavKey, "dashboard">, { title: string; body: string }> = {
-  shares: {
-    title: "Shares",
-    body: "Create a share (a managed directory), then expose it over SMB or NFS with a toggle. FELDCORE writes the Samba/NFS config and reloads the service.",
-  },
-  docker: {
-    title: "Docker",
-    body: "Manage containers and install apps from a store backed by the Unraid Community Applications template catalog.",
-  },
-  vms: {
-    title: "Virtual Machines",
-    body: "Create and control KVM/libvirt virtual machines. Planned for a later phase.",
-  },
-  settings: {
-    title: "Settings",
-    body: "Users and authentication, network, service toggles, and appearance.",
-  },
-};
-
-function ComingSoon({ nav }: { nav: Exclude<NavKey, "dashboard"> }) {
-  const r = ROADMAP[nav];
+function ThemeToggle() {
+  const { resolved, setMode } = useTheme();
+  const next = resolved === "dark" ? "light" : "dark";
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
-      <h1 className="text-2xl font-semibold text-slate-100">{r.title}</h1>
-      <p className="mt-3 max-w-md text-sm text-slate-400">{r.body}</p>
-      <span className="mt-5 rounded-full bg-white/5 px-3 py-1 text-xs text-slate-400">
-        Coming soon
-      </span>
-    </div>
+    <button
+      onClick={() => setMode(next)}
+      aria-label={`Switch to ${next} theme`}
+      title={`Switch to ${next} theme`}
+      className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-2 transition-colors hover:bg-accent/10 hover:text-accent"
+    >
+      {resolved === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+    </button>
   );
 }

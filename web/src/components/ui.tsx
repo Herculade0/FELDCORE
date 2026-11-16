@@ -1,81 +1,95 @@
 import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import type { StreamStatus } from "../lib/useStream";
 
-// Lightweight presentational primitives. These keep the dashboard consistent
-// without pulling in a component library yet; shadcn/ui can replace them later.
+// Presentational primitives for the "friendly console" look: frosted-glass
+// cards with generous radii on top of the accent-tinted backdrop.
 
 export function Card({
-  title,
-  icon,
   children,
-  right,
+  className = "",
 }: {
-  title?: string;
-  icon?: ReactNode;
   children: ReactNode;
-  right?: ReactNode;
+  className?: string;
+}) {
+  return <section className={`glass rounded-3xl p-5 ${className}`}>{children}</section>;
+}
+
+export function CardTitle({
+  icon: Icon,
+  title,
+  hint,
+}: {
+  icon: LucideIcon;
+  title: string;
+  hint?: ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-[#111823] shadow-lg shadow-black/20">
-      {title && (
-        <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-200">
-            {icon}
-            {title}
-          </div>
-          {right}
-        </div>
-      )}
-      <div className="p-4">{children}</div>
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent/12 text-accent">
+          <Icon size={16} strokeWidth={2.25} />
+        </span>
+        <h2 className="text-sm font-bold text-ink">{title}</h2>
+      </div>
+      {hint && <div className="truncate text-xs font-medium text-ink-3">{hint}</div>}
     </div>
   );
 }
 
-function barColor(p: number): string {
-  if (p >= 90) return "bg-rose-500";
-  if (p >= 70) return "bg-amber-400";
-  return "bg-emerald-400";
-}
-
-export function Meter({ percent }: { percent: number }) {
+/** Rounded progress bar; shifts to amber/red as it fills. */
+export function Bar({ percent }: { percent: number }) {
   const p = Math.max(0, Math.min(100, percent || 0));
+  const fill = p >= 90 ? "bg-bad" : p >= 75 ? "bg-warn" : "accent-gradient";
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-white/5">
+    <div className="h-2.5 w-full overflow-hidden rounded-full bg-track">
       <div
-        className={`h-full rounded-full transition-all duration-500 ${barColor(p)}`}
-        style={{ width: `${p}%` }}
+        className={`h-full rounded-full transition-[width] duration-700 ease-out ${fill}`}
+        style={{ width: `${Math.max(p, 1.5)}%` }}
       />
     </div>
   );
 }
 
-export function StatTile({
-  label,
-  value,
-  sub,
-  percent,
-  icon,
+const STATUS: Record<StreamStatus, { label: string; cls: string }> = {
+  live: { label: "Online", cls: "text-ok" },
+  connecting: { label: "Connecting", cls: "text-warn" },
+  offline: { label: "Offline", cls: "text-bad" },
+};
+
+export function StatusPill({ status }: { status: StreamStatus }) {
+  const s = STATUS[status];
+  return (
+    <span className="glass inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-bold text-ink-2">
+      <span className={`relative flex h-2 w-2 ${s.cls}`}>
+        {status === "live" && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
+        )}
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
+      </span>
+      {s.label}
+    </span>
+  );
+}
+
+/** Gradient squircle holding a white icon — the app-tile motif. */
+export function IconBadge({
+  icon: Icon,
+  size = 48,
+  muted = false,
 }: {
-  label: string;
-  value: string;
-  sub?: string;
-  percent?: number;
-  icon?: ReactNode;
+  icon: LucideIcon;
+  size?: number;
+  muted?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-[#111823] p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-          {label}
-        </span>
-        <span className="text-slate-500">{icon}</span>
-      </div>
-      <div className="mt-2 text-2xl font-semibold text-slate-100">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
-      {percent !== undefined && (
-        <div className="mt-3">
-          <Meter percent={percent} />
-        </div>
-      )}
-    </div>
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-2xl text-white shadow-lg shadow-accent/25 ${
+        muted ? "bg-ink-3/60 shadow-none" : "accent-gradient"
+      }`}
+      style={{ width: size, height: size }}
+    >
+      <Icon size={size * 0.46} strokeWidth={2} />
+    </span>
   );
 }

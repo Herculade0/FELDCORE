@@ -1,4 +1,4 @@
-// Small presentation helpers shared across the dashboard.
+// Small presentation helpers shared across the UI.
 
 export function bytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0 B";
@@ -24,6 +24,21 @@ export function duration(totalSeconds: number): string {
   return parts.join(" ");
 }
 
-export function pct(n: number): string {
-  return `${(n || 0).toFixed(0)}%`;
+export function greeting(now: Date = new Date()): string {
+  const h = now.getHours();
+  if (h < 5) return "Good night";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/** "AMD Ryzen 7 7700X 8-Core Processor" -> "AMD Ryzen 7 7700X". */
+export function shortCpu(model: string): string {
+  return model
+    .replace(/\((R|TM)\)/gi, "")
+    .replace(/\b\d+-Core\b/i, "")
+    .replace(/\b(Processor|CPU)\b/gi, "")
+    .replace(/@.*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

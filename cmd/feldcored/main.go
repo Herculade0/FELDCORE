@@ -30,16 +30,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := api.New(system.NewCollector(), webRoot)
+	// Graceful shutdown on SIGINT/SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// One background loop samples the host every 2s and keeps ~2 minutes.
+	collector := system.NewCollector()
+	sampler := system.NewSampler(collector, 2*time.Second, 60)
+	go sampler.Run(ctx)
+
+	srv := api.New(collector, sampler, webRoot)
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	// Graceful shutdown on SIGINT/SIGTERM.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		log.Info("feldcored listening", "addr", cfg.ListenAddr)
