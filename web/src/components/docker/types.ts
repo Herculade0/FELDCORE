@@ -26,6 +26,9 @@ export interface Container {
   cpuPct: number;
   memUsed: number;
   memLimit: number;
+  role?: string;
+  hostname?: string;
+  publicHost?: string;
 }
 
 export interface Image {

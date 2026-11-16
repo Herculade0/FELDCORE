@@ -63,6 +63,12 @@ type inspectContainer struct {
 	NetworkSettings struct {
 		Networks map[string]map[string]any `json:"Networks"`
 	} `json:"NetworkSettings"`
+	Mounts []struct {
+		Type        string `json:"Type"`
+		Name        string `json:"Name"`
+		Source      string `json:"Source"`
+		Destination string `json:"Destination"`
+	} `json:"Mounts"`
 }
 
 // --- View types: what the API hands the front-end. ---
@@ -95,6 +101,12 @@ type Container struct {
 	CPUPct     float64  `json:"cpuPct"` // live, 0 when not running
 	MemUsed    int64    `json:"memUsed"`
 	MemLimit   int64    `json:"memLimit"`
+	// Role is set for containers FELDCORE runs for itself (tunnel, proxy).
+	Role string `json:"role,omitempty"`
+	// Hostname and PublicHost are filled in by the API from proxy and tunnel
+	// routes so the container list can show the names a person can open.
+	Hostname   string `json:"hostname,omitempty"`
+	PublicHost string `json:"publicHost,omitempty"`
 }
 
 // Image is an available local image.
