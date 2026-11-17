@@ -127,13 +127,21 @@ func (a *Service) LoginWithCode(clientKey, username, password, code string) (tok
 // once an authenticator is enrolled.
 func (a *Service) LoginCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
 	now := a.now()
-	if a.lim.blocked(clientKey, now) {
+	userKey := "user:" + strings.ToLower(strings.TrimSpace(username))
+	ipKey := "ip:" + clientKey
+	keys := []string{ipKey}
+	if strings.TrimSpace(username) != "" {
+		keys = append(keys, userKey)
+	}
+	done, allowed := a.lim.begin(now, keys...)
+	if !allowed {
 		return "", time.Time{}, ErrRateLimited
 	}
 
 	admin := a.st.Snapshot().Admin
 	// Always run one bcrypt comparison so a wrong username takes as long as
-	// a wrong password.
+	// a wrong password. bcrypt refuses input past 72 bytes immediately, which
+	// would skip that work, so an over-long password is compared as a pad.
 	hash := a.dummyHash()
 	userOK := false
 	totpOn := false
@@ -142,32 +150,44 @@ func (a *Service) LoginCode(clientKey, username, password, code string) (token s
 		userOK = true
 		totpOn = admin.TOTP
 	}
-	passOK := bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
+	tooLong := len(password) > maxPassword
+	compare := password
+	if tooLong {
+		compare = "feldcore-timing-pad"
+	}
+	passOK := bcrypt.CompareHashAndPassword(hash, []byte(compare)) == nil && !tooLong
 	if !userOK || !passOK {
-		a.lim.fail(clientKey, now)
+		done(true)
 		return "", time.Time{}, ErrInvalidCredentials
 	}
 	if a.factor != nil {
 		if ferr := a.factor(username, code); ferr != nil {
 			if a.RedeemRecovery(username, code) {
-				a.lim.reset(clientKey)
+				done(false)
+				a.lim.reset(userKey)
 				return a.issue(username)
 			}
 			if !factorPending(ferr) {
-				a.lim.fail(clientKey, now)
+				done(true)
+			} else {
+				done(false)
 			}
 			return "", time.Time{}, ferr
 		}
 	} else if totpOn {
 		if strings.TrimSpace(code) == "" {
+			done(false)
 			return "", time.Time{}, ErrTOTPRequired
 		}
 		if !a.codeMatches(code) {
-			a.lim.fail(clientKey, now)
+			done(true)
 			return "", time.Time{}, ErrTOTPInvalid
 		}
 	}
-	a.lim.reset(clientKey)
+	done(false)
+	// A success clears the username bucket only. The address keeps its
+	// failures, so one good password cannot reset a shared IP.
+	a.lim.reset(userKey)
 	return a.issue(username)
 }
 
@@ -287,19 +307,38 @@ func (a *Service) SetSessionHours(h int) error {
 }
 
 // CheckPassword reports whether password is the administrator's current one.
-func (a *Service) CheckPassword(password string) error {
+// client is the caller address. Every check, right or wrong, counts, so the
+// call cannot be used as an unlimited password oracle.
+func (a *Service) CheckPassword(client, password string) error {
+	if strings.TrimSpace(client) == "" {
+		client = "local"
+	}
+	done, allowed := a.lim.begin(a.now(), "check:"+client)
+	if !allowed {
+		return ErrRateLimited
+	}
 	admin := a.st.Snapshot().Admin
 	if admin == nil {
+		done(true)
 		return ErrSetupDone
 	}
-	if bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)) != nil {
+	tooLong := len(password) > maxPassword
+	compare := password
+	if tooLong {
+		compare = "feldcore-timing-pad"
+	}
+	match := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(compare)) == nil && !tooLong
+	done(true)
+	if !match {
 		return ErrInvalidCredentials
 	}
 	return nil
 }
 
 // ChangePassword replaces the administrator password after checking the current one.
-func (a *Service) ChangePassword(current, next string) error {
+// keep is the session token that should stay signed in. Every other live
+// administrator session is revoked in the same update.
+func (a *Service) ChangePassword(current, next, keep string) error {
 	admin := a.st.Snapshot().Admin
 	if admin == nil {
 		return ErrSetupDone
@@ -307,23 +346,37 @@ func (a *Service) ChangePassword(current, next string) error {
 	if err := validate(admin.Username, next); err != nil {
 		return err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(current)) != nil {
+	if len(current) > maxPassword || bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(current)) != nil {
 		return ErrInvalidCredentials
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(next), a.cost)
 	if err != nil {
 		return err
 	}
+	keepHash := ""
+	if keep != "" {
+		keepHash = hashToken(keep)
+	}
+	now := a.now()
 	return a.st.Update(func(s *store.State) error {
 		if s.Admin == nil {
 			return ErrSetupDone
 		}
 		s.Admin.PasswordHash = string(hash)
-		// Citizen ID sessions carry this number. The original session cookie
-		// does not, so this sign-in keeps working exactly as before.
 		// Passkeys stay: this person still has them, and proved the current
 		// password. An administrator reset removes passkeys instead.
+		// keep is the API session that stays. Every other one is removed.
 		s.Admin.SessionVersion++
+		kept := s.Sessions[:0]
+		for _, se := range s.Sessions {
+			if !se.ExpiresAt.After(now) {
+				continue
+			}
+			if keepHash != "" && subtle.ConstantTimeCompare([]byte(se.TokenHash), []byte(keepHash)) == 1 {
+				kept = append(kept, se)
+			}
+		}
+		s.Sessions = kept
 		return nil
 	})
 }
@@ -358,7 +411,9 @@ func (a *Service) dummyHash() []byte {
 	return a.dummy
 }
 
-// limiter is a small fixed-window counter of failed logins per client.
+// limiter is a fixed-window count of sign-in attempts. begin reserves a slot
+// before the password check, so two requests cannot both pass the check
+// before either of them is recorded.
 type limiter struct {
 	mu     sync.Mutex
 	max    int
@@ -367,48 +422,72 @@ type limiter struct {
 }
 
 type bucket struct {
-	n     int
-	start time.Time
+	n       int
+	pending int
+	start   time.Time
 }
 
 func newLimiter(max int, window time.Duration) *limiter {
 	return &limiter{max: max, window: window, hits: map[string]*bucket{}}
 }
 
-func (l *limiter) blocked(key string, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b, ok := l.hits[key]
-	if !ok {
-		return false
-	}
-	if now.Sub(b.start) > l.window {
-		delete(l.hits, key)
-		return false
-	}
-	return b.n >= l.max
-}
-
-func (l *limiter) fail(key string, now time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if len(l.hits) > 4096 { // bound memory under a spray of source addresses
-		for k, b := range l.hits {
-			if now.Sub(b.start) > l.window {
-				delete(l.hits, k)
-			}
-		}
-	}
-	b, ok := l.hits[key]
-	if !ok || now.Sub(b.start) > l.window {
-		l.hits[key] = &bucket{n: 1, start: now}
-		return
-	}
-	b.n++
-}
-
 func (l *limiter) reset(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.hits, key)
+}
+
+// begin reserves one attempt against every key. The reservation counts
+// toward the lockout, so two requests cannot both pass the check before
+// either of them is recorded. done(true) records a failure. done(false)
+// releases the reservation and leaves the counters as they were.
+func (l *limiter) begin(now time.Time, keys ...string) (func(failed bool), bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.hits) > 4096 {
+		for k, b := range l.hits {
+			if b.pending == 0 && now.Sub(b.start) > l.window {
+				delete(l.hits, k)
+			}
+		}
+	}
+	for _, k := range keys {
+		b := l.hits[k]
+		if b == nil || now.Sub(b.start) > l.window {
+			continue
+		}
+		if b.n+b.pending >= l.max {
+			return nil, false
+		}
+	}
+	for _, k := range keys {
+		b := l.hits[k]
+		if b == nil || now.Sub(b.start) > l.window {
+			l.hits[k] = &bucket{pending: 1, start: now}
+			continue
+		}
+		b.pending++
+	}
+	return func(failed bool) {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		for _, k := range keys {
+			b := l.hits[k]
+			if b == nil {
+				continue
+			}
+			if b.pending > 0 {
+				b.pending--
+			}
+			if !failed {
+				continue
+			}
+			if now.Sub(b.start) > l.window {
+				b.n = 1
+				b.start = now
+				continue
+			}
+			b.n++
+		}
+	}, true
 }

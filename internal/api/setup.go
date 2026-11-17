@@ -40,6 +40,11 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Client = clientKey(r)
+	if s.citizen != nil {
+		if ip := s.citizen.ClientIP(r); ip != "" {
+			in.Client = ip
+		}
+	}
 	if p, ok := principalFrom(r.Context()); ok {
 		switch {
 		case p.Username != "":

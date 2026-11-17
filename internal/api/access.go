@@ -49,14 +49,35 @@ func bearerToken(h http.Header) (string, bool) {
 // wizardAccess serves the guided setup before an administrator exists.
 // Afterwards it requires a session or an admin-scoped agent token.
 func (s *Server) wizardAccess(next http.Handler) http.Handler {
-	authed := s.requireAuth(s.enforceScope(next))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.auth != nil && s.auth.SetupRequired() {
 			next.ServeHTTP(w, r)
 			return
 		}
-		authed.ServeHTTP(w, r)
+		// Once an administrator exists, only that browser session can run the
+		// wizard. An agent token, including an admin-scoped one, cannot.
+		if user, ok := s.currentUser(r); ok {
+			next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal{Username: user})))
+			return
+		}
+		if _, has := bearerToken(r.Header); has {
+			writeError(w, http.StatusForbidden, "An agent token cannot run the wizard.")
+			return
+		}
+		writeError(w, http.StatusUnauthorized, "Sign in to continue.")
 	})
+}
+
+// callerAdmin is a browser session or a token that carries the admin scope.
+func (s *Server) callerAdmin(r *http.Request) bool {
+	if _, ok := s.currentUser(r); ok {
+		return true
+	}
+	p, ok := principalFrom(r.Context())
+	if !ok {
+		return false
+	}
+	return auth.Allows(p.Scopes, auth.ScopeAdmin)
 }
 
 // requireAuth accepts a browser session or a bearer agent token.

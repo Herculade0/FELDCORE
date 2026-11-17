@@ -283,7 +283,7 @@ func trimAudit(in []store.AuditEvent, now time.Time) []store.AuditEvent {
 		// flood of unknown usernames cannot flush the log.
 		drop := 0
 		for i, ev := range live {
-			if ev.Action == "sign-in noise" {
+			if noisyAudit(ev) {
 				drop = i
 				break
 			}
@@ -291,6 +291,19 @@ func trimAudit(in []store.AuditEvent, now time.Time) []store.AuditEvent {
 		live = append(live[:drop], live[drop+1:]...)
 	}
 	return live
+}
+
+func noisyAudit(ev store.AuditEvent) bool {
+	switch ev.Action {
+	case "sign-in noise", "publish.block":
+		return true
+	case "sign-in failed":
+		return ev.Target == "locked" || ev.Target == "passkey"
+	case "access denied":
+		return ev.TokenName == "Citizen ID"
+	default:
+		return false
+	}
 }
 
 func normalizeScopes(in []string) ([]string, error) {

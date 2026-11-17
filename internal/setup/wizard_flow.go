@@ -112,6 +112,7 @@ type Request struct {
 	Password2       string `json:"password2"`
 	CurrentPassword string `json:"currentPassword"`
 	TOTPCode        string `json:"totpCode"`
+	CurrentTOTP     string `json:"currentTotp"`
 	SkipTOTP        bool   `json:"skipTotp"`
 	DisableTOTP     bool   `json:"disableTotp"`
 

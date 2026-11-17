@@ -111,8 +111,11 @@ func (s *Server) handleCitizenLogin(w http.ResponseWriter, r *http.Request) {
 // administrator session when this person is the administrator. /api/v1 does
 // not read the parent-domain citizen cookie.
 func (s *Server) issueDesk(w http.ResponseWriter, r *http.Request, id citizenid.Identity) error {
-	if id.Admin && !s.managementHost(r) {
-		return &statusError{code: http.StatusForbidden, msg: "Sign in from this server's own address."}
+	if !s.managementHost(r) {
+		// A desk cookie and an administrator session belong on this server's
+		// own address. The parent-domain citizen cookie from this sign-in
+		// still stands, including for the administrator on an app hostname.
+		return nil
 	}
 	if err := s.citizen.StartDesk(w, r, id); err != nil {
 		return err
@@ -467,10 +470,8 @@ func (s *Server) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request
 		s.fail(w, r, err)
 		return
 	}
-	if err := s.issueDesk(w, r, id); err != nil {
-		s.fail(w, r, err)
-		return
-	}
+	// A passkey signs the person into the app. It does not mint a desk or
+	// administrator session, on this hostname or any other.
 	writeJSON(w, http.StatusOK, map[string]any{"username": id.Username, "admin": id.Admin})
 }
 
@@ -478,6 +479,9 @@ func (s *Server) handlePasskeyRegisterBegin(w http.ResponseWriter, r *http.Reque
 	id, ok := citizenid.FromContext(r.Context())
 	if !ok || s.citizen == nil {
 		writeError(w, http.StatusUnauthorized, "Sign in to continue.")
+		return
+	}
+	if !s.confirmFactor(w, r) {
 		return
 	}
 	opts, err := s.citizen.BeginPasskeyRegister(w, r, id)

@@ -100,27 +100,34 @@ func TestClientIPTrustsForwardedHeadersOnlyFromTrustedPeers(t *testing.T) {
 	req.RemoteAddr = "203.0.113.5:1234"
 	req.Header.Set("CF-Connecting-IP", "198.51.100.9")
 	req.Header.Set("X-Forwarded-For", "198.51.100.8")
-	if got := ClientIP(req, func(net.IP) bool { return false }); got != "203.0.113.5" {
+	if got := ClientIP(req, func(net.IP) bool { return false }, nil); got != "203.0.113.5" {
 		t.Fatalf("untrusted peer used a forwarded header: %s", got)
 	}
 
 	req.RemoteAddr = "127.0.0.1:1234"
-	if got := ClientIP(req, nil); got != "198.51.100.9" {
+	if got := ClientIP(req, nil, nil); got != "198.51.100.9" {
 		t.Fatalf("loopback should prefer CF-Connecting-IP, got %s", got)
 	}
 	req.Header.Del("CF-Connecting-IP")
-	if got := ClientIP(req, nil); got != "198.51.100.8" {
+	if got := ClientIP(req, nil, nil); got != "198.51.100.8" {
 		t.Fatalf("loopback should use X-Forwarded-For, got %s", got)
 	}
 
 	req.RemoteAddr = "172.17.0.2:1234"
-	req.Header.Set("X-Forwarded-For", "198.51.100.7, 172.17.0.2")
-	trust := func(ip net.IP) bool { return ip.Equal(net.ParseIP("172.17.0.2")) }
-	if got := ClientIP(req, trust); got != "198.51.100.7" {
-		t.Fatalf("caddy should be trusted, got %s", got)
+	req.Header.Set("CF-Connecting-IP", "127.0.0.1")
+	req.Header.Set("X-Forwarded-For", "198.51.100.7, 203.0.113.9")
+	proxy := func(ip net.IP) bool { return ip.Equal(net.ParseIP("172.17.0.2")) }
+	if got := ClientIP(req, proxy, func(net.IP) bool { return false }); got != "203.0.113.9" {
+		t.Fatalf("caddy must use the rightmost forwarded address, got %s", got)
 	}
-	if got := ClientIP(req, func(net.IP) bool { return false }); got != "172.17.0.2" {
+	if got := ClientIP(req, func(net.IP) bool { return false }, nil); got != "172.17.0.2" {
 		t.Fatalf("same headers from an untrusted peer, got %s", got)
+	}
+	tunnel := func(ip net.IP) bool { return ip.Equal(net.ParseIP("172.17.0.3")) }
+	req.RemoteAddr = "172.17.0.3:1234"
+	req.Header.Set("CF-Connecting-IP", "198.51.100.4")
+	if got := ClientIP(req, func(net.IP) bool { return false }, tunnel); got != "198.51.100.4" {
+		t.Fatalf("tunnel should use CF-Connecting-IP, got %s", got)
 	}
 }
 

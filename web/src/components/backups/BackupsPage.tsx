@@ -15,6 +15,7 @@ interface Sets {
   vms: boolean;
   internalAffairs: boolean;
   snapshots: boolean;
+  secrets?: boolean;
 }
 
 interface Dest {
@@ -128,7 +129,8 @@ interface Draft {
 }
 
 const SETS: { key: keyof Sets; label: string }[] = [
-  { key: "config", label: "FELDCORE config and secrets" },
+  { key: "config", label: "FELDCORE config" },
+  { key: "secrets", label: "Include encrypted secrets" },
   { key: "appdata", label: "Container appdata" },
   { key: "compose", label: "Compose stacks" },
   { key: "vms", label: "Virtual machines" },
@@ -165,7 +167,7 @@ function blank(): Draft {
     keepDaily: "7",
     keepWeekly: "4",
     keepMonthly: "6",
-    sets: { config: true, appdata: true, compose: true, vms: true, internalAffairs: true, snapshots: true },
+    sets: { config: true, appdata: true, compose: true, vms: true, internalAffairs: true, snapshots: true, secrets: false },
   };
 }
 
@@ -730,7 +732,7 @@ export default function BackupsPage() {
               <label key={s.key} className="flex items-center justify-between gap-3 text-sm font-semibold text-ink">
                 {s.label}
                 <Toggle
-                  checked={draft.sets[s.key]}
+                  checked={Boolean(draft.sets[s.key])}
                   onChange={(on) => setDraft({ ...draft, sets: { ...draft.sets, [s.key]: on } })}
                   label={s.label}
                 />

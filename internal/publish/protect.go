@@ -37,10 +37,11 @@ type Geo interface {
 // token bucket per client IP.
 type Protection struct {
 	Policy func() store.ProtectPolicy
-	// Trust is asked only for non-loopback peers. Loopback is always trusted.
-	Trust func(context.Context, net.IP) bool
-	Geo   Geo
-	Now   func() time.Time
+	// Trust is Caddy. Tunnel is cloudflared. Loopback is handled in ClientIP.
+	Trust  func(context.Context, net.IP) bool
+	Tunnel func(context.Context, net.IP) bool
+	Geo    Geo
+	Now    func() time.Time
 
 	limits ipLimit
 }
@@ -55,6 +56,11 @@ func (p *Protection) Check(r *http.Request, app App) Result {
 			return false
 		}
 		return p.Trust(r.Context(), peer)
+	}, func(peer net.IP) bool {
+		if p.Tunnel == nil {
+			return false
+		}
+		return p.Tunnel(r.Context(), peer)
 	})
 	if pol.BlockBots {
 		if emptyAgent(r.UserAgent()) {
@@ -185,28 +191,31 @@ func GeoDecision(enabled, ready bool, mode string, countries []string, code stri
 }
 
 // ClientIP is the address protection and the audit log attribute to the
-// caller. CF-Connecting-IP and X-Forwarded-For are used only when the TCP
-// peer is loopback or trust reports it (Caddy and the Cloudflare Tunnel
-// connector). Any other peer is itself the client, and those headers are
-// ignored so they cannot be spoofed.
-func ClientIP(r *http.Request, trust func(net.IP) bool) string {
+// caller. CF-Connecting-IP is used only from the tunnel peer or loopback.
+// X-Forwarded-For is used only from the proxy peer or loopback, and only
+// the rightmost address, which is the hop that proxy added. Any other peer
+// is itself the client.
+func ClientIP(r *http.Request, proxy, tunnel func(net.IP) bool) string {
 	peer := remoteIP(r)
-	trusted := peer != nil && (peer.IsLoopback() || (trust != nil && trust(peer)))
-	if trusted {
+	if peer == nil {
+		return ""
+	}
+	loop := peer.IsLoopback()
+	if loop || (tunnel != nil && tunnel(peer)) {
 		if ip := parseIPHeader(r.Header.Get("CF-Connecting-IP")); ip != nil {
 			return ip.String()
 		}
+	}
+	if loop || (proxy != nil && proxy(peer)) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			first := strings.TrimSpace(strings.Split(xff, ",")[0])
-			if ip := parseIPHeader(first); ip != nil {
+			parts := strings.Split(xff, ",")
+			last := strings.TrimSpace(parts[len(parts)-1])
+			if ip := parseIPHeader(last); ip != nil {
 				return ip.String()
 			}
 		}
 	}
-	if peer != nil {
-		return peer.String()
-	}
-	return ""
+	return peer.String()
 }
 
 func remoteIP(r *http.Request) net.IP {

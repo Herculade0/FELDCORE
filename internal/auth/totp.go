@@ -176,6 +176,20 @@ func (a *Service) pending() (string, bool, error) {
 	return a.secrets.Get(secretPending)
 }
 
+// VerifyCurrentTOTP checks the authenticator that is already turned on.
+// A replacement needs that code. A recovery code is not accepted here.
+// When two-factor is off, there is nothing to check.
+func (a *Service) VerifyCurrentTOTP(code string) error {
+	if !a.TOTPEnabled() {
+		return nil
+	}
+	secret, ok, err := a.secrets.Get(secretTOTP)
+	if err != nil || !ok || !totpMatch(secret, code, a.now()) {
+		return &InputError{"Enter the current authenticator code before changing two-factor."}
+	}
+	return nil
+}
+
 // codeMatches accepts a current authenticator code or a recovery code.
 // A recovery code is removed when it matches.
 func (a *Service) codeMatches(code string) bool {

@@ -109,7 +109,10 @@ func (s *Service) iaStatus(c catalogFile) IAStatus {
 	return st
 }
 
-func (s *Service) SaveDestination(in DestinationInput, actor, tokenID string) (Destination, error) {
+func (s *Service) SaveDestination(in DestinationInput, actor, tokenID string, admin bool) (Destination, error) {
+	if in.Sets != nil && in.Sets.Secrets && !admin {
+		return Destination{}, input("Including encrypted secrets is an administrator choice.")
+	}
 	var prev *Destination
 	if id := strings.TrimSpace(inID(in)); id != "" {
 		d, ok := s.findDest(id)
@@ -144,7 +147,10 @@ func (s *Service) SaveDestination(in DestinationInput, actor, tokenID string) (D
 }
 
 // UpdateDestination saves an existing destination. id comes from the URL.
-func (s *Service) UpdateDestination(id string, in DestinationInput, actor, tokenID string) (Destination, error) {
+func (s *Service) UpdateDestination(id string, in DestinationInput, actor, tokenID string, admin bool) (Destination, error) {
+	if in.Sets != nil && in.Sets.Secrets && !admin {
+		return Destination{}, input("Including encrypted secrets is an administrator choice.")
+	}
 	if !idRe.MatchString(id) {
 		return Destination{}, input("That backup destination is gone.")
 	}
@@ -252,6 +258,9 @@ func (s *Service) RevealPassword(id, actor, tokenID string, admin bool) (string,
 }
 
 func (s *Service) StartBackup(id, actor, tokenID string, admin bool) (Job, error) {
+	if dest, ok := s.findDest(id); ok && dest.Sets.Secrets && !admin {
+		return Job{}, input("This backup includes encrypted secrets. An administrator has to run it.")
+	}
 	return s.launchKind(id, "backup", actor, tokenID, func(j *bjob) func(context.Context) error {
 		j.admin = admin
 		return func(ctx context.Context) error { return s.runBackup(ctx, j) }
@@ -288,7 +297,10 @@ func (s *Service) StartRestore(in RestoreInput, actor, tokenID string, admin boo
 		if err != nil {
 			return Job{}, err
 		}
-		if !s.restoreAllowed(c) {
+		if !admin && pathTouchesProtected(c, s.DataDir) {
+			return Job{}, input("Restoring FELDCORE state or secrets needs an administrator.")
+		}
+		if !s.restoreAllowed(c) && !(admin && s.insideData(c)) {
 			return Job{}, input("That path is outside the folders this server backs up.")
 		}
 		paths = append(paths, c)
@@ -524,6 +536,18 @@ func (s *Service) restoreAllowed(p string) bool {
 		}
 	}
 	return false
+}
+
+// insideData is the configuration directory. An administrator may restore
+// state.json and the secrets folder from there. A non-admin is refused
+// before this is consulted.
+func (s *Service) insideData(p string) bool {
+	data := filepath.Clean(strings.TrimSpace(s.DataDir))
+	if data == "" || data == "." || data == "/" || !filepath.IsAbs(data) {
+		return false
+	}
+	p = filepath.Clean(p)
+	return p == data || strings.HasPrefix(p, data+string(filepath.Separator))
 }
 
 func (s *Service) restoreRoots() []string {
