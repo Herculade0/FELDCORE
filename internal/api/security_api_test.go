@@ -42,7 +42,7 @@ func TestAppAccessReportsProxyFailure(t *testing.T) {
 	}
 	srv := New(Deps{
 		Auth: accounts, Citizen: g,
-		Proxy: &proxy.Service{Store: st, DataDir: dir, ListenPort: 8787, Listen: func() []int { return nil }},
+		Proxy: &proxy.Service{Store: st, DataDir: dir, ListenPort: 8787, PreferHost: func() bool { return false }, Listen: func() []int { return nil }},
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))

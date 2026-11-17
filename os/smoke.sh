@@ -34,7 +34,7 @@ bins=(
 	mkfs.btrfs btrfs mkfs.xfs xfs_scrub hdparm
 	parted sgdisk wipefs fstrim lsblk blkid findmnt mkfs.ext4
 	ufw
-	cloudflared curl bash
+	cloudflared caddy curl bash
 	systemctl timedatectl hostnamectl
 	lspci
 	rtl_eeprom
@@ -90,6 +90,87 @@ else
 	fi
 	run docker info >/dev/null
 fi
+
+# check_caddy confirms the baked proxy: the pinned release, the DNS module
+# public certificates need, and a Citizen ID publish config Caddy will load.
+check_caddy() {
+	local pin ver cfg inner
+	pin=$(cd "$(dirname "$0")" && pwd)/caddy.sha256
+	ver=$(awk 'NF && $1 !~ /^#/ {print $2; exit}' "${pin}")
+	if [[ -z ${ver} ]]; then
+		echo "smoke: os/caddy.sha256 has no version" >&2
+		fail=1
+		return
+	fi
+	if ! run caddy version | grep -q "v${ver}"; then
+		echo "smoke: caddy is not v${ver}" >&2
+		fail=1
+	fi
+	if ! run caddy list-modules | grep -q 'dns.providers.cloudflare'; then
+		echo "smoke: caddy is missing dns.providers.cloudflare" >&2
+		fail=1
+	fi
+	if [[ ${mode} == root ]]; then
+		sudo mkdir -p "${root}/tmp"
+		cfg="${root}/tmp/feldcore-smoke-caddy"
+		inner=/tmp/feldcore-smoke-caddy
+	else
+		cfg=$(mktemp)
+		inner=${cfg}
+	fi
+	if [[ ${mode} == root ]]; then
+		sudo tee "${cfg}" >/dev/null
+	else
+		cat >"${cfg}"
+	fi <<'EOF'
+{
+	admin off
+}
+
+files.home.arpa {
+	tls internal
+	route {
+		reverse_proxy /citizen/* 127.0.0.1:8787 {
+			header_up -CF-Connecting-IP
+			header_up X-Forwarded-For {http.request.remote.host}
+			header_up X-Forwarded-Proto {http.request.scheme}
+			header_up X-Forwarded-Host {http.request.host}
+		}
+		forward_auth 127.0.0.1:8787 {
+			uri /citizen/check
+			copy_headers Cookie
+			header_up X-Forwarded-Uri {http.request.uri}
+			header_up -CF-Connecting-IP
+			header_up X-Forwarded-For {http.request.remote.host}
+			header_up X-Forwarded-Proto {http.request.scheme}
+			header_up X-Forwarded-Host {http.request.host}
+		}
+		reverse_proxy 127.0.0.1:8791 {
+			header_up -CF-Connecting-IP
+			header_up X-Forwarded-For {http.request.remote.host}
+			header_up X-Forwarded-Proto {http.request.scheme}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up -Authorization
+			header_up Cookie "(?i)(?:^|;\s*)(?:__Host-)?(?:feldcore_desk|feldcore_session|feldcore_passkey)=[^;]*" ""
+			header_up Cookie "^\s*;\s*|\s*;\s*$" ""
+			header_up Cookie ";\s*;" ";"
+			header_down Set-Cookie "(?i)^(?:__Host-)?feldcore_(?:citizen|desk|session|passkey)=.*" ""
+		}
+	}
+}
+EOF
+	if ! run caddy adapt --config "${inner}" --adapter caddyfile >/dev/null; then
+		echo "smoke: caddy rejected the citizen publish config" >&2
+		fail=1
+	fi
+	if [[ ${mode} == root ]]; then
+		sudo rm -f "${cfg}"
+	else
+		rm -f "${cfg}"
+	fi
+}
+
+check_caddy
 
 if [[ ${fail} != 0 ]]; then
 	echo "smoke: failed" >&2
