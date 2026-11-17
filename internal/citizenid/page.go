@@ -19,21 +19,21 @@ func randomToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-func httpSet(w http.ResponseWriter, r *http.Request, name, value, path string, maxAge int) {
+func (g *Gateway) httpSet(w http.ResponseWriter, r *http.Request, name, value, path string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name: name, Value: value, Path: path, MaxAge: maxAge,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestSecure(r),
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.requestSecure(r),
 	})
 }
 
-func clearCookie(w http.ResponseWriter, name string, r *http.Request) {
+func (g *Gateway) clearCookie(w http.ResponseWriter, name string, r *http.Request) {
 	path := "/"
 	if name == pendingCookie || name == csrfCookie {
 		path = "/citizen"
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: name, Value: "", Path: path, MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestSecure(r),
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.requestSecure(r),
 	})
 }
 
@@ -42,7 +42,7 @@ func (g *Gateway) issueCSRF(w http.ResponseWriter, r *http.Request) (string, err
 	if err != nil {
 		return "", err
 	}
-	httpSet(w, r, csrfCookie, hashKey(token), "/citizen", 3600)
+	g.httpSet(w, r, csrfCookie, hashKey(token), "/citizen", 3600)
 	return token, nil
 }
 
@@ -54,7 +54,7 @@ func (g *Gateway) checkCSRF(r *http.Request, token string) bool {
 	return subtle.ConstantTimeCompare([]byte(c.Value), []byte(hashKey(token))) == 1
 }
 
-func originOK(r *http.Request) bool {
+func (g *Gateway) originOK(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
@@ -63,11 +63,7 @@ func originOK(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	host := r.Host
-	if fh := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); fh != "" {
-		host = fh
-	}
-	return strings.EqualFold(u.Host, host)
+	return strings.EqualFold(u.Host, g.clientHost(r))
 }
 
 type signInView struct {
@@ -102,7 +98,7 @@ func (g *Gateway) ServeSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 	view := signInView{Next: next}
 	if r.Method == http.MethodPost {
-		if !originOK(r) || !g.checkCSRF(r, r.FormValue("csrf")) {
+		if !g.originOK(r) || !g.checkCSRF(r, r.FormValue("csrf")) {
 			http.Error(w, "This form has expired. Reload the page and try again.", http.StatusForbidden)
 			return
 		}

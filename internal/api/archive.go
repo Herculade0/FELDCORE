@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -106,7 +107,7 @@ func (s *Server) handleBackupRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, tokenID := actorOf(r)
-	job, err := s.backups.StartBackup(chi.URLParam(r, "id"), actor, tokenID)
+	job, err := s.backups.StartBackup(chi.URLParam(r, "id"), actor, tokenID, s.isAdmin(r))
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -137,8 +138,12 @@ func (s *Server) handleBackupPassword(w http.ResponseWriter, r *http.Request) {
 	if !s.backupReady(w) {
 		return
 	}
+	if !s.isAdmin(r) {
+		writeError(w, http.StatusForbidden, "The repository password is shown to an administrator.")
+		return
+	}
 	actor, tokenID := actorOf(r)
-	pw, err := s.backups.RevealPassword(chi.URLParam(r, "id"), actor, tokenID)
+	pw, err := s.backups.RevealPassword(chi.URLParam(r, "id"), actor, tokenID, true)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -178,8 +183,12 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(in.Mode), "replace") && !s.isAdmin(r) {
+		writeError(w, http.StatusForbidden, "Replacing files on this server needs an administrator.")
+		return
+	}
 	actor, tokenID := actorOf(r)
-	job, err := s.backups.StartRestore(in, actor, tokenID)
+	job, err := s.backups.StartRestore(in, actor, tokenID, s.isAdmin(r))
 	if err != nil {
 		s.fail(w, r, err)
 		return

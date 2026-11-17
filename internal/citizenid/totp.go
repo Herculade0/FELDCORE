@@ -213,11 +213,16 @@ func (g *Gateway) ResetTOTP(id string) error {
 				return ErrNotFound
 			}
 			s.Admin.TOTP = false
+			// Citizen ID cookies carry this version. API sessions do not,
+			// so the session list has to be cleared as well.
+			s.Admin.SessionVersion++
+			s.Sessions = nil
 			return nil
 		}
 		for i := range s.Accounts {
 			if s.Accounts[i].ID == id {
 				s.Accounts[i].TOTP = false
+				s.Accounts[i].SessionVersion++
 				return nil
 			}
 		}
@@ -280,7 +285,7 @@ func (g *Gateway) FinishSecondFactor(w http.ResponseWriter, r *http.Request, cod
 	g.mu.Lock()
 	delete(g.pending, key)
 	g.mu.Unlock()
-	clearCookie(w, pendingCookie, r)
+	g.clearCookie(w, pendingCookie, r)
 	if err := g.startSession(w, r, id, "password+totp"); err != nil {
 		return Identity{}, err
 	}
@@ -309,7 +314,7 @@ func (g *Gateway) issuePending(w http.ResponseWriter, r *http.Request, username 
 	}
 	g.pending[hashKey(token)] = pendingLogin{Username: username, IP: g.clientIP(r), Expires: now.Add(5 * time.Minute)}
 	g.mu.Unlock()
-	httpSet(w, r, pendingCookie, token, "/citizen", 300)
+	g.httpSet(w, r, pendingCookie, token, "/citizen", 300)
 	return nil
 }
 

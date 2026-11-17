@@ -20,12 +20,13 @@ type citizenHook struct {
 }
 
 func (h citizenHook) Allow(r *http.Request, app App) error {
+	level, groups := h.g.EffectivePublish(app.Container, citizenLevel(app.Access), app.Groups)
 	decision, err := h.g.Authorize(r, citizenid.AppAccess{
 		ID:       app.Container,
 		Name:     app.Hostname,
 		Host:     app.Hostname,
-		Level:    citizenLevel(app.Access),
-		GroupIDs: h.g.ResolveGroups(app.Groups),
+		Level:    level,
+		GroupIDs: groups,
 	})
 	if err != nil {
 		return err

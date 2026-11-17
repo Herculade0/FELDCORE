@@ -175,18 +175,38 @@ func TestRawXMLGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := vetXML("box", doc); err != nil {
+	const diskDir = "/srv/feldcore/domains/box"
+	if err := vetXML("box", doc, diskDir, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := vetXML("other", doc); err == nil {
+	if err := vetXML("other", doc, diskDir, true); err == nil {
 		t.Fatal("renamed domain accepted")
 	}
 	pub := strings.Replace(doc, "127.0.0.1", "0.0.0.0", -1)
-	if err := vetXML("box", pub); err == nil {
+	if err := vetXML("box", pub, diskDir, true); err == nil {
 		t.Fatal("public vnc accepted")
 	}
-	if err := vetXML("box", `<!DOCTYPE foo [<!ENTITY x "y">]>`+doc); err == nil {
+	if err := vetXML("box", `<!DOCTYPE foo [<!ENTITY x "y">]>`+doc, diskDir, true); err == nil {
 		t.Fatal("entity accepted")
+	}
+	outside := strings.Replace(doc, "/srv/feldcore/domains/box/vdisk1.raw", "/var/lib/feldcore/secrets/master.key", 1)
+	if err := vetXML("box", outside, diskDir, true); err == nil {
+		t.Fatal("disk outside the VM folder accepted")
+	}
+	fs := strings.Replace(doc, "</devices>", "<filesystem type='mount'><source dir='/'/></filesystem></devices>", 1)
+	if err := vetXML("box", fs, diskDir, true); err == nil {
+		t.Fatal("filesystem root accepted")
+	}
+	cmd := strings.Replace(doc, "</domain>", "<qemu:commandline><qemu:arg value='-sandbox'/></qemu:commandline></domain>", 1)
+	if err := vetXML("box", cmd, diskDir, true); err == nil {
+		t.Fatal("qemu command line accepted")
+	}
+	hostdev := strings.Replace(doc, "</devices>", "<hostdev mode='subsystem' type='pci'><source><address domain='0x0000' bus='0x01' slot='0x00' function='0x0'/></source></hostdev></devices>", 1)
+	if err := vetXML("box", hostdev, diskDir, false); err == nil {
+		t.Fatal("hostdev accepted for a non-admin")
+	}
+	if err := vetXML("box", hostdev, diskDir, true); err != nil {
+		t.Fatal(err)
 	}
 }
 

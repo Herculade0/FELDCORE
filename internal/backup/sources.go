@@ -20,7 +20,7 @@ type filePlan struct {
 	Cleanup  func(context.Context) error
 }
 
-func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string) (filePlan, error) {
+func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string, admin bool) (filePlan, error) {
 	staging := filepath.Join(s.DataDir, "backup-staging", jobID)
 	if err := os.MkdirAll(staging, 0o700); err != nil {
 		return filePlan{}, op("Could not prepare a working folder for the backup.")
@@ -34,7 +34,9 @@ func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string)
 	}
 	if dest.Sets.Config {
 		state := filepath.Join(s.DataDir, "state.json")
-		if pathExists(state) {
+		if !admin {
+			plan.Notes = append(plan.Notes, "Settings file left out.")
+		} else if pathExists(state) {
 			add(state)
 		} else {
 			plan.Notes = append(plan.Notes, "No FELDCORE state file was found.")

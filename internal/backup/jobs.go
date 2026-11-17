@@ -43,6 +43,7 @@ type Job struct {
 type bjob struct {
 	Job
 	tokenID  string
+	admin    bool
 	readData bool
 	snap     string
 	paths    []string

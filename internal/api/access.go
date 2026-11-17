@@ -143,6 +143,19 @@ func (s *Server) enforceScope(next http.Handler) http.Handler {
 	})
 }
 
+// isAdmin is a browser session or a token that holds the admin scope.
+// The deployAnyway flag is an acknowledgement, not this check.
+func (s *Server) isAdmin(r *http.Request) bool {
+	p, ok := principalFrom(r.Context())
+	if !ok {
+		return false
+	}
+	if p.ViaToken {
+		return auth.Allows(p.Scopes, auth.ScopeAdmin)
+	}
+	return p.Username != ""
+}
+
 func actorOf(r *http.Request) (string, string) {
 	p, ok := principalFrom(r.Context())
 	if !ok {
@@ -269,6 +282,9 @@ func scopeFor(method, path string) string {
 		return auth.ScopeContainers
 	}
 	if strings.HasPrefix(p, "/vms/") || p == "/vms" {
+		if method == http.MethodPut && strings.HasSuffix(p, "/xml") {
+			return auth.ScopeAdmin
+		}
 		return auth.ScopeVMs
 	}
 	return auth.ScopeAdmin

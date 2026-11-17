@@ -111,6 +111,9 @@ func (s *Server) handleCitizenLogin(w http.ResponseWriter, r *http.Request) {
 // administrator session when this person is the administrator. /api/v1 does
 // not read the parent-domain citizen cookie.
 func (s *Server) issueDesk(w http.ResponseWriter, r *http.Request, id citizenid.Identity) error {
+	if id.Admin && !s.managementHost(r) {
+		return &statusError{code: http.StatusForbidden, msg: "Sign in from this server's own address."}
+	}
 	if err := s.citizen.StartDesk(w, r, id); err != nil {
 		return err
 	}
@@ -119,7 +122,7 @@ func (s *Server) issueDesk(w http.ResponseWriter, r *http.Request, id citizenid.
 		if err != nil {
 			return err
 		}
-		setSessionCookie(w, r, token, expires)
+		s.setSessionCookie(w, r, token, expires)
 	}
 	return nil
 }
@@ -293,9 +296,15 @@ func (s *Server) handleCitizenTOTPReset(w http.ResponseWriter, r *http.Request) 
 	if !s.confirmFactor(w, r) {
 		return
 	}
-	if err := s.citizen.ResetTOTP(chi.URLParam(r, "id")); err != nil {
+	user, _ := s.currentUser(r)
+	old := s.sessionCookieValue(r)
+	id := chi.URLParam(r, "id")
+	if err := s.citizen.ResetTOTP(id); err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	if id == "admin" {
+		s.restoreCallerSession(w, r, user, old)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }

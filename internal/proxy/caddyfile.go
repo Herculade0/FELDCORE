@@ -82,22 +82,29 @@ func writeProxy(b *strings.Builder, site Site) {
 	fmt.Fprintf(b, "\t}\n")
 }
 
+// cookieDown drops a Set-Cookie whose name is a FELDCORE session, including
+// the __Host- form. Other cookies the app sets are left alone.
+const cookieDown = `header_down Set-Cookie "(?i)^(?:__Host-)?feldcore_(?:citizen|desk|session|passkey)=.*" ""`
+
 func writeAppProxy(b *strings.Builder, site Site, pad string) {
 	if site.KeepCookies {
-		fmt.Fprintf(b, "%sreverse_proxy %s\n", pad, site.Upstream)
+		fmt.Fprintf(b, "%sreverse_proxy %s {\n", pad, site.Upstream)
+		fmt.Fprintf(b, "%s\t%s\n", pad, cookieDown)
+		fmt.Fprintf(b, "%s}\n", pad)
 		return
 	}
 	writeCookieScrub(b, pad)
 	fmt.Fprintf(b, "%sreverse_proxy %s {\n", pad, site.Upstream)
 	fmt.Fprintf(b, "%s\theader_up -Authorization\n", pad)
 	fmt.Fprintf(b, "%s\theader_up Cookie {clean_cookie}\n", pad)
+	fmt.Fprintf(b, "%s\t%s\n", pad, cookieDown)
 	fmt.Fprintf(b, "%s}\n", pad)
 }
 
 // writeCookieScrub removes only the Citizen ID and management cookies.
 // Other cookies belong to the app and are forwarded.
 func writeCookieScrub(b *strings.Builder, pad string) {
-	names := []string{"feldcore_citizen", "feldcore_desk", "feldcore_session"}
+	names := []string{"feldcore_citizen", "feldcore_desk", "feldcore_session", "feldcore_passkey"}
 	in := "{http.request.header.Cookie}"
 	for i, name := range names {
 		out := fmt.Sprintf("{c%d}", i)

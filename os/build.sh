@@ -3,6 +3,7 @@
 # Private signing keys stay in $FELDCORE_OS_WORK (default /var/tmp/feldcore-os).
 # They are never written into the image or the output directory.
 set -euo pipefail
+export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.11}"
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 work=${FELDCORE_OS_WORK:-/var/tmp/feldcore-os}

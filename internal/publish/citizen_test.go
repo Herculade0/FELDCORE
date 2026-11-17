@@ -135,6 +135,11 @@ func TestProxyStripsCitizenCookieBeforeTheApp(t *testing.T) {
 	var seen http.Header
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = r.Header.Clone()
+		w.Header().Add("Set-Cookie", "app=1")
+		w.Header().Add("Set-Cookie", "feldcore_session=stolen; Path=/")
+		w.Header().Add("Set-Cookie", "__Host-feldcore_citizen=stolen; Path=/; Secure")
+		w.Header().Add("Set-Cookie", "feldcore_passkey=stolen")
+		w.Header().Add("Set-Cookie", "theme=dark")
 		io.WriteString(w, "app")
 	}))
 	defer upstream.Close()
@@ -155,6 +160,13 @@ func TestProxyStripsCitizenCookieBeforeTheApp(t *testing.T) {
 	}
 	if !strings.Contains(seen.Get("Cookie"), "app=1") {
 		t.Fatalf("app cookie dropped: %q", seen.Get("Cookie"))
+	}
+	var names []string
+	for _, c := range rec.Result().Cookies() {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, ",") != "app,theme" {
+		t.Fatalf("set-cookie scrub: %v", names)
 	}
 }
 

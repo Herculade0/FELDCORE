@@ -129,7 +129,11 @@ func (s *Server) handleVMXMLPut(w http.ResponseWriter, r *http.Request) {
 	if !readJSONLimit(w, r, &body, 1<<20) {
 		return
 	}
-	if err := s.vms.DefineXML(r.Context(), chi.URLParam(r, "name"), body.XML); err != nil {
+	if !s.isAdmin(r) {
+		writeError(w, http.StatusForbidden, "Replacing a VM's XML needs an administrator.")
+		return
+	}
+	if err := s.vms.DefineXML(r.Context(), chi.URLParam(r, "name"), body.XML, true); err != nil {
 		s.fail(w, r, err)
 		return
 	}

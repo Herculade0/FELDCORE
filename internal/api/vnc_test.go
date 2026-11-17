@@ -67,6 +67,7 @@ func TestVNCProxyRequiresAdminSession(t *testing.T) {
 	}
 
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, login)
