@@ -67,7 +67,9 @@ func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string,
 	}
 	if dest.Sets.Config {
 		state := filepath.Join(s.DataDir, "state.json")
-		if pathExists(state) {
+		if !admin {
+			plan.Notes = append(plan.Notes, "Settings file left out.")
+		} else if pathExists(state) {
 			add(state)
 		} else {
 			plan.Notes = append(plan.Notes, "No FELDCORE state file was found.")
@@ -179,11 +181,20 @@ func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string,
 	}
 	plan.Paths = append(plan.Paths, mf)
 	plan.Paths = uniqueStrings(plan.Paths)
-	if len(plan.Paths) == 1 {
+	if len(plan.Paths) == 1 && !settingsLeftOut(plan.Notes) {
 		_ = plan.Cleanup(ctx)
 		return filePlan{}, input("Nothing was found to back up.")
 	}
 	return plan, nil
+}
+
+func settingsLeftOut(notes []string) bool {
+	for _, n := range notes {
+		if strings.Contains(n, "Settings file left out") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) appdataDir() string {

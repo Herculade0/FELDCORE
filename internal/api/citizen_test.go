@@ -41,6 +41,7 @@ func TestDirectoryUserCannotManage(t *testing.T) {
 		t.Fatal(err)
 	}
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"ada","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	login.RemoteAddr = "192.0.2.80:9"
 	rec := httptest.NewRecorder()
@@ -90,6 +91,7 @@ func TestDirectoryUserCannotManage(t *testing.T) {
 	}
 
 	legacy := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	legacy.Host = "127.0.0.1"
 	legacy.Header.Set("Content-Type", "application/json")
 	legacy.RemoteAddr = "192.0.2.81:9"
 	lrec := httptest.NewRecorder()
@@ -99,6 +101,7 @@ func TestDirectoryUserCannotManage(t *testing.T) {
 	}
 	admin := lrec.Result().Cookies()[0]
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	r.Host = "127.0.0.1"
 	r.AddCookie(admin)
 	w := httptest.NewRecorder()
 	srv.Router().ServeHTTP(w, r)
@@ -133,6 +136,7 @@ func TestCitizenLoginAsksForTOTP(t *testing.T) {
 	}
 
 	legacy := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	legacy.Host = "127.0.0.1"
 	legacy.Header.Set("Content-Type", "application/json")
 	legacy.RemoteAddr = "192.0.2.82:9"
 	lrec := httptest.NewRecorder()
@@ -142,6 +146,7 @@ func TestCitizenLoginAsksForTOTP(t *testing.T) {
 	}
 
 	first := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	first.Host = "127.0.0.1"
 	first.Header.Set("Content-Type", "application/json")
 	first.RemoteAddr = "192.0.2.83:9"
 	frec := httptest.NewRecorder()
@@ -161,6 +166,7 @@ func TestCitizenLoginAsksForTOTP(t *testing.T) {
 		}
 	}
 	second := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"admin","password":"correct horse","totp":"`+next+`"}`))
+	second.Host = "127.0.0.1"
 	second.Header.Set("Content-Type", "application/json")
 	second.RemoteAddr = "192.0.2.84:9"
 	srec := httptest.NewRecorder()

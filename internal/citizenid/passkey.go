@@ -196,7 +196,7 @@ func (g *Gateway) discover(rawID, userHandle []byte) (webauthn.User, error) {
 }
 
 func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
-	host := strings.ToLower(g.forwardedHost(r))
+	host := strings.ToLower(stripPort(g.forwardedHost(r)))
 	if !g.passkeyHost(host) {
 		return nil, &InputError{"Passkeys are not available on this address."}
 	}

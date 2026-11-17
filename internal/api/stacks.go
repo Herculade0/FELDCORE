@@ -112,11 +112,7 @@ func (s *Server) handleStackCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Deploy {
-		if _, err := s.stacks.Check(body.Name, body.Compose, body.Env, isolateChoice(body.Isolate, true), body.Confirm, body.DeployAnyway); err != nil {
-			if s.refusedGate(w, r, "stack.deploy", body.Name, err) {
-				return
-			}
-			s.fail(w, r, err)
+		if !s.acceptStack(w, r, "stack.deploy", body.Name, body.Compose, body.Env, isolateChoice(body.Isolate, true), body.Confirm, body.DeployAnyway) {
 			return
 		}
 	}
@@ -196,11 +192,7 @@ func (s *Server) handleStackDeploy(w http.ResponseWriter, r *http.Request) {
 		envText = body.Env
 		isolate = isolateChoice(body.Isolate, current.Isolate)
 	}
-	if _, err := s.stacks.Check(name, composeText, envText, isolate, body.Confirm, body.DeployAnyway); err != nil {
-		if s.refusedGate(w, r, "stack.deploy", name, err) {
-			return
-		}
-		s.fail(w, r, err)
+	if !s.acceptStack(w, r, "stack.deploy", name, composeText, envText, isolate, body.Confirm, body.DeployAnyway) {
 		return
 	}
 	if strings.TrimSpace(body.Compose) != "" {
@@ -239,11 +231,7 @@ func (s *Server) handleStackUpdate(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if _, err := s.stacks.Check(name, current.Compose, current.Env, current.Isolate, true, body.DeployAnyway); err != nil {
-		if s.refusedGate(w, r, "stack.update", name, err) {
-			return
-		}
-		s.fail(w, r, err)
+	if !s.acceptStack(w, r, "stack.update", name, current.Compose, current.Env, current.Isolate, true, body.DeployAnyway) {
 		return
 	}
 	s.startStackJob(w, r, name, "update", "Update "+name, func(ctx context.Context, log compose.Log) error {
@@ -372,6 +360,26 @@ func (s *Server) handleStackFromContainer(w http.ResponseWriter, r *http.Request
 	}
 	s.auditFile(r, "stack.convert", st.Name, "ok")
 	writeJSON(w, http.StatusCreated, st)
+}
+
+// acceptStack runs the deploy gate. deployAnyway only counts for an
+// administrator. A lesser caller who would need that acknowledgement is refused.
+func (s *Server) acceptStack(w http.ResponseWriter, r *http.Request, action, name, composeText, envText string, isolate, confirm, anyway bool) bool {
+	admin := s.isAdmin(r)
+	if _, err := s.stacks.Check(name, composeText, envText, isolate, confirm, anyway && admin); err != nil {
+		var gate *compose.Gate
+		if errors.As(err, &gate) && gate.Ack && !admin {
+			s.auditFile(r, action, name, "denied")
+			writeError(w, http.StatusForbidden, "High-risk settings need an administrator.")
+			return false
+		}
+		if s.refusedGate(w, r, action, name, err) {
+			return false
+		}
+		s.fail(w, r, err)
+		return false
+	}
+	return true
 }
 
 // refusedGate writes a 409 and audits the refusal. Other errors return false

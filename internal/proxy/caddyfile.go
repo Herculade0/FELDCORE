@@ -87,12 +87,19 @@ func writeProxy(b *strings.Builder, site Site) {
 	fmt.Fprintf(b, "\t}\n")
 }
 
+// cookieDown drops a Set-Cookie whose name is a FELDCORE session, including
+// the __Host- form. Other cookies the app sets are left alone.
+const cookieDown = `header_down Set-Cookie "(?i)^(?:__Host-)?feldcore_(?:citizen|desk|session|passkey)=.*" ""`
+
 func writeAppProxy(b *strings.Builder, site Site, pad string) {
 	fmt.Fprintf(b, "%sreverse_proxy %s {\n", pad, site.Upstream)
 	writeForwarded(b, pad+"\t")
 	if !site.Passthrough {
 		fmt.Fprintf(b, "%s\theader_up -Authorization\n", pad)
 		writeCookieReplace(b, pad+"\t", site.KeepCookies)
+		// The management UI's upstream is feldcored, so its Set-Cookie is the
+		// real session. Every other upstream has a planted session dropped.
+		fmt.Fprintf(b, "%s\t%s\n", pad, cookieDown)
 	}
 	fmt.Fprintf(b, "%s}\n", pad)
 }

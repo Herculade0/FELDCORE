@@ -26,10 +26,15 @@ func (s *Server) handleWizardStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
+	if s.refuseForeignHost(w, r) {
+		return
+	}
 	if s.wiz == nil {
 		writeError(w, http.StatusNotFound, "Setup is not available.")
 		return
 	}
+	user, _ := s.currentUser(r)
+	old := s.sessionCookieValue(r)
 	var in setup.Request
 	if !readJSON(w, r, &in) {
 		return
@@ -51,6 +56,8 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 	view, grant, err := s.wiz.Apply(r.Context(), in)
 	if grant != nil {
 		s.setSessionCookie(w, r, grant.Token, grant.Expires)
+	} else {
+		s.restoreCallerSession(w, r, user, old)
 	}
 	if err != nil {
 		// The account already exists. Return the page, with the error on it,

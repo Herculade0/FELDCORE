@@ -111,7 +111,10 @@ func (s *Server) handleCitizenLogin(w http.ResponseWriter, r *http.Request) {
 // administrator session when this person is the administrator. /api/v1 does
 // not read the parent-domain citizen cookie.
 func (s *Server) issueDesk(w http.ResponseWriter, r *http.Request, id citizenid.Identity) error {
-	if !s.onManagement(r) {
+	if !s.managementHost(r) {
+		// A desk cookie and an administrator session belong on this server's
+		// own address. The parent-domain citizen cookie from this sign-in
+		// still stands, including for the administrator on an app hostname.
 		return nil
 	}
 	if err := s.citizen.StartDesk(w, r, id); err != nil {
@@ -296,9 +299,15 @@ func (s *Server) handleCitizenTOTPReset(w http.ResponseWriter, r *http.Request) 
 	if !s.confirmFactor(w, r) {
 		return
 	}
-	if err := s.citizen.ResetTOTP(chi.URLParam(r, "id")); err != nil {
+	user, _ := s.currentUser(r)
+	old := s.sessionCookieValue(r)
+	id := chi.URLParam(r, "id")
+	if err := s.citizen.ResetTOTP(id); err != nil {
 		s.fail(w, r, err)
 		return
+	}
+	if id == "admin" {
+		s.restoreCallerSession(w, r, user, old)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }

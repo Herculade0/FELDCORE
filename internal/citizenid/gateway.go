@@ -378,11 +378,8 @@ func (g *Gateway) AppForHost(host string) (AppAccess, bool) {
 	if route == nil {
 		return AppAccess{}, false
 	}
-	app := AppAccess{ID: route.Container, Name: route.Hostname, Host: route.Hostname, Level: LevelPublic}
-	if level, groups, set := Effective(snap, route.Container); set {
-		app.Level = level
-		app.GroupIDs = g.ResolveGroups(groups)
-	}
+	level, groups := g.Effective(route.Container, route.Hostname)
+	app := AppAccess{ID: route.Container, Name: route.Hostname, Host: route.Hostname, Level: level, GroupIDs: groups}
 	return app, true
 }
 
@@ -704,8 +701,7 @@ func (g *Gateway) dropDeskLocked(w http.ResponseWriter, r *http.Request) {
 // on a published app is admin unless an app grant says otherwise, and the
 // stricter of the grant and the publish access wins.
 func (g *Gateway) PublishedAccess(container, access string, groups []string) (string, []string) {
-	level, ids := Combine(g.st.Snapshot(), container, access, groups)
-	return level, g.ResolveGroups(ids)
+	return g.EffectivePublish(container, access, groups)
 }
 
 // ResolveGroups turns stored group names or ids into ids.
@@ -756,12 +752,15 @@ func (g *Gateway) load(r *http.Request) (context.Context, error) {
 }
 
 func (g *Gateway) loadLocked(r *http.Request) (context.Context, error) {
+	// Prefer the host-only cookie. A planted plain cookie must not override it,
+	// and a present __Host- value is not replaced by the plain name when it
+	// fails to load.
+	if c, err := r.Cookie("__Host-" + cookieName); err == nil && c.Value != "" {
+		return g.sessions.Load(r.Context(), c.Value)
+	}
 	token := ""
-	for _, name := range []string{cookieName, "__Host-" + cookieName} {
-		if c, err := r.Cookie(name); err == nil && c.Value != "" {
-			token = c.Value
-			break
-		}
+	if c, err := r.Cookie(cookieName); err == nil {
+		token = c.Value
 	}
 	return g.sessions.Load(r.Context(), token)
 }
@@ -956,41 +955,62 @@ func q(raw string) string {
 	return "?" + raw
 }
 
-// forwardedOK is true when the TCP peer is allowed to set X-Forwarded-*.
-// That is loopback or Caddy. A direct client cannot supply those headers.
-func (g *Gateway) forwardedOK(r *http.Request) bool {
-	peer := remoteIP(r)
-	if peer == nil {
+// headersTrusted reports whether this TCP peer may set X-Forwarded-Proto and
+// X-Forwarded-Host. Loopback, Caddy, and the containerized cloudflared qualify.
+// Anyone else is ignored, so a client cannot spoof https or the public hostname.
+func (g *Gateway) headersTrusted(r *http.Request) bool {
+	if r == nil {
 		return false
 	}
-	if peer.IsLoopback() {
+	return g.Trusts(r.Context(), remoteIP(r))
+}
+
+// forwardedOK is headersTrusted. Return URLs and WebAuthn use this name.
+func (g *Gateway) forwardedOK(r *http.Request) bool {
+	return g.headersTrusted(r)
+}
+
+// Trusts reports whether ip is loopback, Caddy, or the containerized tunnel.
+// CF-Connecting-IP stays limited to the tunnel; scheme and host are honoured
+// from both proxies.
+func (g *Gateway) Trusts(ctx context.Context, ip net.IP) bool {
+	if ip != nil && ip.IsLoopback() {
 		return true
 	}
-	return g.trust != nil && g.trust(r.Context(), peer)
+	if g == nil || ip == nil {
+		return false
+	}
+	if g.trust != nil && g.trust(ctx, ip) {
+		return true
+	}
+	return g.tunnel != nil && g.tunnel(ctx, ip)
+}
+
+// clientHost is the host the browser used, including a port. The forwarded
+// host is read only from a trusted peer.
+func (g *Gateway) clientHost(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if g.headersTrusted(r) {
+		if h := firstForwarded(r.Header.Get("X-Forwarded-Host")); h != "" {
+			return h
+		}
+	}
+	return strings.TrimSpace(r.Host)
 }
 
 func (g *Gateway) forwardedHost(r *http.Request) string {
-	if g.forwardedOK(r) {
-		if h := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); h != "" {
-			return stripPort(h)
-		}
-	}
-	return stripPort(r.Host)
+	return stripPort(g.clientHost(r))
 }
 
 // requestHost keeps a non-default port. WebAuthn origins include it.
 func (g *Gateway) requestHost(r *http.Request) string {
-	raw := r.Host
-	if g.forwardedOK(r) {
-		if h := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); h != "" {
-			raw = h
-		}
-	}
-	return strings.TrimSpace(raw)
+	return g.clientHost(r)
 }
 
 // RequestSecure reports whether the browser used HTTPS. X-Forwarded-Proto
-// counts only from Caddy or loopback.
+// counts only from Caddy, the containerized tunnel, or loopback.
 func (g *Gateway) RequestSecure(r *http.Request) bool {
 	return g.requestSecure(r)
 }
@@ -999,37 +1019,29 @@ func (g *Gateway) requestSecure(r *http.Request) bool {
 	if r != nil && r.TLS != nil {
 		return true
 	}
-	if g.forwardedOK(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		return true
+	if !g.headersTrusted(r) {
+		return false
 	}
-	return false
+	return strings.EqualFold(firstForwarded(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+func firstForwarded(v string) string {
+	return strings.TrimSpace(strings.Split(v, ",")[0])
 }
 
 // ManagementHost reports whether this request is for the management UI.
-// An app hostname must not receive a desk or administrator session cookie.
+// Only loopback names, IP literals, the configured UI hostname, and the
+// tunnel admin hostname (when expose-admin is on) qualify.
 func (g *Gateway) ManagementHost(r *http.Request) bool {
-	host := strings.ToLower(g.forwardedHost(r))
-	if host == "" || host == "localhost" {
-		return true
+	if g == nil || r == nil {
+		return false
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		return true
-	}
-	if g.uiHost(host) {
-		return true
-	}
-	snap := g.st.Snapshot()
-	if snap.Remote.ExposeAdmin && strings.EqualFold(stripPort(snap.Remote.AdminHostname), host) {
-		return true
-	}
-	return !g.appHost(host)
+	ui, expose, admin := g.HostPolicy()
+	return IsManagementHost(g.forwardedHost(r), ui, expose, admin)
 }
 
 func (g *Gateway) uiHost(host string) bool {
 	snap := g.st.Snapshot()
-	if !snap.Web.UIEnabled && snap.Web.UIHostname == "" {
-		// The default name is still the management host when the UI is on.
-	}
 	h := snap.Web.UIHostname
 	if h == "" {
 		d := snap.Web.Domain

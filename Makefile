@@ -1,3 +1,7 @@
+# Pin the toolchain. go.mod's go line is 1.26.11; Go omits a toolchain
+# directive that only repeats that version.
+export GOTOOLCHAIN := go1.26.11
+
 BINARY := bin/feldcored
 
 .PHONY: all build web go run dev clean tidy

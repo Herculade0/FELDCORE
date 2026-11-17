@@ -321,6 +321,10 @@ func (s *Service) proxyTo(w http.ResponseWriter, r *http.Request, app App) {
 			req.Header.Set("X-Forwarded-Proto", "https")
 		}
 	}
+	rp.ModifyResponse = func(resp *http.Response) error {
+		scrubSetCookies(resp.Header)
+		return nil
+	}
 	rp.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
 		if s.Log != nil {
 			s.Log.Warn("publish proxy failed", "app", app.Container, "host", app.Hostname, "err", err)

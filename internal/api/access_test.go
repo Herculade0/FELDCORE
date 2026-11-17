@@ -63,6 +63,7 @@ func TestRemoteAndSnapshotAPI(t *testing.T) {
 	srv := New(Deps{Auth: accounts, Remote: remoteSvc, Snaps: snaps, Log: log})
 
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, login)
@@ -79,6 +80,7 @@ func TestRemoteAndSnapshotAPI(t *testing.T) {
 			r = httptest.NewRequest(method, path, strings.NewReader(body))
 			r.Header.Set("Content-Type", "application/json")
 		}
+		r.Host = "127.0.0.1"
 		r.AddCookie(cookie)
 		w := httptest.NewRecorder()
 		srv.Router().ServeHTTP(w, r)

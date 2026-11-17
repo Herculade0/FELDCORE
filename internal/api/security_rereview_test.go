@@ -54,6 +54,7 @@ func TestCitizenCookieIsNotADeskSession(t *testing.T) {
 func TestPasskeyAddRequiresPassword(t *testing.T) {
 	srv, _ := citizenServer(t)
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	login.RemoteAddr = "192.0.2.41:9"
 	rec := httptest.NewRecorder()
@@ -124,6 +125,7 @@ func TestLegacyLoginSharesCitizenLockout(t *testing.T) {
 		}
 	}
 	legacy := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	legacy.Host = "127.0.0.1"
 	legacy.Header.Set("Content-Type", "application/json")
 	legacy.RemoteAddr = "192.0.2.50:9"
 	rec := httptest.NewRecorder()
@@ -132,6 +134,7 @@ func TestLegacyLoginSharesCitizenLockout(t *testing.T) {
 		t.Fatalf("legacy login bypassed the citizen lockout: %d %s", rec.Code, rec.Body.String())
 	}
 	other := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	other.Host = "127.0.0.1"
 	other.Header.Set("Content-Type", "application/json")
 	other.RemoteAddr = "192.0.2.51:9"
 	rec = httptest.NewRecorder()
@@ -145,6 +148,7 @@ func TestLegacyLoginRejectsOverlongPassword(t *testing.T) {
 	srv, _ := citizenServer(t)
 	body := `{"username":"admin","password":"` + strings.Repeat("a", 80) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+	req.Host = "127.0.0.1"
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "192.0.2.52:9"
 	rec := httptest.NewRecorder()
@@ -166,6 +170,7 @@ func TestHostCookieLogoutEndsTheSession(t *testing.T) {
 	}
 	srv := New(Deps{Auth: accounts})
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	login.TLS = &tls.ConnectionState{}
 	login.RemoteAddr = "192.0.2.60:9"
@@ -210,6 +215,7 @@ func TestPasswordChangeRevokesOtherAdminSessions(t *testing.T) {
 	signIn := func(addr string) *http.Cookie {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+		req.Host = "127.0.0.1"
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = addr
 		rec := httptest.NewRecorder()
@@ -222,6 +228,7 @@ func TestPasswordChangeRevokesOtherAdminSessions(t *testing.T) {
 	keep := signIn("192.0.2.70:9")
 	other := signIn("192.0.2.71:9")
 	change := httptest.NewRequest(http.MethodPut, "/api/v1/settings/password", strings.NewReader(`{"current":"correct horse","next":"a new password"}`))
+	change.Host = "127.0.0.1"
 	change.Header.Set("Content-Type", "application/json")
 	change.AddCookie(keep)
 	rec := httptest.NewRecorder()

@@ -54,7 +54,7 @@ func (g *Gateway) checkCSRF(r *http.Request, token string) bool {
 	return subtle.ConstantTimeCompare([]byte(c.Value), []byte(hashKey(token))) == 1
 }
 
-func originOK(r *http.Request) bool {
+func (g *Gateway) originOK(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
@@ -63,11 +63,7 @@ func originOK(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	host := r.Host
-	if fh := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); fh != "" {
-		host = fh
-	}
-	return strings.EqualFold(u.Host, host)
+	return strings.EqualFold(u.Host, g.clientHost(r))
 }
 
 type signInView struct {
@@ -102,7 +98,7 @@ func (g *Gateway) ServeSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 	view := signInView{Next: next}
 	if r.Method == http.MethodPost {
-		if !originOK(r) || !g.checkCSRF(r, r.FormValue("csrf")) {
+		if !g.originOK(r) || !g.checkCSRF(r, r.FormValue("csrf")) {
 			http.Error(w, "This form has expired. Reload the page and try again.", http.StatusForbidden)
 			return
 		}

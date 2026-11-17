@@ -152,6 +152,11 @@ func (a *Service) DisableTOTP(password, code string) error {
 			return ErrSetupDone
 		}
 		s.Admin.TOTP = false
+		// Same as an administrator authenticator reset: Citizen ID cookies
+		// die with the version, and API sessions are removed because
+		// Authenticate does not read that version.
+		s.Admin.SessionVersion++
+		s.Sessions = nil
 		return nil
 	}); err != nil {
 		return err

@@ -6,11 +6,20 @@ import (
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
+// accessRule is one side of an access decision. set is false when that side
+// has no rule, which is different from an explicit public rule: a missing
+// publish toggle must not wipe a Citizen ID grant, and the other way around.
+type accessRule struct {
+	set    bool
+	level  string
+	groups []string
+}
+
 // Effective is the access level for a container, combining the Citizen ID
 // app grant and the publish access. When neither is set the route stays
 // public, which is how an open web route has always behaved. When a record
 // exists but its level is empty, the result is admin. When both are set,
-// the stricter one wins.
+// the stricter one wins. Two group lists are intersected.
 func Effective(snap store.State, container string) (level string, groups []string, set bool) {
 	hasGrant, grantLevel, grantGroups := findGrant(snap, container)
 	hasPub, access, pubGroups := findPublish(snap, container)
@@ -63,7 +72,7 @@ func combine(hasGrant bool, grantLevel string, grantGroups []string, hasAccess b
 	switch {
 	case gOK && aOK && gRank == aRank:
 		if gLevel == LevelGroups {
-			return LevelGroups, unionGroups(grantGroups, accessGroups)
+			return LevelGroups, intersectIDs(grantGroups, accessGroups)
 		}
 		return gLevel, nil
 	case gOK && (!aOK || gRank > aRank):
@@ -122,18 +131,101 @@ func rank(level string) (int, bool) {
 	}
 }
 
-func unionGroups(a, b []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, list := range [][]string{a, b} {
-		for _, g := range list {
-			g = strings.TrimSpace(g)
-			if g == "" || seen[g] {
-				continue
-			}
-			seen[g] = true
-			out = append(out, g)
+func intersectIDs(a, b []string) []string {
+	have := map[string]bool{}
+	for _, id := range a {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			have[id] = true
 		}
 	}
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range b {
+		id = strings.TrimSpace(id)
+		if id == "" || !have[id] || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
 	return out
+}
+
+func (g *Gateway) grantRule(container string) accessRule {
+	if g == nil || g.st == nil {
+		return accessRule{}
+	}
+	for _, gr := range g.st.Snapshot().AppGrants {
+		if gr.Container != container {
+			continue
+		}
+		rule := accessRule{set: true, level: gr.Level}
+		if level, ok := knownGrant(gr.Level); ok && level == LevelGroups {
+			rule.groups = g.ResolveGroups(gr.GroupIDs)
+		}
+		return rule
+	}
+	return accessRule{}
+}
+
+func (g *Gateway) publishRule(container, host string) accessRule {
+	if g == nil || g.st == nil {
+		return accessRule{}
+	}
+	var fallback accessRule
+	found := false
+	for _, app := range g.st.Snapshot().Publish.Apps {
+		if !app.Enabled || app.Container != container {
+			continue
+		}
+		rule := publishAccessRule(g, app.Access, app.Groups)
+		if host != "" && strings.EqualFold(app.Hostname, host) {
+			return rule
+		}
+		if !found {
+			fallback = rule
+			found = true
+		}
+	}
+	if !found {
+		return accessRule{}
+	}
+	return fallback
+}
+
+func publishAccessRule(g *Gateway, access string, groups []string) accessRule {
+	rule := accessRule{set: true, level: access}
+	if level, ok := knownAccess(access); ok && level == LevelGroups {
+		rule.groups = g.ResolveGroups(groups)
+	}
+	return rule
+}
+
+// Effective is the rule a web route and the directory both show: the stricter
+// of the Citizen ID grant and the publish toggle for this hostname.
+func (g *Gateway) Effective(container, host string) (string, []string) {
+	grant := g.grantRule(container)
+	pub := g.publishRule(container, host)
+	if !grant.set && !pub.set {
+		return LevelPublic, []string{}
+	}
+	level, groups := combine(grant.set, grant.level, grant.groups, pub.set, pub.level, pub.groups)
+	if groups == nil {
+		groups = []string{}
+	}
+	return level, groups
+}
+
+// EffectivePublish combines a publish record the caller already has with the
+// stored Citizen ID grant. The publish side is always set, even when it is public.
+// Group names are resolved to ids before the lists are intersected.
+func (g *Gateway) EffectivePublish(container, level string, groups []string) (string, []string) {
+	grant := g.grantRule(container)
+	pub := publishAccessRule(g, level, groups)
+	out, ids := combine(grant.set, grant.level, grant.groups, true, pub.level, pub.groups)
+	if ids == nil {
+		ids = []string{}
+	}
+	return out, ids
 }

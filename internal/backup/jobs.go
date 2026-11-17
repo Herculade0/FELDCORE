@@ -43,13 +43,13 @@ type Job struct {
 type bjob struct {
 	Job
 	tokenID  string
+	admin    bool
 	readData bool
 	snap     string
 	paths    []string
 	mode     string
 	iaHead   string
 	redact   []string
-	admin    bool
 }
 
 func (s *Service) jobsLocked() map[string]*bjob {
