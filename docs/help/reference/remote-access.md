@@ -13,7 +13,7 @@ references:
   - networks
 ---
 
-Two containers do the publishing, and both stay off until you ask. `feldcore-cloudflared` is the tunnel. `feldcore-caddy` is the proxy that obtains certificates. The walkthrough is [[help:expose-site|How to expose your site]].
+Publishing stays off until you ask. On FELDCORE OS the tunnel connector is the cloudflared program shipped with the image. On other systems it is the container `feldcore-cloudflared`. `feldcore-caddy` is the proxy that obtains certificates. The walkthrough is [[help:expose-site|How to expose your site]].
 
 [[route:settings.remote|Open Remote access]]
 
@@ -34,9 +34,9 @@ Create the API token with:
 - Zone → DNS → Edit
 - Zone → Zone → Read
 
-The token is encrypted under `/var/lib/feldcore/secrets/` (mode `0600`). It is not written to the log, to `state.json`, or onto the container command line. The connector reads a mode `0600` file mounted into the container.
+The token is encrypted under `/var/lib/feldcore/secrets/` (mode `0600`). It is not written to the log, to `state.json`, or onto the command line. The connector reads a mode `0600` file.
 
-FELDCORE prefers to run cloudflared as the container `feldcore-cloudflared` on the `feldcore` network. If Docker is not running, **Install cloudflared on the host** downloads the official binary into FELDCORE's data directory and runs it only while remote access is on.
+On FELDCORE OS, cloudflared 2026.11.0 is already at `/usr/bin/cloudflared`. FELDCORE runs that program and restarts it if it exits. It does not start a container, and it can start while Docker is still coming up. On any other machine without that program, FELDCORE runs the container `feldcore-cloudflared` on the `feldcore` network when Docker is running. If Docker is not running, **Install cloudflared on the host** downloads the official binary into FELDCORE's data directory and runs it only while remote access is on.
 
 Turning remote access off stops the connector and deletes the runtime token file. It does not delete the tunnel in Cloudflare, so turning it back on uses the same tunnel.
 

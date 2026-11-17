@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/cfapi"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/secrets"
@@ -66,13 +69,49 @@ func newSvc(t *testing.T) (*Service, *fakeEngine, *bytes.Buffer) {
 	var buf bytes.Buffer
 	log := slog.New(secrets.NewRedactingHandler(slog.NewTextHandler(&buf, nil), box))
 	eng := &fakeEngine{ready: true, mode: "bridge"}
-	return &Service{Store: st, Secrets: box, Engine: eng, DataDir: dir, ListenPort: 8787, Log: log}, eng, &buf
+	// Existing cases are ordinary hosts: Docker is up and the OS program is absent.
+	return &Service{
+		Store: st, Secrets: box, Engine: eng, DataDir: dir, ListenPort: 8787, Log: log,
+		PreferHost: func() bool { return false },
+	}, eng, &buf
 }
+
+type fakeBinary struct {
+	available bool
+	running   bool
+	detail    string
+	err       error
+	starts    int
+	stops     int
+	token     string
+}
+
+func (f *fakeBinary) Available() bool { return f.available }
+func (f *fakeBinary) Running() bool   { return f.running }
+func (f *fakeBinary) Start(_ context.Context, token string) error {
+	f.starts++
+	f.token = token
+	if f.err != nil {
+		f.detail = f.err.Error()
+		f.running = false
+		return f.err
+	}
+	f.running = true
+	f.detail = ""
+	return nil
+}
+func (f *fakeBinary) Stop() error {
+	f.stops++
+	f.running = false
+	return nil
+}
+func (f *fakeBinary) Install(context.Context) error { return nil }
+func (f *fakeBinary) Detail() string                { return f.detail }
 
 func TestDefaultIsOff(t *testing.T) {
 	svc, eng, _ := newSvc(t)
 	v := svc.View(context.Background())
-	if v.Mode != "off" || v.ExposeAdmin || len(v.Routes) != 0 || v.Status.State != "off" {
+	if v.Mode != "off" || v.ExposeAdmin || v.RunsOnHost || len(v.Routes) != 0 || v.Status.State != "off" {
 		t.Fatalf("view %+v", v)
 	}
 	if err := svc.Sync(context.Background()); err != nil {
@@ -103,6 +142,13 @@ func TestTokenModeHidesToken(t *testing.T) {
 	}
 	if spec.Role != "tunnel" || len(spec.Binds) != 1 || !strings.Contains(spec.Binds[0], "tunnel.token") {
 		t.Fatalf("spec %+v", spec)
+	}
+	if strings.Join(spec.Entrypoint, " ") != "/usr/local/bin/cloudflared" || spec.User != "0:0" {
+		t.Fatalf("entrypoint %+v user %q", spec.Entrypoint, spec.User)
+	}
+	joinedCmd := strings.Join(spec.Command, " ")
+	if strings.Contains(joinedCmd, "sh") || !strings.Contains(joinedCmd, "--token-file") {
+		t.Fatalf("command %q", joinedCmd)
 	}
 	fi, err := os.Stat(svc.tokenPath())
 	if err != nil || fi.Mode().Perm()&0o077 != 0 {
@@ -265,8 +311,213 @@ func TestPublishGatewayOrigin(t *testing.T) {
 }
 
 func TestCommandArgsOmitToken(t *testing.T) {
-	args := strings.Join(commandArgs("/usr/bin/cloudflared"), " ")
-	if strings.Contains(args, "token") {
+	const secret = "super-secret-tunnel-token"
+	args := strings.Join(tokenArgs("/usr/bin/cloudflared", "/var/lib/feldcore/run/tunnel.token"), " ")
+	if strings.Contains(args, secret) || strings.Contains(args, "sh") {
 		t.Fatal(args)
+	}
+	if !strings.Contains(args, "--token-file") || !strings.Contains(args, "/usr/bin/cloudflared") {
+		t.Fatal(args)
+	}
+	plain := strings.Join(commandArgs("/usr/bin/cloudflared"), " ")
+	if strings.Contains(plain, "token") {
+		t.Fatal(plain)
+	}
+}
+
+func TestOSRunsBakedBinaryWhileDockerIsUp(t *testing.T) {
+	svc, eng, logs := newSvc(t)
+	bin := &fakeBinary{available: true}
+	svc.Binary = bin
+	svc.PreferHost = func() bool { return true }
+	const token = "super-secret-tunnel-token"
+	if err := svc.Save(context.Background(), SaveInput{Mode: "token", TunnelToken: token}); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.specs) != 0 {
+		t.Fatalf("container started on FELDCORE OS: %+v", eng.specs)
+	}
+	if len(eng.stopped) != 1 || eng.stopped[0] != docker.TunnelContainer {
+		t.Fatalf("stopped %+v", eng.stopped)
+	}
+	if bin.starts != 1 || bin.token != token || !bin.running {
+		t.Fatalf("binary %+v", bin)
+	}
+	view := svc.View(context.Background())
+	if !view.RunsOnHost || view.Status.Connector != "binary" || view.Status.State != "up" {
+		t.Fatalf("view %+v", view)
+	}
+	if bytes.Contains(logs.Bytes(), []byte(token)) {
+		t.Fatalf("token leaked %s", logs.Bytes())
+	}
+	if !strings.Contains(logs.String(), BakedCloudflaredVersion) || !strings.Contains(logs.String(), bakedCloudflared) {
+		t.Fatalf("log %s", logs.Bytes())
+	}
+	if err := svc.Save(context.Background(), SaveInput{Mode: "off"}); err != nil {
+		t.Fatal(err)
+	}
+	if bin.stops != 1 || bin.running {
+		t.Fatalf("stop %+v", bin)
+	}
+	if svc.View(context.Background()).Status.State != "off" {
+		t.Fatal(svc.View(context.Background()).Status)
+	}
+}
+
+func TestOSStartsBeforeDockerIsHealthy(t *testing.T) {
+	svc, eng, _ := newSvc(t)
+	eng.ready = false
+	bin := &fakeBinary{available: true}
+	svc.Binary = bin
+	svc.PreferHost = func() bool { return true }
+	if err := svc.Save(context.Background(), SaveInput{Mode: "token", TunnelToken: "super-secret-tunnel-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if bin.starts != 1 || len(eng.specs) != 0 || len(eng.stopped) != 0 {
+		t.Fatalf("starts %d specs %d stopped %+v", bin.starts, len(eng.specs), eng.stopped)
+	}
+	if svc.appOrigin(context.Background()) != "http://127.0.0.1:8791" {
+		t.Fatal(svc.appOrigin(context.Background()))
+	}
+}
+
+func TestOSExecErrorIsNotReturnedRaw(t *testing.T) {
+	svc, eng, _ := newSvc(t)
+	bin := &fakeBinary{
+		available: true,
+		err:       errors.New(`feldcore-cloudflared was created but did not start: exec: "sh": executable file not found in $PATH`),
+	}
+	svc.Binary = bin
+	svc.PreferHost = func() bool { return true }
+	err := svc.Save(context.Background(), SaveInput{Mode: "token", TunnelToken: "super-secret-tunnel-token"})
+	if err == nil {
+		t.Fatal("expected a connector error")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("type %T", err)
+	}
+	if strings.Contains(err.Error(), "exec:") || strings.Contains(err.Error(), "sh") || strings.Contains(err.Error(), "PATH") {
+		t.Fatalf("cryptic error: %s", err)
+	}
+	if !strings.Contains(err.Error(), "could not start") && !strings.Contains(err.Error(), bakedCloudflared) {
+		t.Fatalf("error %s", err)
+	}
+	if len(eng.specs) != 0 {
+		t.Fatal("container was still applied")
+	}
+	view := svc.View(context.Background())
+	if view.Status.State != "down" || view.Status.Connector != "binary" {
+		t.Fatalf("status %+v", view.Status)
+	}
+	if strings.Contains(view.Status.Detail, "exec:") || strings.Contains(view.Status.Detail, "sh") {
+		t.Fatalf("detail %q", view.Status.Detail)
+	}
+	if view.Status.Detail == "" {
+		t.Fatal("missing detail")
+	}
+}
+
+func TestOSMissingBinaryNamesThePath(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	svc.Binary = &fakeBinary{available: false}
+	svc.PreferHost = func() bool { return true }
+	err := svc.Save(context.Background(), SaveInput{Mode: "token", TunnelToken: "super-secret-tunnel-token"})
+	if err == nil || strings.Contains(err.Error(), "exec:") {
+		t.Fatal(err)
+	}
+	if !strings.Contains(err.Error(), bakedCloudflared) || !strings.Contains(err.Error(), BakedCloudflaredVersion) {
+		t.Fatalf("error %s", err)
+	}
+	view := svc.View(context.Background())
+	if view.Status.State != "down" || view.Status.Connector != "none" || !strings.Contains(view.Status.Detail, bakedCloudflared) {
+		t.Fatalf("status %+v", view.Status)
+	}
+}
+
+func TestApplianceReleaseSkipsTheContainer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "feldcore-os-release")
+	if err := os.WriteFile(path, []byte("ID=feldcore\nVERSION_ID=0.1.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restore := appliance.SetReleasePath(path)
+	t.Cleanup(restore)
+	svc, eng, _ := newSvc(t)
+	svc.PreferHost = nil
+	bin := &fakeBinary{available: true}
+	svc.Binary = bin
+	if err := svc.Save(context.Background(), SaveInput{Mode: "token", TunnelToken: "super-secret-tunnel-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.specs) != 0 || bin.starts != 1 || !svc.View(context.Background()).RunsOnHost {
+		t.Fatalf("specs %d starts %d view %+v", len(eng.specs), bin.starts, svc.View(context.Background()))
+	}
+}
+
+func TestOSPublishDialsLoopback(t *testing.T) {
+	svc, eng, _ := newSvc(t)
+	svc.GatewayPort = 8791
+	svc.PreferHost = func() bool { return true }
+	svc.Binary = &fakeBinary{available: true}
+	payload, _ := json.Marshal(map[string]string{"a": "acc", "t": "tun", "s": "nope"})
+	token := base64.StdEncoding.EncodeToString(payload)
+	const apiTok = "super-secret-api-token-value"
+	var ingress string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/configurations"):
+			raw, _ := io.ReadAll(r.Body)
+			ingress = string(raw)
+			_, _ = w.Write([]byte(`{"success":true,"result":{}}`))
+		case r.URL.Path == "/zones":
+			if r.URL.Query().Get("name") == "example.com" {
+				_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"zone","name":"example.com"}]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"result":[]}`))
+		case strings.Contains(r.URL.Path, "/dns_records") && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"success":true,"result":[]}`))
+		case strings.Contains(r.URL.Path, "/dns_records") && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"success":true,"result":{"id":"rec"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"success":true,"result":{"id":"tun","connections":[{"id":"c"}]}}`))
+		}
+	}))
+	defer srv.Close()
+	svc.NewCF = func(tok string) *cfapi.Client { return &cfapi.Client{Base: srv.URL, Token: tok} }
+	if err := svc.Save(context.Background(), SaveInput{
+		Mode: "token", TunnelToken: token, APIToken: apiTok, ExposeAdmin: true, AdminHostname: "feld.example.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetPublicInput(PublicInput{Container: "plex", Hostname: "plex.example.com", Port: 32400, Enabled: true, Gateway: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ingress, "host.docker.internal") || !strings.Contains(ingress, "http://127.0.0.1:8791") || !strings.Contains(ingress, "http://127.0.0.1:8787") {
+		t.Fatalf("ingress %s", ingress)
+	}
+	if len(eng.specs) != 0 {
+		t.Fatal("container started")
+	}
+}
+
+func TestHostBinaryWhenDockerIsDown(t *testing.T) {
+	svc, eng, _ := newSvc(t)
+	eng.ready = false
+	bin := &fakeBinary{available: true}
+	svc.Binary = bin
+	if err := svc.Save(context.Background(), SaveInput{Mode: "token", TunnelToken: "super-secret-tunnel-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if bin.starts != 1 || len(eng.specs) != 0 {
+		t.Fatalf("starts %d specs %d", bin.starts, len(eng.specs))
+	}
+	if svc.View(context.Background()).RunsOnHost {
+		t.Fatal("ordinary host looked like the OS")
 	}
 }
