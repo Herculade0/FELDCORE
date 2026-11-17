@@ -111,13 +111,6 @@ func main() {
 		ListenPort: listenPort(cfg.ListenAddr), Log: log,
 		Skip: cfg.SkipWizard,
 	})
-	if code, err := wiz.EnsureCode(); err != nil {
-		log.Error("could not prepare the setup code", "err", err)
-	} else if code != "" {
-		fmt.Fprintf(os.Stdout, "FELDCORE setup code: %s\n", setup.FormatCode(code))
-		log.Info("enter the setup code above on the first-start screen; it works once")
-	}
-
 	if os.Geteuid() != 0 {
 		log.Warn("not running as root: shares cannot be applied to the system")
 	}
@@ -294,6 +287,30 @@ func main() {
 		}
 		diskSvc.Loop(ctx)
 	}()
+	// The answer file runs after the setup writers are wired and before the
+	// HTTP server listens, so a host on the LAN cannot claim the box while
+	// the file is also creating the administrator. EnsureCode runs after it:
+	// a created administrator consumes the code, and a failure still prints one.
+	installRes, installErr := wiz.ApplyInstallFile(ctx)
+	if installErr != nil {
+		log.Error("install answer file was not fully applied", "err", installErr)
+	} else if installRes != nil && installRes.Already {
+		log.Info("install answer file already applied")
+	} else if installRes != nil {
+		log.Info("install answer file applied",
+			"sections", strings.Join(installRes.Applied, ","),
+			"skipped", strings.Join(installRes.Skipped, ","))
+		for _, warning := range installRes.Warnings {
+			log.Warn("install answer file", "warning", warning)
+		}
+	}
+	if code, err := wiz.EnsureCode(); err != nil {
+		log.Error("could not prepare the setup code", "err", err)
+	} else if code != "" {
+		fmt.Fprintf(os.Stdout, "FELDCORE setup code: %s\n", setup.FormatCode(code))
+		log.Info("enter the setup code above on the first-start screen; it works once")
+	}
+
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Router(),

@@ -315,10 +315,10 @@ func (s *Service) applyDHCP(ctx context.Context, iface string) error {
 	}
 	var path, body string
 	if s.backend() == "networkd" {
-		path = "/etc/systemd/network/10-feldcore.network"
+		path = s.etcPath("systemd", "network", "10-feldcore.network")
 		body = "[Match]\nName=" + iface + "\n\n[Network]\nDHCP=yes\n"
 	} else {
-		path = "/etc/network/interfaces.d/feldcore"
+		path = s.etcPath("network", "interfaces.d", "feldcore")
 		body = "auto " + iface + "\niface " + iface + " inet dhcp\n"
 	}
 	return s.commitNetFile(ctx, path, body, iface)
@@ -348,7 +348,7 @@ func (s *Service) commitNetFile(ctx context.Context, path, body, iface string) e
 }
 
 func (s *Service) writeNTP(ctx context.Context, servers []string) error {
-	dir := "/etc/systemd/timesyncd.conf.d"
+	dir := s.etcPath("systemd", "timesyncd.conf.d")
 	path := filepath.Join(dir, "feldcore.conf")
 	if len(servers) == 0 {
 		_ = os.Remove(path)

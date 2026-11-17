@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -181,7 +182,7 @@ func (s *Service) backend() string {
 	if out, err := s.cmd.Run(context.Background(), "systemctl", "is-active", "systemd-networkd"); err == nil && strings.TrimSpace(out) == "active" {
 		return "networkd"
 	}
-	if _, err := os.Stat("/etc/network/interfaces"); err == nil {
+	if _, err := os.Stat(s.etcPath("network", "interfaces")); err == nil {
 		return "ifupdown"
 	}
 	return ""
@@ -239,7 +240,11 @@ func (s *Service) applyHost(ctx context.Context, req Request) error {
 	}
 	if loc := strings.TrimSpace(req.Locale); loc != "" {
 		if _, err := s.cmd.Run(ctx, "localectl", "set-locale", "LANG="+loc); err != nil {
-			if err := os.WriteFile("/etc/default/locale", []byte("LANG="+loc+"\n"), 0o644); err != nil {
+			path := s.etcPath("default", "locale")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return &OpError{"Could not set the locale: " + err.Error()}
+			}
+			if err := os.WriteFile(path, []byte("LANG="+loc+"\n"), 0o644); err != nil {
 				return &OpError{"Could not set the locale: " + err.Error()}
 			}
 		}
@@ -447,13 +452,13 @@ func (s *Service) netFile(req Request) (string, string) {
 		if dns != "" {
 			body += "DNS=" + dns + "\n"
 		}
-		return "/etc/systemd/network/10-feldcore.network", body
+		return s.etcPath("systemd", "network", "10-feldcore.network"), body
 	}
 	body := "auto " + req.Iface + "\niface " + req.Iface + " inet static\n    address " + req.Address + "\n    gateway " + req.Gateway + "\n"
 	if dns != "" {
 		body += "    dns-nameservers " + dns + "\n"
 	}
-	return "/etc/network/interfaces.d/feldcore", body
+	return s.etcPath("network", "interfaces.d", "feldcore"), body
 }
 
 func (s *Service) reloadNet(ctx context.Context, iface string) error {
