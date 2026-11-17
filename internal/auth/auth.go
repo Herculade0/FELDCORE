@@ -11,12 +11,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Herculade0/feldcore/internal/store"
+)
+
+var (
+	ErrTOTPRequired = errors.New("authenticator code required")
+	ErrTOTPInvalid  = errors.New("incorrect authenticator code")
 )
 
 const (
@@ -35,6 +41,12 @@ var (
 	ErrRateLimited        = errors.New("too many failed attempts; wait a few minutes and try again")
 )
 
+// SecondFactor runs after the administrator password matches. Citizen ID
+// installs this so the authenticator it shares with the setup wizard is
+// checked here. A nil hook falls back to that same authenticator when the
+// wizard turned it on, and stays password-only until then.
+type SecondFactor func(username, code string) error
+
 // InputError is a validation failure whose message is safe to show the user.
 type InputError struct{ Msg string }
 
@@ -42,12 +54,14 @@ func (e *InputError) Error() string { return e.Msg }
 
 // Service owns accounts and sessions.
 type Service struct {
-	st   *store.Store
-	cost int
-	lim  *limiter
-	now  func() time.Time
+	st      *store.Store
+	cost    int
+	lim     *limiter
+	now     func() time.Time
+	secrets SecretBox
 
 	dummyOnce sync.Once
+	factor    SecondFactor
 	dummy     []byte
 }
 
@@ -92,9 +106,26 @@ func (a *Service) Setup(username, password string) error {
 	})
 }
 
+// SetSecondFactor installs the authenticator check used by Login.
+// The hook is nil until Citizen ID is wired in.
+func (a *Service) SetSecondFactor(fn SecondFactor) {
+	a.factor = fn
+}
+
 // Login checks credentials and, on success, returns a new session token.
 // clientKey identifies the caller for rate limiting (normally its IP).
 func (a *Service) Login(clientKey, username, password string) (token string, expires time.Time, err error) {
+	return a.LoginCode(clientKey, username, password, "")
+}
+
+// LoginWithCode is the setup wizard's name for LoginCode.
+func (a *Service) LoginWithCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
+	return a.LoginCode(clientKey, username, password, code)
+}
+
+// LoginCode is Login with the authenticator code. An empty code is rejected
+// once an authenticator is enrolled.
+func (a *Service) LoginCode(clientKey, username, password, code string) (token string, expires time.Time, err error) {
 	now := a.now()
 	if a.lim.blocked(clientKey, now) {
 		return "", time.Time{}, ErrRateLimited
@@ -105,17 +136,54 @@ func (a *Service) Login(clientKey, username, password string) (token string, exp
 	// a wrong password.
 	hash := a.dummyHash()
 	userOK := false
+	totpOn := false
 	if admin != nil && subtle.ConstantTimeCompare([]byte(admin.Username), []byte(username)) == 1 {
 		hash = []byte(admin.PasswordHash)
 		userOK = true
+		totpOn = admin.TOTP
 	}
 	passOK := bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 	if !userOK || !passOK {
 		a.lim.fail(clientKey, now)
 		return "", time.Time{}, ErrInvalidCredentials
 	}
+	if a.factor != nil {
+		if ferr := a.factor(username, code); ferr != nil {
+			if a.RedeemRecovery(username, code) {
+				a.lim.reset(clientKey)
+				return a.issue(username)
+			}
+			if !factorPending(ferr) {
+				a.lim.fail(clientKey, now)
+			}
+			return "", time.Time{}, ferr
+		}
+	} else if totpOn {
+		if strings.TrimSpace(code) == "" {
+			return "", time.Time{}, ErrTOTPRequired
+		}
+		if !a.codeMatches(code) {
+			a.lim.fail(clientKey, now)
+			return "", time.Time{}, ErrTOTPInvalid
+		}
+	}
 	a.lim.reset(clientKey)
 	return a.issue(username)
+}
+
+// IssueSession starts an administrator session after Citizen ID has already
+// checked the password and the authenticator. It does not check them again.
+func (a *Service) IssueSession(username string) (string, time.Time, error) {
+	admin := a.st.Snapshot().Admin
+	if admin == nil || subtle.ConstantTimeCompare([]byte(admin.Username), []byte(username)) != 1 {
+		return "", time.Time{}, ErrInvalidCredentials
+	}
+	return a.issue(username)
+}
+
+func factorPending(err error) bool {
+	var p interface{ SecondFactorPending() bool }
+	return errors.As(err, &p) && p.SecondFactorPending()
 }
 
 // issue creates and stores a session for username.
@@ -218,6 +286,18 @@ func (a *Service) SetSessionHours(h int) error {
 	})
 }
 
+// CheckPassword reports whether password is the administrator's current one.
+func (a *Service) CheckPassword(password string) error {
+	admin := a.st.Snapshot().Admin
+	if admin == nil {
+		return ErrSetupDone
+	}
+	if bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)) != nil {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
 // ChangePassword replaces the administrator password after checking the current one.
 func (a *Service) ChangePassword(current, next string) error {
 	admin := a.st.Snapshot().Admin
@@ -239,6 +319,9 @@ func (a *Service) ChangePassword(current, next string) error {
 			return ErrSetupDone
 		}
 		s.Admin.PasswordHash = string(hash)
+		// Citizen ID sessions carry this number. The original session cookie
+		// does not, so this sign-in keeps working exactly as before.
+		s.Admin.SessionVersion++
 		return nil
 	})
 }

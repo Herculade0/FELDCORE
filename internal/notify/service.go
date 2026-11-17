@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/events"
 	"github.com/Herculade0/feldcore/internal/secrets"
 	"github.com/Herculade0/feldcore/internal/store"
 )
@@ -42,6 +43,10 @@ type Service struct {
 	Log      *slog.Logger
 	Now      func() time.Time
 	SendMail func(ctx context.Context, m Message) error
+	// Bus receives container and update events when set. The dispatcher
+	// decides which channels to use. Without a bus, Emit sends mail directly,
+	// which is how this service behaved before the event bus existed.
+	Bus *events.Bus
 
 	mu    sync.Mutex
 	quiet map[string]time.Time
@@ -68,23 +73,29 @@ type Settings struct {
 
 // View is the page's read model.
 type View struct {
-	Enabled         bool                `json:"enabled"`
-	Configured      bool                `json:"configured"`
-	Mode            string              `json:"mode"`
-	Host            string              `json:"host"`
-	Port            int                 `json:"port"`
-	Username        string              `json:"username"`
-	From            string              `json:"from"`
-	To              string              `json:"to"`
-	TLS             string              `json:"tls"`
-	HasPassword     bool                `json:"hasPassword"`
-	BridgeManaged   bool                `json:"bridgeManaged"`
-	BridgeHost      string              `json:"bridgeHost"`
-	BridgePort      int                 `json:"bridgePort"`
-	BridgeRunning   bool                `json:"bridgeRunning"`
-	OnContainerStop bool                `json:"onContainerStop"`
-	OnUpdate        bool                `json:"onUpdate"`
-	Events          []store.NotifyEvent `json:"events"`
+	Enabled         bool                  `json:"enabled"`
+	Configured      bool                  `json:"configured"`
+	Mode            string                `json:"mode"`
+	Host            string                `json:"host"`
+	Port            int                   `json:"port"`
+	Username        string                `json:"username"`
+	From            string                `json:"from"`
+	To              string                `json:"to"`
+	TLS             string                `json:"tls"`
+	HasPassword     bool                  `json:"hasPassword"`
+	BridgeManaged   bool                  `json:"bridgeManaged"`
+	BridgeHost      string                `json:"bridgeHost"`
+	BridgePort      int                   `json:"bridgePort"`
+	BridgeRunning   bool                  `json:"bridgeRunning"`
+	OnContainerStop bool                  `json:"onContainerStop"`
+	OnUpdate        bool                  `json:"onUpdate"`
+	Events          []store.NotifyEvent   `json:"events"`
+	Channels        []store.NotifyChannel `json:"channels"`
+	Routes          []store.NotifyRoute   `json:"routes"`
+	Quiet           store.NotifyQuiet     `json:"quiet"`
+	DedupeSeconds   int                   `json:"dedupeSeconds"`
+	RatePerHour     int                   `json:"ratePerHour"`
+	InAppEnabled    bool                  `json:"inAppEnabled"`
 }
 
 func (s *Service) now() time.Time {
@@ -130,6 +141,7 @@ func (s *Service) View(ctx context.Context) View {
 			v.BridgeRunning = running
 		}
 	}
+	decorate(&v, n)
 	return v
 }
 
@@ -173,6 +185,13 @@ func (s *Service) Save(ctx context.Context, in Settings) error {
 	if err := s.Store.Update(func(st *store.State) error {
 		n.Events = st.Notify.Events
 		n.NotifiedVersion = st.Notify.NotifiedVersion
+		n.Channels = st.Notify.Channels
+		n.Routes = st.Notify.Routes
+		n.Quiet = st.Notify.Quiet
+		n.DedupeSeconds = st.Notify.DedupeSeconds
+		n.RatePerHour = st.Notify.RatePerHour
+		n.InAppSet = st.Notify.InAppSet
+		n.InAppEnabled = st.Notify.InAppEnabled
 		st.Notify = n
 		return nil
 	}); err != nil {
@@ -200,7 +219,10 @@ func (s *Service) Test(ctx context.Context) error {
 	}, true)
 }
 
-// Emit sends an event when notifications are on.
+// Emit sends an event when notifications are on. Container stops and update
+// notices honour their own switches. Any other kind, including backup.failed,
+// backup.check_failed and backup.restore_failed, is sent while the master
+// switch is on.
 func (s *Service) Emit(ctx context.Context, ev Event) {
 	n := s.Store.Snapshot().Notify
 	if !n.Enabled {
@@ -244,14 +266,12 @@ func (s *Service) Watch(ctx context.Context, containers Containers, latest Lates
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
-			n := s.Store.Snapshot().Notify
-			if !n.Enabled {
-				continue
-			}
-			if n.OnContainerStop && containers != nil {
+			// Poll even when mail is off. The bus lets the bell and other
+			// channels hear about a stop; mail still respects its own switches.
+			if containers != nil {
 				s.pollContainers(ctx, containers, now)
 			}
-			if n.OnUpdate && latest != nil && updatesEnabled != nil && updatesEnabled() && now.Sub(lastUpdate) > 6*time.Hour {
+			if latest != nil && updatesEnabled != nil && updatesEnabled() && now.Sub(lastUpdate) > 6*time.Hour {
 				lastUpdate = now
 				s.pollUpdate(ctx, latest)
 			}
@@ -269,7 +289,7 @@ func (s *Service) pollContainers(ctx context.Context, containers Containers, now
 	s.seen = running
 	s.mu.Unlock()
 	for _, ev := range events {
-		s.Emit(ctx, ev)
+		s.emit(ctx, ev)
 	}
 }
 
@@ -282,11 +302,28 @@ func (s *Service) pollUpdate(ctx context.Context, latest Latest) {
 	if !ok {
 		return
 	}
-	s.Emit(ctx, ev)
+	s.emit(ctx, ev)
 	_ = s.Store.Update(func(st *store.State) error {
 		st.Notify.NotifiedVersion = ver
 		return nil
 	})
+}
+
+// emit publishes when a bus is attached, and otherwise sends mail the way
+// this service did before routing existed.
+func (s *Service) emit(ctx context.Context, ev Event) {
+	if s.Bus != nil {
+		sev := events.Warning
+		if ev.Kind == KindUpdate || ev.Kind == KindTest {
+			sev = events.Info
+		}
+		s.Bus.Publish(events.Event{
+			Name: ev.Kind, Severity: sev, Title: ev.Title, Body: ev.Body,
+			Source: "feldcore", Key: ev.Kind + ":" + ev.Title,
+		})
+		return
+	}
+	s.Emit(ctx, ev)
 }
 
 func (s *Service) deliver(ctx context.Context, ev Event, force bool) error {
