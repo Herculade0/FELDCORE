@@ -163,6 +163,33 @@ serial console, `feldcore-install --yes /dev/disk` writes the appliance
 layout onto another whole disk. It refuses a partition, the disk it booted
 from, and any disk that has a mounted filesystem.
 
+### Installing it (USB) and unattended setup
+
+Flash `feldcore-os.raw.zst` to a USB stick or disk with
+[balenaEtcher](https://etcher.balena.io/) or `zstd -d` plus `dd`. Boot it and
+the appliance comes up on port 8787; it prints a one-time setup code on the
+console.
+
+To skip the on-screen setup, drop a `feldcore-install.json` **answer file** onto
+the image's EFI partition at `/efi/feldcore/feldcore-install.json` (the ESP is
+FAT, so Windows, macOS and Linux can all write it after flashing). On its first
+boot — before it starts listening — `feldcored` reads the file once and applies
+each section it finds: hostname, network (including WiFi), the administrator
+account or setup code, SSH, and the data pool. WiFi (`wpasupplicant`) and SSH
+(`openssh-server`) are in the image; `sshd` stays off until the answer file
+turns it on, and it is public-key only (root password locked). A missing
+section is skipped.
+
+> The administrator password, the setup code and the WiFi password sit in
+> **clear text** on the USB. Prefer an SSH key, and delete the file (or wipe the
+> stick) after the first boot.
+
+Build the answer file in your browser with the install form at
+[herculade0.github.io/FELDCORE/install](https://herculade0.github.io/FELDCORE/install/).
+It runs entirely client-side — nothing is uploaded — and downloads a
+`feldcore-install.json` you copy onto the ESP. The schema is in
+[docs/FELDCORE-INSTALL-ANSWER.md](docs/FELDCORE-INSTALL-ANSWER.md).
+
 A release is a git tag matching `v*`. Pushing the tag runs
 [`.github/workflows/os-image.yml`](.github/workflows/os-image.yml) and
 [`.github/workflows/release.yml`](.github/workflows/release.yml). Neither
