@@ -363,6 +363,9 @@ func (a *Service) ChangePassword(current, next, keep string) error {
 			return ErrSetupDone
 		}
 		s.Admin.PasswordHash = string(hash)
+		// Passkeys stay: this person still has them, and proved the current
+		// password. An administrator reset removes passkeys instead.
+		// keep is the API session that stays. Every other one is removed.
 		s.Admin.SessionVersion++
 		kept := s.Sessions[:0]
 		for _, se := range s.Sessions {

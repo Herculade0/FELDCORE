@@ -42,3 +42,34 @@ func stripCookies(header string, names ...string) string {
 	}
 	return strings.Join(kept, "; ")
 }
+
+// scrubSetCookies drops upstream Set-Cookie headers that would plant a
+// FELDCORE session. An app keeps every other cookie it sets.
+func scrubSetCookies(h http.Header) {
+	if h == nil {
+		return
+	}
+	vals := h.Values("Set-Cookie")
+	if len(vals) == 0 {
+		return
+	}
+	h.Del("Set-Cookie")
+	for _, v := range vals {
+		if reservedSetCookie(v) {
+			continue
+		}
+		h.Add("Set-Cookie", v)
+	}
+}
+
+func reservedSetCookie(v string) bool {
+	name, _, _ := strings.Cut(v, "=")
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.TrimPrefix(name, "__host-")
+	switch name {
+	case "feldcore_citizen", "feldcore_desk", "feldcore_session", "feldcore_passkey":
+		return true
+	default:
+		return false
+	}
+}

@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -235,7 +236,10 @@ func (s *Service) TestDestination(ctx context.Context, id, actor, tokenID string
 	return "Reached " + dest.Name + ". The repository will be created on the first backup if it is not there yet.", nil
 }
 
-func (s *Service) RevealPassword(id, actor, tokenID string) (string, error) {
+func (s *Service) RevealPassword(id, actor, tokenID string, admin bool) (string, error) {
+	if !admin {
+		return "", input("The repository password is shown to an administrator.")
+	}
 	if !idRe.MatchString(id) {
 		return "", input("That backup destination is gone.")
 	}
@@ -284,16 +288,25 @@ func (s *Service) StartRestore(in RestoreInput, actor, tokenID string, admin boo
 	if mode == "replace" && in.Confirm != "replace" {
 		return Job{}, input("Type replace to put the files back where they came from.")
 	}
+	if mode == "replace" && !admin {
+		return Job{}, input("Replacing files on this server needs an administrator.")
+	}
 	var paths []string
 	for _, p := range in.Paths {
 		c, err := cleanSnapPath(p)
 		if err != nil {
 			return Job{}, err
 		}
+		if !admin && pathTouchesProtected(c, s.DataDir) {
+			return Job{}, input("Restoring FELDCORE state or secrets needs an administrator.")
+		}
+		if !s.restoreAllowed(c) && !(admin && s.insideData(c)) {
+			return Job{}, input("That path is outside the folders this server backs up.")
+		}
 		paths = append(paths, c)
 	}
-	if !admin && s.protectedRestore(paths) {
-		return Job{}, input("Restoring FELDCORE state or secrets needs an administrator.")
+	if len(paths) == 0 {
+		return Job{}, input("Choose a file or folder from the backup.")
 	}
 	return s.launchKind(in.DestinationID, "restore", actor, tokenID, func(j *bjob) func(context.Context) error {
 		j.snap = strings.ToLower(in.SnapshotID)
@@ -503,6 +516,55 @@ func (s *Service) trimJobs() {
 		delete(s.jobM, s.jobQ[drop])
 		s.jobQ = append(s.jobQ[:drop], s.jobQ[drop+1:]...)
 	}
+}
+
+// restoreAllowed limits a restore to folders this server backs up: the
+// shares root, appdata, and Compose roots. The directory does not have to
+// exist yet. "/" is never an allow-all.
+func (s *Service) restoreAllowed(p string) bool {
+	p = filepath.Clean(p)
+	if p == "/" || p == "." || !filepath.IsAbs(p) {
+		return false
+	}
+	for _, root := range s.restoreRoots() {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "/" || root == "." || !filepath.IsAbs(root) {
+			continue
+		}
+		if p == root || strings.HasPrefix(p, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// insideData is the configuration directory. An administrator may restore
+// state.json and the secrets folder from there. A non-admin is refused
+// before this is consulted.
+func (s *Service) insideData(p string) bool {
+	data := filepath.Clean(strings.TrimSpace(s.DataDir))
+	if data == "" || data == "." || data == "/" || !filepath.IsAbs(data) {
+		return false
+	}
+	p = filepath.Clean(p)
+	return p == data || strings.HasPrefix(p, data+string(filepath.Separator))
+}
+
+func (s *Service) restoreRoots() []string {
+	root := strings.TrimSpace(s.SharesRoot)
+	if root == "" {
+		root = "/srv/feldcore"
+	}
+	roots := []string{root, s.appdataDir()}
+	roots = append(roots,
+		filepath.Join(s.DataDir, "compose"),
+		filepath.Join(root, "compose"),
+		filepath.Join(root, "stacks"),
+	)
+	if s.Compose != nil {
+		roots = append(roots, s.Compose(context.Background())...)
+	}
+	return roots
 }
 
 func (s *Service) composePresent() bool {

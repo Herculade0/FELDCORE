@@ -552,6 +552,7 @@ func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, max int64) boo
 // fail maps a service error onto an HTTP response.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var (
+		status       *statusError
 		authInput    *auth.InputError
 		citInput     *citizenid.InputError
 		shareInput   *shares.InputError
@@ -592,6 +593,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		stackGate    *compose.Gate
 	)
 	switch {
+	case errors.As(err, &status):
+		writeError(w, status.code, status.msg)
 	case errors.As(err, &authInput):
 		writeError(w, http.StatusBadRequest, authInput.Msg)
 	case errors.As(err, &citInput):
@@ -732,7 +735,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, citizenid.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:
-		s.log.Error("request failed", "path", r.URL.Path, "err", err)
+		if s.log != nil {
+			s.log.Error("request failed", "path", r.URL.Path, "err", err)
+		}
 		writeError(w, http.StatusInternalServerError, "Something went wrong on the server. Check the FELDCORE log.")
 	}
 }

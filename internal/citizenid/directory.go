@@ -102,24 +102,14 @@ func (g *Gateway) Directory() Directory {
 	for _, gr := range snap.Groups {
 		out.Groups = append(out.Groups, GroupInfo{ID: gr.ID, Name: gr.Name, Description: gr.Description})
 	}
-	grants := map[string]store.AppGrant{}
-	for _, gr := range snap.AppGrants {
-		grants[gr.Container] = gr
-	}
 	for _, rt := range snap.Web.Routes {
 		if !rt.Enabled || rt.Hostname == "" {
 			continue
 		}
+		level, groups := g.Effective(rt.Container, rt.Hostname)
 		info := AppInfo{
 			Container: rt.Container, Host: rt.Hostname, URL: routeURL(rt),
-			Level: LevelPublic, GroupIDs: []string{},
-		}
-		if gr, ok := grants[rt.Container]; ok && gr.Level != "" {
-			info.Level = gr.Level
-			info.GroupIDs = append([]string{}, gr.GroupIDs...)
-			if info.GroupIDs == nil {
-				info.GroupIDs = []string{}
-			}
+			Level: level, GroupIDs: groups,
 		}
 		out.Apps = append(out.Apps, info)
 	}
@@ -136,20 +126,13 @@ func (g *Gateway) Profile(id Identity) Profile {
 // Launcher lists the published apps this person may open.
 func (g *Gateway) Launcher(id Identity) []LauncherApp {
 	snap := g.st.Snapshot()
-	grants := map[string]store.AppGrant{}
-	for _, gr := range snap.AppGrants {
-		grants[gr.Container] = gr
-	}
 	var out []LauncherApp
 	for _, rt := range snap.Web.Routes {
 		if !rt.Enabled || rt.Hostname == "" {
 			continue
 		}
-		app := AppAccess{ID: rt.Container, Name: rt.Hostname, Host: rt.Hostname, Level: LevelPublic}
-		if gr, ok := grants[rt.Container]; ok && gr.Level != "" {
-			app.Level = gr.Level
-			app.GroupIDs = gr.GroupIDs
-		}
+		level, groups := g.Effective(rt.Container, rt.Hostname)
+		app := AppAccess{ID: rt.Container, Name: rt.Hostname, Host: rt.Hostname, Level: level, GroupIDs: groups}
 		if !id.Admin && !allowed(id, app) {
 			continue
 		}
@@ -337,6 +320,9 @@ func (g *Gateway) SetPassword(id, password string) error {
 			if s.Accounts[i].ID == id {
 				s.Accounts[i].PasswordHash = hash
 				s.Accounts[i].SessionVersion++
+				// An administrator chose this password, so the old passkeys
+				// no longer belong to the person who can sign in.
+				s.Passkeys = dropPasskeys(s.Passkeys, id)
 				return nil
 			}
 		}
@@ -440,14 +426,18 @@ func (g *Gateway) UpdateGroup(id, name, description string) (GroupInfo, error) {
 	return GroupInfo{ID: id, Name: name, Description: description}, nil
 }
 
-// DeleteGroup removes a group from users and from app rules.
+// DeleteGroup removes a group from users, Citizen ID grants, and publish
+// toggles. The name is removed as well as the id, so creating the name
+// again does not inherit the old access.
 func (g *Gateway) DeleteGroup(id string) error {
 	return g.st.Update(func(s *store.State) error {
 		kept := s.Groups[:0]
 		found := false
+		name := ""
 		for _, gr := range s.Groups {
 			if gr.ID == id {
 				found = true
+				name = gr.Name
 				continue
 			}
 			kept = append(kept, gr)
@@ -461,6 +451,9 @@ func (g *Gateway) DeleteGroup(id string) error {
 		}
 		for i := range s.AppGrants {
 			s.AppGrants[i].GroupIDs = removeID(s.AppGrants[i].GroupIDs, id)
+		}
+		for i := range s.Publish.Apps {
+			s.Publish.Apps[i].Groups = dropGroupRef(s.Publish.Apps[i].Groups, id, name)
 		}
 		return nil
 	})
@@ -549,6 +542,20 @@ func removeID(ids []string, drop string) []string {
 		if id != drop {
 			kept = append(kept, id)
 		}
+	}
+	return kept
+}
+
+func dropGroupRef(in []string, id, name string) []string {
+	if in == nil {
+		return nil
+	}
+	kept := in[:0]
+	for _, g := range in {
+		if g == id || (name != "" && strings.EqualFold(g, name)) {
+			continue
+		}
+		kept = append(kept, g)
 	}
 	return kept
 }

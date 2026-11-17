@@ -104,6 +104,13 @@ func TestBackupAPIScopesAndAudit(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "password") {
 		t.Fatalf("password %d %s", rec.Code, rec.Body.String())
 	}
+	if rec := call(srv, http.MethodPost, "/api/v1/backup/destinations/"+dest.ID+"/password", "", writeTok, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("write token password %d %s", rec.Code, rec.Body.String())
+	}
+	replace := `{"destinationId":"` + dest.ID + `","snapshotId":"abcdef0123456789","mode":"replace","confirm":"replace","paths":["` + filepath.Join(shares, "library", "note.txt") + `"]}`
+	if rec := call(srv, http.MethodPost, "/api/v1/backup/restore", replace, writeTok, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("write token replace %d %s", rec.Code, rec.Body.String())
+	}
 
 	log := call(srv, http.MethodGet, "/api/v1/audit", "", "", cookie)
 	text := log.Body.String()

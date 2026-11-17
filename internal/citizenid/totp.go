@@ -213,11 +213,16 @@ func (g *Gateway) ResetTOTP(id string) error {
 				return ErrNotFound
 			}
 			s.Admin.TOTP = false
+			// Citizen ID cookies carry this version. API sessions do not,
+			// so the session list has to be cleared as well.
+			s.Admin.SessionVersion++
+			s.Sessions = nil
 			return nil
 		}
 		for i := range s.Accounts {
 			if s.Accounts[i].ID == id {
 				s.Accounts[i].TOTP = false
+				s.Accounts[i].SessionVersion++
 				return nil
 			}
 		}

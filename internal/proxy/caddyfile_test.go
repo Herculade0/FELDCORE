@@ -23,6 +23,7 @@ func TestBuildModes(t *testing.T) {
 		"http://files.home.arpa",
 		"dns cloudflare {env.CF_API_TOKEN}",
 		"reverse_proxy valheim:2456",
+		`header_down Set-Cookie "(?i)^(?:__Host-)?feldcore_(?:citizen|desk|session|passkey)=.*" ""`,
 		"reverse_proxy host.docker.internal:8787",
 		"email admin@example.com",
 		"admin off",

@@ -158,11 +158,14 @@ func (m *Manager) XML(ctx context.Context, name string) (string, error) {
 	return m.virsh(ctx, "dumpxml", name)
 }
 
-func (m *Manager) DefineXML(ctx context.Context, name, doc string) error {
+func (m *Manager) DefineXML(ctx context.Context, name, doc string, admin bool) error {
 	if err := checkName(name); err != nil {
 		return err
 	}
-	if err := vetXML(name, doc); err != nil {
+	if !admin {
+		return invalid("Replacing a VM's XML needs an administrator.")
+	}
+	if err := vetXML(name, doc, m.vmDir(name), admin); err != nil {
 		return err
 	}
 	st, err := m.stateOf(ctx, name)
@@ -585,7 +588,7 @@ func parseVNC(out string) (string, error) {
 	}
 }
 
-func vetXML(name, doc string) error {
+func vetXML(name, doc, diskDir string, admin bool) error {
 	if len(doc) == 0 || len(doc) > 1<<20 {
 		return invalid("The domain XML is empty or too large.")
 	}
@@ -600,7 +603,70 @@ func vetXML(name, doc string) error {
 	if spec.Name != name {
 		return invalid("The domain name in the XML must stay %s.", name)
 	}
+	if err := vetDevices(doc, diskDir, admin); err != nil {
+		return err
+	}
 	return vncIsLocal(doc)
+}
+
+// vetDevices rejects a QEMU command line, device passthrough for anyone who
+// is not an administrator, and disk or folder sources outside this VM's folder.
+func vetDevices(doc, diskDir string, admin bool) error {
+	dec := xml.NewDecoder(strings.NewReader(doc))
+	var stack []string
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return invalid("The XML could not be parsed.")
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			local := t.Name.Local
+			if local == "commandline" {
+				return invalid("The XML cannot contain a QEMU command line.")
+			}
+			if local == "hostdev" && !admin {
+				return invalid("Device passthrough needs an administrator.")
+			}
+			parent := ""
+			if len(stack) > 0 {
+				parent = stack[len(stack)-1]
+			}
+			if local == "source" && (parent == "disk" || parent == "filesystem") {
+				src := attr(t, "file")
+				if src == "" {
+					src = attr(t, "dev")
+				}
+				if src == "" {
+					src = attr(t, "dir")
+				}
+				if src != "" && !insideDir(src, diskDir) {
+					return invalid("Disk and folder sources must stay inside this VM's folder.")
+				}
+			}
+			stack = append(stack, local)
+		case xml.EndElement:
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+}
+
+func insideDir(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	if root == "" || root == "/" || root == "." || !filepath.IsAbs(root) || !filepath.IsAbs(path) {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func vncIsLocal(doc string) error {
