@@ -110,8 +110,11 @@ build_binary() {
 		return
 	fi
 	log "building feldcored"
-	(cd "${repo}/web" && npm install --no-audit --no-fund && npm run build)
-	(cd "${repo}" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "${work}/feldcored" ./cmd/feldcored)
+	local ldflags vite_version
+	ldflags="${FELDCORE_LDFLAGS:--s -w -X github.com/Herculade0/feldcore/internal/version.Current=${version}}"
+	vite_version="${VITE_FELDCORE_VERSION:-${version}}"
+	(cd "${repo}/web" && npm install --no-audit --no-fund && VITE_FELDCORE_VERSION="${vite_version}" npm run build)
+	(cd "${repo}" && CGO_ENABLED=0 go build -trimpath -ldflags "${ldflags}" -o "${work}/feldcored" ./cmd/feldcored)
 }
 
 signing_key() {

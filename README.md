@@ -1,5 +1,7 @@
 # FELDCORE
 
+FELDCORE is provided as is. Downloading, installing or running it is at your own risk.
+
 A modern, self-hostable server management UI — the parts of the Unraid
 experience that are useful on *any* Linux box, minus the array/parity storage
 model. Drop one binary onto a Debian (or any systemd) machine and you get a

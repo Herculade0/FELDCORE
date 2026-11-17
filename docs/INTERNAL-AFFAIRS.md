@@ -558,7 +558,7 @@ Ship this before the reading room, git, or Proton.
 
 ## Decisions
 
-Corey decided these. They used to be open questions at the end of this design.
+The owner decided these. They used to be open questions at the end of this design.
 
 1. **Network.** SMB and NFS stay off for the first version. Any network reading room comes later. The administrator reads reports in the web UI.
 2. **Admin tokens.** Existing `admin` tokens do not get Internal Affairs access. Reading the cabinet needs `ia:read` ticked explicitly. Filing needs `ia:file`.
