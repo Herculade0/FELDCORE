@@ -182,7 +182,6 @@ func TestCitizenGate(t *testing.T) {
 		"reverse_proxy /citizen/* host.docker.internal:8787",
 		"forward_auth host.docker.internal:8787",
 		"uri /citizen/check",
-		"copy_headers Cookie",
 		"header_up X-Forwarded-Host {http.request.host}",
 		"reverse_proxy files:80",
 		"tls internal",
@@ -196,6 +195,9 @@ func TestCitizenGate(t *testing.T) {
 	}
 	if strings.Count(file, "forward_auth") != 1 {
 		t.Fatalf("public site was gated:\n%s", file)
+	}
+	if strings.Contains(file, "copy_headers") {
+		t.Fatalf("copy_headers would drop the browser cookie after a successful check:\n%s", file)
 	}
 	open := file[strings.Index(file, "open.home.arpa"):]
 	if strings.Contains(open, "forward_auth") || strings.Contains(open, "route {") {
@@ -271,5 +273,44 @@ func TestAttachJoinsTheProxyNetwork(t *testing.T) {
 	}
 	if len(eng.joined) != 0 {
 		t.Fatal("unrouted container was attached")
+	}
+}
+
+func TestPublicInternalCertDoesNotNeedToken(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := secrets.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := &fakeEngine{ready: true}
+	svc := &Service{
+		Store: st, Secrets: box, Engine: eng, DataDir: dir, ListenPort: 8787, GatewayPort: 8791,
+		Listen: func() []int { return nil },
+	}
+	if err := svc.SetRoute(RouteInput{
+		Container: "plex", Hostname: "plex.example.com", Port: 32400, TLS: "internal", Enabled: true, Gateway: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.specs) != 1 || eng.specs[0].Image != docker.CaddyImage || len(eng.specs[0].Env) != 0 {
+		t.Fatalf("tunnel-only name asked for public ACME: %+v", eng.specs)
+	}
+	raw, err := os.ReadFile(dir + "/caddy/Caddyfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "tls internal") || strings.Contains(text, "CF_API_TOKEN") || strings.Contains(text, "dns cloudflare") {
+		t.Fatalf("caddyfile %s", text)
+	}
+	if !strings.Contains(text, "host.docker.internal:8791") {
+		t.Fatalf("caddyfile %s", text)
 	}
 }

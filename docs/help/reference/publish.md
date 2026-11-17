@@ -26,6 +26,17 @@ The Web address button on the container row is the other door to the same idea: 
 
 Home names such as `plex.home.arpa` use the local certificate and skip the tunnel. A public name uses the tunnel when Remote access is on. If Remote access is off, the page says the name is served from this server only, and that no router ports were opened.
 
+## Certificate
+
+A home name uses the local certificate.
+
+A public name has a choice:
+
+- **Let's Encrypt (directly public)** is the default. Caddy asks Let's Encrypt with the Cloudflare API token from Remote access. Use this when the name itself must present a public certificate.
+- **Local certificate (tunnel only)** uses FELDCORE's internal CA. Cloudflare terminates the public HTTPS, and the tunnel dials this server on port 8791. A certificate does not need the API token. Use this when the name is only opened through the tunnel.
+
+Remote access still publishes the tunnel hostname for either choice when the name is public and Remote access is on. The sign-in page is served on that same port, so a browser coming through the tunnel can sign in.
+
 ## Citizen ID on the form
 
 The menu is `public`, `signed-in`, `groups`, or `admins`. The value is stored with the app and enforced. Protection still runs first. Group names are comma-separated. The same choice, with friendlier labels, is on Settings → Citizen ID.

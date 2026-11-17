@@ -96,6 +96,9 @@ func TestPublishWiresProxyCertAndTunnel(t *testing.T) {
 	if !route.Enabled || !route.Gateway || route.TLS != "acme" || route.Hostname != "plex.example.com" || route.Port != 32400 {
 		t.Fatalf("route %+v", route)
 	}
+	if svc.Form(context.Background(), "plex", "", nil).TLS != "acme" {
+		t.Fatal("a directly public name did not keep Let's Encrypt")
+	}
 	if tn.synced != 1 || len(tn.inputs) != 1 || !tn.inputs[0].Enabled || !tn.inputs[0].Gateway || tn.inputs[0].Hostname != "plex.example.com" {
 		t.Fatalf("tunnel %+v", tn.inputs)
 	}
@@ -149,6 +152,9 @@ func TestPublishLocalNameSkipsTunnel(t *testing.T) {
 	}
 	if px.routes[0].TLS != "internal" || !px.routes[0].Gateway {
 		t.Fatalf("route %+v", px.routes[0])
+	}
+	if svc.Form(context.Background(), "Plex", "", nil).TLS != "internal" {
+		t.Fatal("home name did not keep the local certificate")
 	}
 	if tn.inputs[0].Enabled {
 		t.Fatal("a home-network name was sent to the tunnel")
@@ -286,4 +292,121 @@ type recordingAudit struct{ ev []store.AuditEvent }
 func (m *recordingAudit) Record(_ string, ev store.AuditEvent) error {
 	m.ev = append(m.ev, ev)
 	return nil
+}
+
+func TestCertificateMode(t *testing.T) {
+	cases := []struct {
+		host, choice, want, errPart string
+	}{
+		{"plex.example.com", "", "acme", ""},
+		{"plex.example.com", "acme", "acme", ""},
+		{"plex.example.com", "letsencrypt", "acme", ""},
+		{"plex.example.com", "internal", "internal", ""},
+		{"plex.example.com", "local", "internal", ""},
+		{"plex.home.arpa", "", "internal", ""},
+		{"plex.home.arpa", "internal", "internal", ""},
+		{"plex.home.arpa", "acme", "", "home-network"},
+		{"plex.example.com", "fancy", "", "Let's Encrypt"},
+	}
+	for _, tc := range cases {
+		got, err := certificateMode(tc.host, tc.choice)
+		if tc.errPart != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.errPart) {
+				t.Fatalf("%s %q: %v", tc.host, tc.choice, err)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Fatalf("%s %q: got %s err %v", tc.host, tc.choice, got, err)
+		}
+	}
+}
+
+func TestPublishTunnelOnlyUsesInternalCA(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(s *store.State) error {
+		s.Web.Domain = "example.com"
+		s.Remote.Mode = "api"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	px := &fakeProxy{}
+	tn := &fakeTunnel{mode: "api"}
+	svc := &Service{Store: st, Proxy: px, Remote: tn, GatewayPort: 8791}
+	out, err := svc.Set(context.Background(), SetInput{
+		Container: "plex", Subdomain: "plex", Port: 32400, Access: AccessSignedIn, TLS: "internal", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Warning != "" {
+		t.Fatal(out.Warning)
+	}
+	if len(px.routes) != 1 || px.routes[0].TLS != "internal" || !px.routes[0].Gateway || px.routes[0].Hostname != "plex.example.com" {
+		t.Fatalf("route %+v", px.routes)
+	}
+	if len(tn.inputs) != 1 || !tn.inputs[0].Enabled || !tn.inputs[0].Gateway {
+		t.Fatalf("tunnel %+v", tn.inputs)
+	}
+	app, ok := svc.find("plex")
+	if !ok || app.TLS != "internal" {
+		t.Fatalf("stored %+v", app)
+	}
+	if svc.Form(context.Background(), "plex", "", nil).TLS != "internal" {
+		t.Fatal("form did not keep the tunnel-only certificate")
+	}
+
+	offDir := t.TempDir()
+	offStore, err := store.Open(offDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := offStore.Update(func(s *store.State) error {
+		s.Web.Domain = "example.com"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	offProxy := &fakeProxy{}
+	offTunnel := &fakeTunnel{mode: "off"}
+	off := &Service{Store: offStore, Proxy: offProxy, Remote: offTunnel, GatewayPort: 8791}
+	warned, err := off.Set(context.Background(), SetInput{
+		Container: "plex", Subdomain: "plex", Port: 32400, Access: AccessAdmins, TLS: "internal", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(warned.Warning, "local certificate") || !strings.Contains(warned.Warning, "Remote access is off") {
+		t.Fatal(warned.Warning)
+	}
+	if offProxy.routes[0].TLS != "internal" || offTunnel.inputs[0].Enabled {
+		t.Fatalf("route %+v tunnel %+v", offProxy.routes[0], offTunnel.inputs[0])
+	}
+
+	homeDir := t.TempDir()
+	homeStore, err := store.Open(homeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := homeStore.Update(func(s *store.State) error {
+		s.Web.Domain = "home.arpa"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	homeProxy := &fakeProxy{}
+	home := &Service{Store: homeStore, Proxy: homeProxy, Remote: &fakeTunnel{mode: "off"}, GatewayPort: 8791}
+	if _, err := home.Set(context.Background(), SetInput{
+		Container: "plex", Subdomain: "plex", Port: 32400, Access: AccessPublic, TLS: "acme", Enabled: true,
+	}); err == nil || !strings.Contains(err.Error(), "home-network") {
+		t.Fatalf("local name accepted Let's Encrypt: %v", err)
+	}
+	if len(homeProxy.routes) != 0 {
+		t.Fatalf("rejected choice still wired a route: %+v", homeProxy.routes)
+	}
 }

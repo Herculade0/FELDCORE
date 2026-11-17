@@ -14,9 +14,17 @@ interface PublishFormData {
   port: number;
   access: string;
   groups: string[];
+  tls: string;
   brand?: SignInBrand;
   tunnelMode: string;
   from: string;
+}
+
+const LOCAL_SUFFIXES = [".home.arpa", ".local", ".lan", ".home", ".internal", ".localdomain"];
+
+function localName(host: string): boolean {
+  const name = host.trim().toLowerCase().replace(/\.$/, "");
+  return LOCAL_SUFFIXES.some((suffix) => name.endsWith(suffix));
 }
 
 const ACCESS = [
@@ -43,6 +51,7 @@ export default function PublishForm({
   const [port, setPort] = useState("");
   const [access, setAccess] = useState("admins");
   const [groups, setGroups] = useState("");
+  const [tls, setTls] = useState("acme");
   const [brand, setBrand] = useState<SignInBrand>(emptyBrand);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -55,6 +64,7 @@ export default function PublishForm({
     setPort(String(d.port || d.suggestion.port || ""));
     setAccess(d.access || "admins");
     setGroups((d.groups ?? []).join(", "));
+    setTls(d.tls === "internal" ? "internal" : "acme");
     setBrand(asBrand(d.brand));
   };
 
@@ -82,6 +92,7 @@ export default function PublishForm({
               .split(",")
               .map((g) => g.trim())
               .filter(Boolean),
+            tls: localName(`${(sub || "app").trim() || "app"}.${data?.domain || "home.arpa"}`) ? "internal" : tls,
             brand,
           },
         },
@@ -191,11 +202,23 @@ export default function PublishForm({
               spellCheck={false}
             />
           )}
+          {!localName(preview) && (
+            <SelectField
+              label="Certificate"
+              value={tls}
+              onChange={(e) => setTls(e.target.value)}
+              disabled={!enabled}
+              hint="Let's Encrypt needs the Cloudflare API token and is for a name reached on its own. Tunnel only uses the local certificate: Cloudflare terminates public HTTPS, and this server does not ask Let's Encrypt."
+            >
+              <option value="acme">Let's Encrypt (directly public)</option>
+              <option value="internal">Local certificate (tunnel only)</option>
+            </SelectField>
+          )}
           <p className="text-xs font-medium leading-relaxed text-ink-3">
             {data.tunnelMode === "off"
               ? "Remote access is off, so a public name is served from this server only. No ports are opened on your router."
               : "When the name is public and Remote access is on, the Cloudflare Tunnel hostname is created and removed with this switch."}{" "}
-            Home-network names such as {data.suggestion.subdomain}.home.arpa use the local certificate and skip the tunnel.
+            Home-network names such as {data.suggestion.subdomain}.home.arpa use the local certificate and skip the tunnel. A public name can use Let's Encrypt, or the local certificate when it is only opened through the tunnel.
           </p>
           <BrandFields
             value={brand}
