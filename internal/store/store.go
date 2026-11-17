@@ -307,6 +307,12 @@ type Publish struct {
 // Access is "public", "signed-in", "groups" or "admins". Groups is only
 // meaningful when Access is "groups". Citizen ID enforces Access; this
 // record only stores it.
+//
+// TLS is "internal" (the FELDCORE local CA) or "acme" (Let's Encrypt).
+// Empty on a record saved before the choice existed means the automatic
+// choice the next time it is published: internal on a home name, acme on
+// a public name. Tunnel-only public names use internal, because Cloudflare
+// terminates the public TLS and the origin does not need an API token.
 type PublishedApp struct {
 	Container string      `json:"container"`
 	Subdomain string      `json:"subdomain"`
@@ -314,6 +320,7 @@ type PublishedApp struct {
 	Port      int         `json:"port"`
 	Access    string      `json:"access"`
 	Groups    []string    `json:"groups,omitempty"`
+	TLS       string      `json:"tls,omitempty"`
 	Enabled   bool        `json:"enabled"`
 	Brand     SignInBrand `json:"brand,omitempty"`
 }

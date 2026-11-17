@@ -81,7 +81,7 @@ On a container, open **Web address**, turn on **Name on your home network**, and
 
 ### On a public domain, without the tunnel
 
-Choose **HTTPS with Let's Encrypt** and a hostname on a zone Cloudflare hosts, such as `app.example.com`. Caddy solves the DNS-01 challenge with the same API token as Remote access. The server does not need port 80 open to the internet for the certificate. It does still need port 443 reachable by whoever should open the name, unless you are using the tunnel instead. The tunnel terminates TLS at Cloudflare, so a public tunnel hostname does not need this certificate.
+Choose **HTTPS with Let's Encrypt** and a hostname on a zone Cloudflare hosts, such as `app.example.com`. Caddy solves the DNS-01 challenge with the same API token as Remote access. The server does not need port 80 open to the internet for the certificate. It does still need port 443 reachable by whoever should open the name, unless you are using the tunnel instead. The tunnel terminates TLS at Cloudflare, so a public tunnel hostname does not need this certificate. On the Publish form, **Local certificate (tunnel only)** is that choice: the origin uses FELDCORE's internal CA and does not need the API token for Let's Encrypt. **Let's Encrypt** stays the choice for a name that is directly public.
 
 The FELDCORE UI can be served the same way. Turn on **Serve this page on a hostname**.
 

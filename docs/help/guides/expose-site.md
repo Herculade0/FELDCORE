@@ -58,7 +58,7 @@ The **Citizen ID** menu on that form is stored. It is not enforced until Citizen
 
 In **Web address**, choose **HTTPS with Let's Encrypt** and a hostname on a zone Cloudflare hosts. Caddy solves DNS-01 with the same API token as Remote access, so port 80 does not have to be open to the internet for the certificate.
 
-Visitors still need to reach port 443 on this server, unless you use the tunnel instead. The tunnel terminates TLS at Cloudflare, so a tunnel hostname does not need this certificate.
+Visitors still need to reach port 443 on this server, unless you use the tunnel instead. The tunnel terminates TLS at Cloudflare, so a tunnel hostname does not need this certificate. On the Publish form, choose **Local certificate (tunnel only)** for that name. Let's Encrypt remains the choice when the name is directly public.
 
 Caddy needs ports 80 and 443. On FELDCORE OS it binds them. Elsewhere the container publishes them. If something else holds them, the page names it and does not start the proxy.
 

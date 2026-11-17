@@ -76,6 +76,7 @@ func (s *Server) handleContainerPublishSave(w http.ResponseWriter, r *http.Reque
 		Port      int               `json:"port"`
 		Access    string            `json:"access"`
 		Groups    []string          `json:"groups"`
+		TLS       string            `json:"tls"`
 		Brand     store.SignInBrand `json:"brand"`
 	}
 	if !readJSON(w, r, &body) {
@@ -83,7 +84,7 @@ func (s *Server) handleContainerPublishSave(w http.ResponseWriter, r *http.Reque
 	}
 	out, err := s.publish.Set(r.Context(), publish.SetInput{
 		Container: info.Spec.Name, Subdomain: body.Subdomain, Port: body.Port,
-		Access: body.Access, Groups: body.Groups, Enabled: body.Enabled, Brand: body.Brand,
+		Access: body.Access, Groups: body.Groups, TLS: body.TLS, Enabled: body.Enabled, Brand: body.Brand,
 	})
 	if err != nil {
 		s.fail(w, r, err)

@@ -54,7 +54,7 @@ On FELDCORE OS, Caddy 2.11.9 at `/usr/bin/caddy` is supervised by FELDCORE and i
 - Android: Settings → Security → Install a certificate → CA certificate
 - Linux: copy to `/usr/local/share/ca-certificates/feldcore.crt` and run `update-ca-certificates`
 
-Public certificates use DNS-01 and the `caddy-dns/cloudflare` module. The OS binary includes that module. The stock `caddy:2` image does not. On a machine that is not FELDCORE OS, the first time you ask for Let's Encrypt, FELDCORE builds a local image `feldcore/caddy:2` that adds it. The container is started as `caddy run`. The API token is passed as `CF_API_TOKEN`. The Caddyfile contains `{env.CF_API_TOKEN}`, not the token.
+Public certificates use DNS-01 and the `caddy-dns/cloudflare` module. The OS binary includes that module. The stock `caddy:2` image does not. On a machine that is not FELDCORE OS, the first time you ask for Let's Encrypt, FELDCORE builds a local image `feldcore/caddy:2` that adds it. The container is started as `caddy run`. The API token is passed as `CF_API_TOKEN`. The Caddyfile contains `{env.CF_API_TOKEN}`, not the token. A tunnel-only name on the Publish form can use the local certificate instead, because Cloudflare terminates the public HTTPS.
 
 **Serve this page on a hostname** publishes the FELDCORE UI itself on the home name or, with the tunnel, on a public name. Pair a public admin hostname with Cloudflare Access.
 
