@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FELDCORE install answer file</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f7fd;
+    --ink: #0a1633;
+    --muted: #43506b;
+    --line: rgba(11, 40, 110, 0.14);
+    --panel: #fff;
+    --accent: #0b5cff;
+    --warn-bg: #fff7ed;
+    --warn: #9a3412;
+    --bad: #b42318;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 42rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 0.75rem; }
+  h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  p, li { color: var(--muted); }
+  a { color: var(--accent); }
+  .warn {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border: 1px solid #fdba74;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin: 0 0 1.25rem;
+  }
+  form, section.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+  fieldset { border: 0; margin: 0 0 1rem; padding: 0; }
+  legend { font-weight: 650; padding: 0; margin-bottom: 0.35rem; }
+  label { display: block; margin: 0.7rem 0; font-weight: 600; }
+  .hint { display: block; font-weight: 400; color: var(--muted); margin-top: 0.15rem; }
+  input, select, textarea {
+    display: block;
+    width: 100%;
+    margin-top: 0.3rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+    color: inherit;
+    background: #fff;
+  }
+  textarea { min-height: 5.5rem; resize: vertical; }
+  label.check { font-weight: 500; }
+  label.check input { width: auto; display: inline-block; margin: 0 0.4rem 0 0; }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem;
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  #errors { color: var(--bad); font-weight: 600; white-space: pre-wrap; }
+  #preview {
+    overflow: auto;
+    background: #0b1428;
+    color: #f3f6fc;
+    padding: 0.8rem;
+    border-radius: 8px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Install answer file</h1>
+  <p class="warn">This file is not encrypted. The administrator password, the setup code, and the WiFi password are written in the clear on the USB stick until the first boot deletes the file. Deleting the file does not scrub those bytes from the stick. Use an SSH public key instead of a password.</p>
+
+  <section class="card">
+    <h2>Signed OS image</h2>
+    <p>Download the latest signed appliance image from the GitHub release. This page does not fetch it for you.</p>
+    <ul>
+      <li><a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/feldcore-os.raw.zst">feldcore-os.raw.zst</a></li>
+      <li><a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/feldcore-os.json">feldcore-os.json</a>, <a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/feldcore-os.json.minisig">feldcore-os.json.minisig</a>, and <a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/update.pub">update.pub</a></li>
+      <li><a href="https://github.com/Herculade0/FELDCORE/releases/latest">Release page</a></li>
+    </ul>
+  </section>
+
+  <h2>Answer file</h2>
+  <form id="form">
+    <label>Hostname
+      <input name="hostname" autocomplete="off" value="feldbox" required>
+    </label>
+    <label>Time zone
+      <input name="timezone" list="zones" value="Europe/London" required>
+      <span class="hint">A zone such as Europe/London or UTC.</span>
+    </label>
+    <datalist id="zones">
+      <option value="UTC"></option>
+      <option value="Europe/London"></option>
+      <option value="Europe/Paris"></option>
+      <option value="America/New_York"></option>
+      <option value="America/Chicago"></option>
+      <option value="America/Denver"></option>
+      <option value="America/Los_Angeles"></option>
+      <option value="Australia/Sydney"></option>
+    </datalist>
+
+    <fieldset>
+      <legend>Network</legend>
+      <label>Mode
+        <select name="netMode">
+          <option value="dhcp">DHCP</option>
+          <option value="static">Static address</option>
+        </select>
+      </label>
+      <div data-show="static">
+        <label>Interface
+          <input name="iface" autocomplete="off" placeholder="leave empty to detect">
+          <span class="hint">Empty uses the default-route interface. eth0 is not assumed. With WiFi, leave this empty or name the wireless interface.</span>
+        </label>
+        <label>Address
+          <input name="address" autocomplete="off" placeholder="192.168.1.20/24">
+        </label>
+        <label>Gateway
+          <input name="gateway" autocomplete="off" placeholder="192.168.1.1">
+        </label>
+        <label>DNS
+          <input name="dns" autocomplete="off" placeholder="1.1.1.1">
+          <span class="hint">Optional. IPv4 addresses separated by spaces or commas.</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>WiFi</legend>
+      <p>Leave the network name empty to stay on the wired port.</p>
+      <label>Network name
+        <input name="ssid" autocomplete="off">
+      </label>
+      <label>Password
+        <input name="psk" type="password" autocomplete="new-password">
+        <span class="hint">8 to 63 characters, or 64 hex digits. Empty means an open network.</span>
+      </label>
+      <label>Country
+        <input name="country" maxlength="2" autocomplete="off" placeholder="GB">
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Web administrator</legend>
+      <label class="check"><input type="radio" name="claim" value="admin"> Create the web administrator in this file</label>
+      <label class="check"><input type="radio" name="claim" value="code"> Use a setup code I choose</label>
+      <label class="check"><input type="radio" name="claim" value="console" checked> Print a random setup code on the console</label>
+      <div data-claim="admin">
+        <label>Username
+          <input name="adminUser" autocomplete="off" value="admin">
+        </label>
+        <label>Password
+          <input name="adminPass" type="password" autocomplete="new-password">
+          <span class="hint">At least 12 characters. This is the FELDCORE web account, not a Unix login. Two-factor stays off until you turn it on after boot.</span>
+        </label>
+      </div>
+      <div data-claim="code">
+        <label>Setup code
+          <input name="setupCode" autocomplete="off" placeholder="ABCD-2345">
+          <span class="hint">Eight characters from ABCDEFGHJKLMNPQRSTUVWXYZ23456789. Dashes are optional.</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>SSH</legend>
+      <label class="check"><input type="checkbox" name="ssh"> Enable SSH</label>
+      <div data-ssh="on">
+        <label class="check"><input type="checkbox" name="permitRoot" checked> Allow root to sign in with a public key</label>
+        <label>Root public key
+          <textarea name="rootKeys" spellcheck="false" placeholder="ssh-ed25519 AAAA... comment"></textarea>
+          <span class="hint">One OpenSSH public key per line. Paste the public key, not a private key. Password login stays off.</span>
+        </label>
+        <label>Unix user
+          <input name="userName" autocomplete="off" placeholder="optional">
+          <span class="hint">Optional. Separate from the web administrator. The home directory is on the state partition, because /home is not kept.</span>
+        </label>
+        <label>Unix user public key
+          <textarea name="userKeys" spellcheck="false"></textarea>
+        </label>
+        <label>Unix password
+          <input name="userPass" type="password" autocomplete="new-password">
+          <span class="hint">Optional, and only for the console. SSH will not accept it. Prefer the public key.</span>
+        </label>
+        <label class="check"><input type="checkbox" name="userSudo"> Grant sudo if sudo is installed</label>
+        <p>The OS image does not install sudo. Checking this records the choice; the account is still created and sudo is skipped until the package exists.</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Data pool</legend>
+      <label class="check"><input type="checkbox" name="dataPool" checked> Use the free space on the install disk as a data pool</label>
+      <p>This records the choice only. The answer file does not partition the disk. Uncheck it to decline the pool.</p>
+    </fieldset>
+
+    <button type="submit">Download feldcore-install.json</button>
+  </form>
+  <p id="errors" role="alert"></p>
+  <pre id="preview" hidden></pre>
+
+  <h2>Where the file goes</h2>
+  <p>Decompress the image and copy <code>feldcore-install.json</code> onto the EFI partition, volume label <code>FC-ESP</code>, at <code>feldcore/feldcore-install.json</code>. The partition starts 1 MiB into the image this repository builds. Nothing on this page is uploaded.</p>
+</main>
+<script>
+function bytes(s) {
+  return new TextEncoder().encode(s).length;
+}
+
+function buildInstall(v) {
+  var errors = [];
+  var hostRe = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+  var tzRe = /^[A-Za-z0-9+_/-]{1,64}$/;
+  var ifaceRe = /^[A-Za-z0-9_.:-]{1,32}$/;
+  var userRe = /^[a-z_][a-z0-9_-]{0,31}$/;
+  var adminRe = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+  var keyRe = /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/=]+( .*)?$/;
+  var alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  function trim(s) { return String(s || "").trim(); }
+  function push(msg) { errors.push(msg); }
+
+  var hostname = trim(v.hostname);
+  var timezone = trim(v.timezone);
+  if (!hostname || !timezone) push("Enter a hostname and a time zone.");
+  if (hostname && !hostRe.test(hostname)) push("Host names use letters, numbers, and hyphens.");
+  if (timezone && (!tzRe.test(timezone) || timezone.indexOf("..") >= 0)) push("Choose a time zone like Europe/London.");
+
+  var mode = trim(v.netMode) || "dhcp";
+  var iface = trim(v.iface);
+  var address = trim(v.address);
+  var gateway = trim(v.gateway);
+  var dns = trim(v.dns);
+  if (mode !== "dhcp" && mode !== "static") push("Network mode must be dhcp or static.");
+  var ssid = trim(v.ssid);
+  var psk = String(v.psk || "");
+  var country = trim(v.country);
+  var wifi = ssid !== "" || psk.trim() !== "" || country !== "";
+  if (wifi && !ssid) push("Enter a WiFi network name.");
+  if (bytes(ssid) > 32) push("The WiFi network name must be at most 32 bytes.");
+  if (/[\u0000-\u001f\u007f]/.test(ssid) || /[\u0000-\u001f\u007f]/.test(psk)) {
+    push("The WiFi name and password cannot contain a new line or a control character.");
+  }
+  if (psk.trim() !== "" && !/^[0-9a-fA-F]{64}$/.test(psk.trim())) {
+    var n = bytes(psk.trim());
+    if (n < 8 || n > 63) push("The WiFi password must be 8 to 63 characters, or 64 hex digits.");
+  }
+  if (country && !/^[A-Za-z]{2}$/.test(country)) push("The WiFi country must be a two-letter code.");
+
+  if (mode === "static") {
+    if (iface && !ifaceRe.test(iface)) push("That network interface name is not valid.");
+    if (wifi && iface && iface.toLowerCase().indexOf("wl") !== 0) {
+      push("When WiFi is set, leave the interface empty or name the wireless interface.");
+    }
+    var parsed = parseCIDR(address);
+    if (!parsed) push("Enter the address as an IPv4 CIDR, for example 192.168.1.20/24.");
+    else if (!gatewayOn(parsed, gateway)) push("The gateway must be an IPv4 address on that network.");
+    if (dns) {
+      dns.split(/[\s,]+/).forEach(function (item) {
+        if (item && !ipv4(item)) push(item + " is not an IPv4 DNS address.");
+      });
+    }
+  }
+
+  var claim = v.claim || "console";
+  if (claim === "admin") {
+    var adminUser = trim(v.adminUser);
+    var adminPass = String(v.adminPass || "");
+    if (!adminRe.test(adminUser)) push("The administrator name must start with a letter or number and be at most 32 characters.");
+    var pw = strong(adminUser, adminPass);
+    if (pw) push("Administrator password: " + pw);
+  } else if (claim === "code") {
+    var code = trim(v.setupCode).toUpperCase().replace(/[-\s]/g, "");
+    if (code.length !== 8 || code.split("").some(function (ch) { return alphabet.indexOf(ch) < 0; })) {
+      push("The setup code must be 8 characters from ABCDEFGHJKLMNPQRSTUVWXYZ23456789.");
+    }
+  } else if (claim !== "console") {
+    push("Choose an administrator, a setup code, or the console code.");
+  }
+
+  var rootKeys = keys(v.rootKeys, keyRe, push, "Root");
+  var userKeys = keys(v.userKeys, keyRe, push, "Unix user");
+  var userName = trim(v.userName);
+  var userPass = String(v.userPass || "");
+  var userOn = userName !== "" || userPass !== "" || !!v.userSudo || userKeys.length > 0;
+  if (!v.ssh && ((rootKeys && rootKeys.length) || userOn)) {
+    push("Turn SSH on to use the public key or Unix user, or clear those fields.");
+  }
+  if (userOn) {
+    if (!userRe.test(userName) || userName === "root") push("Unix user names start with a lowercase letter or underscore. root is not allowed.");
+    if (userPass) {
+      var up = strong(userName, userPass);
+      if (up) push("Unix password: " + up);
+    }
+  }
+
+  if (errors.length) return { errors: errors, json: "" };
+
+  var file = { version: 1, hostname: hostname, timezone: timezone };
+  file.network = { mode: mode };
+  if (mode === "static") {
+    if (iface) file.network.iface = iface;
+    file.network.address = address;
+    file.network.gateway = gateway;
+    if (dns) file.network.dns = dns;
+  }
+  if (wifi) {
+    file.wifi = { ssid: ssid };
+    if (psk.trim()) file.wifi.psk = psk.trim();
+    if (country) file.wifi.country = country.toUpperCase();
+  }
+  if (claim === "admin") {
+    file.admin = { username: trim(v.adminUser), password: String(v.adminPass || ""), skipTotp: true };
+  } else if (claim === "code") {
+    file.setupCode = trim(v.setupCode).toUpperCase().replace(/[-\s]/g, "");
+  }
+  if (v.ssh) {
+    file.ssh = { enable: true, permitRoot: !!v.permitRoot, authorizedKeys: rootKeys };
+  }
+  if (userOn) {
+    file.user = { name: userName, sudo: !!v.userSudo };
+    if (userPass) file.user.password = userPass;
+    if (userKeys.length) file.user.authorizedKeys = userKeys;
+  }
+  file.dataPool = !!v.dataPool;
+  return { errors: [], json: JSON.stringify(file, null, 2) + "\n" };
+}
+
+function keys(raw, keyRe, push, who) {
+  var out = [];
+  String(raw || "").split(/\r?\n/).forEach(function (line) {
+    line = line.trim();
+    if (!line) return;
+    if (line.toUpperCase().indexOf("PRIVATE KEY") >= 0) {
+      push(who + " SSH key: paste a public key. A private key was refused.");
+      return;
+    }
+    if (!keyRe.test(line)) {
+      push(who + " SSH key was not recognised.");
+      return;
+    }
+    out.push(line);
+  });
+  return out;
+}
+
+function strong(username, password) {
+  username = String(username || "");
+  password = String(password || "");
+  if (bytes(password) > 72) return "Use a password of at most 72 characters.";
+  if (bytes(password) < 12) return "Use at least 12 characters.";
+  var lowered = password.toLowerCase();
+  var user = username.toLowerCase();
+  if (password.toLowerCase() === user || (user && bytes(username) > 2 && lowered.indexOf(user) >= 0)) {
+    return "Don't include the username in the password.";
+  }
+  var easy = { password: 1, password1: 1, password123: 1, feldcore: 1, admin: 1, admin123: 1, qwerty: 1, qwerty123: 1, letmein: 1, changeme: 1, "correct horse": 1 };
+  if (easy[lowered]) return "That password is too easy to guess.";
+  var lower = false, upper = false, digit = false, symbol = false;
+  for (var i = 0; i < password.length; i++) {
+    var c = password.charCodeAt(i);
+    if (c >= 97 && c <= 122) lower = true;
+    else if (c >= 65 && c <= 90) upper = true;
+    else if (c >= 48 && c <= 57) digit = true;
+    else symbol = true;
+  }
+  if (bytes(password) >= 16 && lower && (upper || digit || symbol)) return "";
+  if (lower && upper && digit && symbol) return "";
+  return "Use upper and lower case, a number, and a symbol. A passphrase of 16 or more characters is fine too.";
+}
+
+function ipv4(s) {
+  var p = String(s).split(".");
+  if (p.length !== 4) return null;
+  var n = [];
+  for (var i = 0; i < 4; i++) {
+    if (!/^\d{1,3}$/.test(p[i])) return null;
+    var o = Number(p[i]);
+    if (o > 255) return null;
+    n.push(o);
+  }
+  return n;
+}
+
+function parseCIDR(s) {
+  var parts = String(s).split("/");
+  if (parts.length !== 2) return null;
+  var ip = ipv4(parts[0]);
+  if (!ip || !/^\d{1,2}$/.test(parts[1])) return null;
+  var prefix = Number(parts[1]);
+  if (prefix > 32) return null;
+  return { ip: ip, prefix: prefix };
+}
+
+function gatewayOn(net, gw) {
+  var g = ipv4(gw);
+  if (!g) return false;
+  var bits = net.prefix;
+  for (var i = 0; i < 4; i++) {
+    var keep = bits >= 8 ? 8 : (bits > 0 ? bits : 0);
+    var mask = keep === 0 ? 0 : (256 - (1 << (8 - keep))) & 255;
+    if ((net.ip[i] & mask) !== (g[i] & mask)) return false;
+    bits -= 8;
+  }
+  return true;
+}
+
+function readForm(form) {
+  var data = new FormData(form);
+  return {
+    hostname: data.get("hostname"),
+    timezone: data.get("timezone"),
+    netMode: data.get("netMode"),
+    iface: data.get("iface"),
+    address: data.get("address"),
+    gateway: data.get("gateway"),
+    dns: data.get("dns"),
+    ssid: data.get("ssid"),
+    psk: data.get("psk"),
+    country: data.get("country"),
+    claim: data.get("claim"),
+    adminUser: data.get("adminUser"),
+    adminPass: data.get("adminPass"),
+    setupCode: data.get("setupCode"),
+    ssh: data.get("ssh") === "on",
+    permitRoot: data.get("permitRoot") === "on",
+    rootKeys: data.get("rootKeys"),
+    userName: data.get("userName"),
+    userPass: data.get("userPass"),
+    userSudo: data.get("userSudo") === "on",
+    userKeys: data.get("userKeys"),
+    dataPool: data.get("dataPool") === "on"
+  };
+}
+
+function wire() {
+  if (typeof document === "undefined") return;
+  var form = document.getElementById("form");
+  var errors = document.getElementById("errors");
+  var preview = document.getElementById("preview");
+  function show() {
+    var mode = form.netMode.value;
+    Array.prototype.forEach.call(form.querySelectorAll("[data-show]"), function (el) {
+      el.hidden = el.getAttribute("data-show") !== mode;
+    });
+    var claim = (form.querySelector('input[name="claim"]:checked') || {}).value;
+    Array.prototype.forEach.call(form.querySelectorAll("[data-claim]"), function (el) {
+      el.hidden = el.getAttribute("data-claim") !== claim;
+    });
+    var ssh = form.ssh.checked;
+    Array.prototype.forEach.call(form.querySelectorAll("[data-ssh]"), function (el) {
+      el.hidden = !ssh;
+    });
+  }
+  form.addEventListener("change", show);
+  form.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var built = buildInstall(readForm(form));
+    if (built.errors.length) {
+      errors.textContent = built.errors.join("\n");
+      preview.hidden = true;
+      return;
+    }
+    errors.textContent = "";
+    preview.hidden = false;
+    preview.textContent = built.json;
+    var blob = new Blob([built.json], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "feldcore-install.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+  show();
+}
+
+globalThis.buildInstall = buildInstall;
+wire();
+</script>
+</body>
+</html>
