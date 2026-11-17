@@ -56,6 +56,34 @@ func TestMinisignRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSignStream(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := bytes.Repeat([]byte("feldcore-installer"), 4096)
+	sig, err := SignStream(key, "feldcore-installer.iso", bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(key.Public(), data, sig); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(sig, []byte("file:feldcore-installer.iso")) {
+		t.Fatalf("trusted comment does not name the file:\n%s", sig)
+	}
+	mem, err := Sign(key, "feldcore-installer.iso", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(key.Public(), data, mem); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(key.Public(), data[:len(data)-1], sig); err == nil {
+		t.Fatal("a short reader verified")
+	}
+}
+
 func TestMinisignCLI(t *testing.T) {
 	bin, err := exec.LookPath("minisign")
 	if err != nil {

@@ -1,13 +1,19 @@
 #!/bin/bash
 # Write the FELDCORE OS disk layout onto one whole disk.
-# The running disk, and any disk with a mounted partition, is refused.
+# The running disk, the live installer medium, and any disk with a mounted
+# partition, is refused.
 set -euo pipefail
 
 PAYLOAD=${FELDCORE_PAYLOAD:-/payload}
 ESP_MIB=256
+ANSWER_TMP=/run/feldcore/feldcore-install.json
+ANSWER_NAME=feldcore-install.json
+
+scan_mounts=()
 
 usage() {
 	echo "Usage: feldcore-install --yes DISK" >&2
+	echo "       feldcore-install --install-json PATH --yes DISK" >&2
 	echo "       feldcore-install --from-cmdline" >&2
 	exit 2
 }
@@ -17,9 +23,156 @@ die() {
 	exit 1
 }
 
+cleanup_scans() {
+	local m
+	[[ ${#scan_mounts[@]} -eq 0 ]] && return 0
+	for m in "${scan_mounts[@]}"; do
+		umount "$m" 2>/dev/null || true
+		rmdir "$m" 2>/dev/null || true
+	done
+	scan_mounts=()
+	return 0
+}
+trap cleanup_scans EXIT
+
+# answer_acceptable is true when the file is one JSON object and version is 1.
+# jq is on the live installer. The raw installer image does not install jq,
+# so the same check is done in awk there.
+answer_acceptable() {
+	local path=$1
+	if command -v jq >/dev/null 2>&1; then
+		if jq -e 'type == "object" and .version == 1' "$path" >/dev/null; then
+			return 0
+		fi
+		return 1
+	fi
+	answer_acceptable_awk "$path"
+}
+
+answer_acceptable_awk() {
+	awk -v path="$1" '
+	function die() { exit 1 }
+	function skip() {
+		while (i <= len) {
+			c = substr(s, i, 1)
+			if (c != " " && c != "\t" && c != "\n" && c != "\r") return
+			i++
+		}
+	}
+	function peek() { skip(); return substr(s, i, 1) }
+	function parse_string(    out) {
+		i++
+		out = ""
+		while (i <= len) {
+			c = substr(s, i, 1)
+			if (c == "\\") {
+				i++
+				if (i > len) die()
+				c = substr(s, i, 1)
+				if (c == "u") {
+					if (i + 4 > len) die()
+					i += 5
+					continue
+				}
+				out = out c
+				i++
+				continue
+			}
+			if (c == "\"") { i++; return out }
+			if (c < " ") die()
+			out = out c
+			i++
+		}
+		die()
+	}
+	function parse_number(    start, num) {
+		start = i
+		if (substr(s, i, 1) == "-") i++
+		if (substr(s, i, 1) !~ /[0-9]/) die()
+		if (substr(s, i, 1) == "0" && substr(s, i + 1, 1) ~ /[0-9]/) die()
+		while (substr(s, i, 1) ~ /[0-9]/) i++
+		if (substr(s, i, 1) == ".") {
+			i++
+			if (substr(s, i, 1) !~ /[0-9]/) die()
+			while (substr(s, i, 1) ~ /[0-9]/) i++
+		}
+		if (substr(s, i, 1) ~ /[eE]/) {
+			i++
+			if (substr(s, i, 1) ~ /[+-]/) i++
+			if (substr(s, i, 1) !~ /[0-9]/) die()
+			while (substr(s, i, 1) ~ /[0-9]/) i++
+		}
+		num = substr(s, start, i - start)
+		return num + 0
+	}
+	function parse_literal() {
+		if (substr(s, i, 4) == "true" || substr(s, i, 4) == "null") { i += 4; return }
+		if (substr(s, i, 5) == "false") { i += 5; return }
+		die()
+	}
+	function parse_array(depth,    c) {
+		i++
+		if (peek() == "]") { i++; return }
+		while (1) {
+			parse_value(depth)
+			c = peek()
+			if (c == "]") { i++; return }
+			if (c != ",") die()
+			i++
+		}
+	}
+	function parse_object(depth,    c, key, num) {
+		i++
+		if (peek() == "}") { i++; return }
+		while (1) {
+			if (peek() != "\"") die()
+			key = parse_string()
+			if (peek() != ":") die()
+			i++
+			if (depth == 1 && key == "version") {
+				c = peek()
+				if (c == "\"" || c == "{" || c == "[") die()
+				num = parse_number()
+				if (num != 1) die()
+				got = 1
+			} else {
+				parse_value(depth + 1)
+			}
+			c = peek()
+			if (c == "}") { i++; return }
+			if (c != ",") die()
+			i++
+		}
+	}
+	function parse_value(depth,    c) {
+		c = peek()
+		if (c == "{") { parse_object(depth); return }
+		if (c == "[") { parse_array(depth); return }
+		if (c == "\"") { parse_string(); return }
+		if (c == "t" || c == "f" || c == "n") { parse_literal(); return }
+		if (c == "-" || (c >= "0" && c <= "9")) { parse_number(); return }
+		die()
+	}
+	BEGIN {
+		while ((getline line < path) > 0) s = s line "\n"
+		close(path)
+		len = length(s)
+		i = 1
+		got = 0
+		if (peek() != "{") die()
+		parse_object(1)
+		skip()
+		if (i <= len) die()
+		if (!got) die()
+		exit 0
+	}
+	'
+}
+
 from_cmdline() {
 	local word disk
 	disk=""
+	# shellcheck disable=SC2013
 	for word in $(cat /proc/cmdline); do
 		case ${word} in
 		feldcore.install=/*)
@@ -34,7 +187,7 @@ from_cmdline() {
 		echo "feldcore-install: this boot did not ask for an install"
 		exit 0
 	fi
-	install_disk "${disk}"
+	install_disk "${disk}" ""
 }
 
 part_name() {
@@ -48,6 +201,15 @@ part_name() {
 	fi
 }
 
+canon_dev() {
+	local d=$1
+	if [[ -e ${d} ]]; then
+		readlink -f "${d}"
+	else
+		printf '%s' "${d}"
+	fi
+}
+
 booted_disk() {
 	local src pk
 	src=$(findmnt -n -o SOURCE / || true)
@@ -55,7 +217,8 @@ booted_disk() {
 		return 0
 	fi
 	src=${src%%\[*}
-	pk=$(lsblk -no PKNAME "${src}" 2>/dev/null | head -1 || true)
+	src=${src%% *}
+	pk=$(lsblk -no PKNAME "${src}" 2>/dev/null | head -n 1 || true)
 	if [[ -n ${pk} ]]; then
 		echo "/dev/${pk}"
 	else
@@ -63,25 +226,332 @@ booted_disk() {
 	fi
 }
 
-install_disk() {
-	local disk=$1
-	local boot mounted part
-	[[ -b ${disk} ]] || die "${disk} is not a block device"
-	if [[ -f /sys/class/block/$(basename "${disk}")/partition ]]; then
-		die "${disk} is a partition. Name the whole disk."
+whole_disk() {
+	local dev=$1 base pk
+	dev=$(canon_dev "${dev}")
+	base=$(basename "${dev}")
+	if [[ -e /sys/class/block/${base}/partition ]]; then
+		pk=$(lsblk -no PKNAME "${dev}" 2>/dev/null | head -n 1 || true)
+		if [[ -n ${pk} ]]; then
+			echo "/dev/${pk}"
+			return 0
+		fi
+	fi
+	echo "${dev}"
+}
+
+# Disks the installer itself was loaded from. A squashfs loop is not one of
+# them; the USB stick or the optical drive behind that loop is.
+live_medium_disks() {
+	local src base backing mntsrc boot
+	src=$(findmnt -n -o SOURCE /run/feldcore/medium 2>/dev/null || true)
+	src=${src%%\[*}
+	src=${src%% *}
+	if [[ -n ${src} ]]; then
+		base=$(basename "${src}")
+		if [[ ${base} == loop* && -r /sys/block/${base}/loop/backing_file ]]; then
+			backing=$(cat "/sys/block/${base}/loop/backing_file")
+			if [[ -n ${backing} ]]; then
+				mntsrc=$(findmnt -n -o SOURCE -T "${backing}" 2>/dev/null || true)
+				mntsrc=${mntsrc%%\[*}
+				mntsrc=${mntsrc%% *}
+				if [[ -n ${mntsrc} ]]; then
+					whole_disk "${mntsrc}"
+				fi
+			fi
+		elif [[ -b ${src} ]]; then
+			whole_disk "${src}"
+		fi
 	fi
 	boot=$(booted_disk || true)
-	if [[ -n ${boot} && ${disk} == "${boot}" ]]; then
-		die "refusing to install onto the disk this system booted from (${boot})"
+	if [[ -n ${boot} && -b ${boot} ]]; then
+		base=$(basename "$(canon_dev "${boot}")")
+		if [[ ${base} != loop* && ! -e /sys/class/block/${base}/partition ]]; then
+			echo "${boot}"
+		fi
+	fi
+}
+
+# The ISO 9660 volume itself. A loop's backing disk is not included: that
+# disk is the Ventoy stick, and the answer file is allowed to live on its
+# data partition. install_disk still refuses to erase that stick.
+iso_volume_disks() {
+	local src base
+	src=$(findmnt -n -o SOURCE /run/feldcore/medium 2>/dev/null || true)
+	src=${src%%\[*}
+	src=${src%% *}
+	[[ -n ${src} ]] || return 0
+	base=$(basename "$(canon_dev "${src}")")
+	if [[ ${base} == loop* ]]; then
+		canon_dev "${src}"
+		return 0
+	fi
+	if [[ -b ${src} ]]; then
+		whole_disk "${src}"
+	fi
+}
+
+is_iso_volume() {
+	local want d
+	want=$(canon_dev "$1")
+	while IFS= read -r d; do
+		[[ -n ${d} ]] || continue
+		if [[ $(canon_dev "${d}") == "${want}" ]]; then
+			return 0
+		fi
+	done < <(iso_volume_disks)
+	return 1
+}
+
+is_live_disk() {
+	local want d
+	want=$(canon_dev "$1")
+	while IFS= read -r d; do
+		[[ -n ${d} ]] || continue
+		if [[ $(canon_dev "${d}") == "${want}" ]]; then
+			return 0
+		fi
+	done < <(live_medium_disks)
+	return 1
+}
+
+accept_answer_file() {
+	local path=$1
+	[[ -f ${path} ]] || die "install answer file not found: ${path}"
+	if ! answer_acceptable "${path}"; then
+		die "install answer file is not a version 1 JSON object: ${path}"
+	fi
+	mkdir -p /run/feldcore
+	cp "${path}" "${ANSWER_TMP}"
+	chmod 600 "${ANSWER_TMP}" 2>/dev/null || true
+}
+
+# lsblk -P lines are KEY="value". Values we care about do not contain quotes.
+parse_lsblk_line() {
+	local rest=$1 key val
+	LB_PATH="" LB_FSTYPE="" LB_LABEL="" LB_PKNAME="" LB_RM="" LB_TRAN="" LB_TYPE=""
+	while [[ ${rest} =~ ^([A-Z]+)=\"([^\"]*)\"[[:space:]]*(.*)$ ]]; do
+		key=${BASH_REMATCH[1]}
+		val=${BASH_REMATCH[2]}
+		rest=${BASH_REMATCH[3]}
+		case ${key} in
+		PATH) LB_PATH=${val} ;;
+		FSTYPE) LB_FSTYPE=${val} ;;
+		LABEL) LB_LABEL=${val} ;;
+		PKNAME) LB_PKNAME=${val} ;;
+		RM) LB_RM=${val} ;;
+		TRAN) LB_TRAN=${val} ;;
+		TYPE) LB_TYPE=${val} ;;
+		esac
+	done
+}
+
+scan_answers() {
+	local target=$1
+	local -a hits=() hit_files=() devs=()
+	local line dev parent fstype ok cand rel bus parent_rm parent_base
+	local target_c
+	target_c=$(canon_dev "${target}")
+	mkdir -p /run/feldcore
+	modprobe vfat 2>/dev/null || true
+	modprobe exfat 2>/dev/null || true
+	udevadm settle --timeout=10 2>/dev/null || true
+	while IFS= read -r line; do
+		[[ -n ${line} ]] || continue
+		parse_lsblk_line "${line}"
+		[[ -n ${LB_PATH} ]] || continue
+		case ${LB_FSTYPE} in
+		vfat|exfat) ;;
+		*) continue ;;
+		esac
+		case ${LB_TYPE} in
+		part|disk) ;;
+		*) continue ;;
+		esac
+		if [[ -n ${LB_PKNAME} ]]; then
+			parent=/dev/${LB_PKNAME}
+		else
+			parent=${LB_PATH}
+		fi
+		if [[ $(canon_dev "${parent}") == "${target_c}" || $(canon_dev "${LB_PATH}") == "${target_c}" ]]; then
+			continue
+		fi
+		if is_iso_volume "${parent}" || is_iso_volume "${LB_PATH}"; then
+			continue
+		fi
+		parent_rm=0
+		parent_base=$(basename "$(canon_dev "${parent}")")
+		if [[ -r /sys/class/block/${parent_base}/removable ]]; then
+			parent_rm=$(tr -d ' \n' <"/sys/class/block/${parent_base}/removable" || true)
+		fi
+		ok=0
+		# The partition's own flag is often 0. The parent disk is the one
+		# the design counts as removable.
+		[[ ${LB_RM} == 1 || ${parent_rm} == 1 ]] && ok=1
+		[[ ${LB_TRAN} == usb ]] && ok=1
+		# FAT stores 11 characters and exFAT stores 15. The design name
+		# FELDCORE-ANSWERS fits neither, so a volume that should be scanned
+		# even when it is not removable and not USB is labeled FC-ANSWERS.
+		# The long name is still accepted if a filesystem reports it.
+		case ${LB_LABEL} in
+		FC-ANSWERS|FELDCORE-ANSWERS) ok=1 ;;
+		esac
+		if [[ ${ok} == 0 ]]; then
+			bus=$(udevadm info -q property -n "${parent}" 2>/dev/null | sed -n 's/^ID_BUS=//p' | head -1 || true)
+			[[ ${bus} == usb ]] && ok=1
+		fi
+		[[ ${ok} == 1 ]] || continue
+		devs+=("${LB_PATH}")
+	# -P and -l are mutually exclusive in util-linux. -P already prints one
+	# device per line, including partitions.
+	done < <(lsblk -P -o PATH,FSTYPE,LABEL,PKNAME,RM,TRAN,TYPE)
+
+	local sorted
+	if [[ ${#devs[@]} -gt 0 ]]; then
+		mapfile -t sorted < <(printf '%s\n' "${devs[@]}" | LC_ALL=C sort -u)
+	else
+		sorted=()
+	fi
+	for dev in "${sorted[@]+"${sorted[@]}"}"; do
+		fstype=$(lsblk -no FSTYPE "${dev}" | head -n 1 || true)
+		local mnt
+		mnt=$(mktemp -d /run/feldcore/scan.XXXXXX)
+		if ! mount -o ro -t "${fstype}" "${dev}" "${mnt}"; then
+			rmdir "${mnt}" 2>/dev/null || true
+			echo "feldcore-install: could not read ${dev}; skipping it" >&2
+			continue
+		fi
+		scan_mounts+=("${mnt}")
+		cand=""
+		rel=""
+		if [[ -f ${mnt}/feldcore/${ANSWER_NAME} ]]; then
+			cand=${mnt}/feldcore/${ANSWER_NAME}
+			rel=feldcore/${ANSWER_NAME}
+		elif [[ -f ${mnt}/${ANSWER_NAME} ]]; then
+			cand=${mnt}/${ANSWER_NAME}
+			rel=${ANSWER_NAME}
+		else
+			continue
+		fi
+		if ! answer_acceptable "${cand}"; then
+			die "install answer file on ${dev} is not a version 1 JSON object (${rel})"
+		fi
+		hits+=("${dev}")
+		hit_files+=("${cand}")
+	done
+	if [[ ${#hits[@]} -gt 1 ]]; then
+		echo "feldcore-install: more than one install answer file:" >&2
+		printf '  %s\n' "${hits[@]}" >&2
+		exit 1
+	fi
+	if [[ ${#hits[@]} -eq 1 ]]; then
+		cp "${hit_files[0]}" "${ANSWER_TMP}"
+		chmod 600 "${ANSWER_TMP}" 2>/dev/null || true
+		echo "feldcore-install: using install answer file from ${hits[0]}"
+	fi
+	cleanup_scans
+}
+
+resolve_answer() {
+	local target=$1 flag=$2
+	local word path=""
+	mkdir -p /run/feldcore
+	rm -f "${ANSWER_TMP}"
+	if [[ -n ${flag} ]]; then
+		accept_answer_file "${flag}"
+		return 0
+	fi
+	if [[ -r /proc/cmdline ]]; then
+		# shellcheck disable=SC2013
+		for word in $(cat /proc/cmdline); do
+			case ${word} in
+			feldcore.install-json=)
+				die "feldcore.install-json= did not name a file"
+				;;
+			feldcore.install-json=*)
+				path=${word#feldcore.install-json=}
+				;;
+			esac
+		done
+	fi
+	if [[ -n ${path} ]]; then
+		accept_answer_file "${path}"
+		return 0
+	fi
+	scan_answers "${target}"
+}
+
+bind_payload() {
+	if [[ -f ${PAYLOAD}/feldcore-root.img.zst ]]; then
+		return 0
+	fi
+	if [[ -f /run/feldcore/medium/payload/feldcore-root.img.zst ]]; then
+		mkdir -p "${PAYLOAD}"
+		mount --bind /run/feldcore/medium/payload "${PAYLOAD}" || die "could not bind the installer payload"
+	fi
+}
+
+ensure_payload() {
+	if [[ ! -f ${PAYLOAD}/feldcore-root.img.zst ]]; then
+		mkdir -p "${PAYLOAD}"
+		mount LABEL=feldcore-payload "${PAYLOAD}" || die "the installer payload is not available"
+	fi
+}
+
+xml_escape() {
+	local s=$1
+	s=${s//&/&amp;}
+	s=${s//</&lt;}
+	s=${s//>/&gt;}
+	printf '%s' "${s}"
+}
+
+write_esp_mac() {
+	local mnt=$1 version
+	version=$(xml_escape "$(tr -d ' \n' <"${PAYLOAD}/version")")
+	mkdir -p "${mnt}/System/Library/CoreServices"
+	cp "${PAYLOAD}/systemd-bootx64.efi" "${mnt}/System/Library/CoreServices/boot.efi"
+	cat >"${mnt}/System/Library/CoreServices/SystemVersion.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ProductName</key>
+	<string>FELDCORE</string>
+	<key>ProductVersion</key>
+	<string>${version}</string>
+</dict>
+</plist>
+EOF
+	: >"${mnt}/mach_kernel"
+}
+
+install_disk() {
+	local disk=$1 flag=${2:-}
+	local boot mounted part
+	[[ -b ${disk} ]] || die "${disk} is not a block device"
+	if [[ -f /sys/class/block/$(basename "$(canon_dev "${disk}")")/partition ]]; then
+		die "${disk} is a partition. Name the whole disk."
+	fi
+	# The answer file is copied to tmpfs before any scan mount is dropped
+	# and before the disk is erased.
+	resolve_answer "${disk}" "${flag}"
+	bind_payload
+	if is_live_disk "${disk}"; then
+		die "refusing to install onto the installer medium ($(canon_dev "${disk}"))"
+	fi
+	boot=$(booted_disk || true)
+	if [[ -n ${boot} && $(canon_dev "${disk}") == "$(canon_dev "${boot}")" ]]; then
+		base=$(basename "$(canon_dev "${boot}")")
+		if [[ ${base} != loop* ]]; then
+			die "refusing to install onto the disk this system booted from (${boot})"
+		fi
 	fi
 	mounted=$(lsblk -nr -o MOUNTPOINT "${disk}" | sed '/^$/d' || true)
 	if [[ -n ${mounted} ]]; then
 		die "${disk} has a mounted filesystem. Unmount it first."
 	fi
-	if [[ ! -f ${PAYLOAD}/feldcore-root.img.zst ]]; then
-		mkdir -p "${PAYLOAD}"
-		mount LABEL=feldcore-payload "${PAYLOAD}" || die "the installer payload is not available"
-	fi
+	ensure_payload
 	for part in feldcore-root.img.zst vmlinuz initrd.img systemd-bootx64.efi version root-mib state-mib; do
 		[[ -f ${PAYLOAD}/${part} ]] || die "payload is missing ${part}"
 	done
@@ -138,17 +608,81 @@ editor no
 auto-entries no
 auto-firmware no
 EOF
+	write_esp_mac "${mnt}"
+	if [[ -f ${ANSWER_TMP} ]]; then
+		mkdir -p "${mnt}/feldcore"
+		cp "${ANSWER_TMP}" "${mnt}/feldcore/${ANSWER_NAME}"
+		echo "feldcore-install: copied the install answer file onto the new EFI partition"
+	fi
 	sync
 	umount "${mnt}"
 	rmdir "${mnt}"
 	echo "feldcore-install: ${disk} will boot FELDCORE ${version} from slot A"
 }
 
-if [[ ${1:-} == "--from-cmdline" ]]; then
-	from_cmdline
-	exit 0
+main() {
+	local install_json="" mode="" disk=""
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+		--from-cmdline)
+			mode=cmdline
+			shift
+			;;
+		--yes)
+			mode=yes
+			if [[ -z ${2:-} || ${2} == --* ]]; then
+				usage
+			fi
+			disk=$2
+			shift 2
+			;;
+		--install-json)
+			if [[ -z ${2:-} || ${2} == --* ]]; then
+				die "--install-json needs a path"
+			fi
+			install_json=$2
+			shift 2
+			;;
+		-h|--help)
+			usage
+			;;
+		*)
+			usage
+			;;
+		esac
+	done
+	case ${mode} in
+	cmdline)
+		if [[ -n ${install_json} ]]; then
+			# A flag beats the kernel command line. from_cmdline still
+			# reads the target disk from feldcore.install=.
+			local word target=""
+			# shellcheck disable=SC2013
+			for word in $(cat /proc/cmdline); do
+				case ${word} in
+				feldcore.install=/*) target=${word#feldcore.install=} ;;
+				feldcore.install=) die "feldcore.install= did not name a disk" ;;
+				esac
+			done
+			if [[ -z ${target} ]]; then
+				echo "feldcore-install: this boot did not ask for an install"
+				exit 0
+			fi
+			install_disk "${target}" "${install_json}"
+			return 0
+		fi
+		from_cmdline
+		;;
+	yes)
+		[[ -n ${disk} ]] || usage
+		install_disk "${disk}" "${install_json}"
+		;;
+	*)
+		usage
+		;;
+	esac
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
 fi
-if [[ ${1:-} != "--yes" || -z ${2:-} ]]; then
-	usage
-fi
-install_disk "$2"
