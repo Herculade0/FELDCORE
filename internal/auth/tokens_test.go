@@ -53,7 +53,7 @@ func TestTokenHashIsSHA256AndSecretIsNotStored(t *testing.T) {
 
 func TestTokenExpiryRevokeAndScopes(t *testing.T) {
 	a := newTestService(t)
-	if !Allows([]string{ScopeAdmin}, ScopeVMs) || !Allows([]string{ScopeAdmin}, ScopeRead) || !Allows([]string{ScopeAdmin}, ScopeFilesWrite) || !Allows([]string{ScopeAdmin}, ScopeStorage) || !Allows([]string{ScopeAdmin}, ScopeBackupsWrite) {
+	if !Allows([]string{ScopeAdmin}, ScopeVMs) || !Allows([]string{ScopeAdmin}, ScopeRead) || !Allows([]string{ScopeAdmin}, ScopeFilesWrite) || !Allows([]string{ScopeAdmin}, ScopeStacks) || !Allows([]string{ScopeAdmin}, ScopeStorage) || !Allows([]string{ScopeAdmin}, ScopeBackupsWrite) {
 		t.Fatal("admin should include the other scopes")
 	}
 	if Allows([]string{ScopeRead}, ScopeStorage) {

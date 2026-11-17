@@ -35,6 +35,7 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **First-start setup** — one-time claim code, then host, network, storage, packages, default shares, firewall and update checks | ✅ working |
 | **Shares** — create a folder, expose it over SMB (public, read-only or private with users) and NFS; installs Samba/NFS for you | ✅ working |
 | **Docker** — run, edit and manage containers (state, live stats, logs, lifecycle); Unraid-style paths/ports/variables/labels/devices, a folder picker, GPU sharing and an allocations table; installs Docker for you | ✅ working |
+| **Stacks** — paste, upload or fetch a Compose file, check it, and deploy, update, stop or remove it; each stack is on its own network unless you say otherwise | ✅ working |
 | **App Store** — browse and search the Unraid Community Applications catalogue; choosing an app opens the container setup prefilled from its template | ✅ working |
 | **Settings** — appearance, host, network, services, firewall, updates, App Store feed, agent tokens | ✅ working |
 | **Agent access** — scoped bearer tokens, a read-only MCP server, and an audit log | ✅ working |
@@ -182,7 +183,10 @@ or a disposable VM.
   install adds your distribution's `docker.io` package. Containers FELDCORE
   creates are tagged with a `feldcore.managed=true` label. It only changes a
   container when you edit, start, stop or remove it yourself, and refuses to
-  edit ones that belong to a Docker Compose project.
+  edit ones that belong to a Docker Compose project. Change those from
+  **Stacks**. The files are kept in `/var/lib/feldcore/compose` (or
+  `$FELDCORE_DATA_DIR/compose`) and backups include that folder. See
+  [docs/COMPOSE.md](docs/COMPOSE.md).
 - Editing a container replaces it, because Docker cannot change ports, paths
   or variables in place. The original is kept until the replacement has
   started, and is restored if it does not. Files in mapped folders survive;
@@ -218,6 +222,7 @@ internal/vm        read-only libvirt domain list, when virsh is installed
 internal/store     JSON state file (atomic writes)
 internal/shares    SMB/NFS share management
 internal/docker    Docker Engine API client + container management
+internal/compose   Compose stacks: files, checks, and the Compose v2 CLI
 internal/apps      App Store: cached Community Applications catalogue
 internal/setup     guided setup wizard and the one-time claim code
 internal/storage   disk inventory the wizard calls (single-disk format only)

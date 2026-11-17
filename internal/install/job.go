@@ -39,10 +39,12 @@ type Reporter interface {
 }
 
 // Spec is one kind of install. Apt is true when the task runs apt or dpkg,
-// so it takes the package-manager lock.
+// so it takes the package-manager lock. Quiet skips the generic "install
+// started" audit lines when the caller records its own event.
 type Spec struct {
 	Label string
 	Apt   bool
+	Quiet bool
 	Run   func(ctx context.Context, rep Reporter) error
 }
 
@@ -62,8 +64,9 @@ type Job struct {
 
 type job struct {
 	Job
-	apt bool
-	run func(context.Context, Reporter) error
+	apt   bool
+	quiet bool
+	run   func(context.Context, Reporter) error
 }
 
 // AuditFunc records one install event. The HTTP layer writes the audit log.
@@ -132,6 +135,32 @@ func (r *Runner) Start(name string) (Job, error) {
 			return existing.view(), nil
 		}
 	}
+	return r.enqueue(name, spec), nil
+}
+
+// StartSpec queues a one-off job. name does not have to be registered.
+// A job already queued or running for that name is returned as-is, so a
+// second click joins the work instead of starting it twice.
+func (r *Runner) StartSpec(name string, spec Spec) (Job, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || spec.Run == nil {
+		return Job{}, ErrUnknown
+	}
+	if spec.Label == "" {
+		spec.Label = name
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if id, ok := r.latest[name]; ok {
+		if existing := r.jobs[id]; existing != nil && (existing.State == Queued || existing.State == Running) {
+			return existing.view(), nil
+		}
+	}
+	return r.enqueue(name, spec), nil
+}
+
+// enqueue starts spec. The caller holds r.mu.
+func (r *Runner) enqueue(name string, spec Spec) Job {
 	j := &job{
 		Job: Job{
 			ID:        newID(),
@@ -142,13 +171,14 @@ func (r *Runner) Start(name string) (Job, error) {
 			CreatedAt: r.now(),
 			Log:       []string{},
 		},
-		apt: spec.Apt,
-		run: spec.Run,
+		apt:   spec.Apt,
+		quiet: spec.Quiet,
+		run:   spec.Run,
 	}
 	r.jobs[j.ID] = j
 	r.latest[name] = j.ID
 	go r.execute(j)
-	return j.view(), nil
+	return j.view()
 }
 
 // Get returns one job by id.
@@ -224,7 +254,7 @@ func (r *Runner) markRunning(j *job) {
 	r.mu.Unlock()
 	r.append(j, "Starting "+j.Label+".")
 	r.log.Info("install started", "name", j.Name, "id", j.ID)
-	r.note("install started", j.Name, "ok")
+	r.note(j, "install started", j.Name, "ok")
 }
 
 func (r *Runner) finish(j *job, err error) {
@@ -243,7 +273,7 @@ func (r *Runner) finish(j *job, err error) {
 		r.mu.Unlock()
 		r.append(j, msg)
 		r.log.Error("install failed", "name", name, "id", id, "err", msg)
-		r.note("install failed", name, "error")
+		r.note(j, "install failed", name, "error")
 		return
 	}
 	j.State = Succeeded
@@ -252,10 +282,13 @@ func (r *Runner) finish(j *job, err error) {
 	r.mu.Unlock()
 	r.append(j, "Finished.")
 	r.log.Info("install finished", "name", name, "id", id)
-	r.note("install finished", name, "ok")
+	r.note(j, "install finished", name, "ok")
 }
 
-func (r *Runner) note(action, target, result string) {
+func (r *Runner) note(j *job, action, target, result string) {
+	if j != nil && j.quiet {
+		return
+	}
 	if r.audit != nil {
 		r.audit(action, target, result)
 	}

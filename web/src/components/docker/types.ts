@@ -16,6 +16,12 @@ export interface Container {
   ports: Port[];
   managed: boolean;
   compose: boolean;
+  /** FELDCORE stack that deployed this container, when there is one. */
+  stack?: string;
+  /** Compose project name, including projects FELDCORE did not create. */
+  project?: string;
+  /** Compose service name. */
+  service?: string;
   gpu: boolean;
   webUrl: string;
   icon?: string;

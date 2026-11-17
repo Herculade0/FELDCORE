@@ -22,10 +22,11 @@ const (
 	iconLabel      = "feldcore.icon"
 	// unraidIconLabel is the label Unraid's own UI reads to draw a container's
 	// icon. FELDCORE writes it too, so an icon set here shows up the same way.
-	unraidIconLabel = "net.unraid.docker.icon"
-	extraLabel      = "feldcore.extra" // extra parameters, so an edit can show them again
-	labelPrefix     = "feldcore."
-	composeLabel    = "com.docker.compose.project"
+	unraidIconLabel     = "net.unraid.docker.icon"
+	extraLabel          = "feldcore.extra" // extra parameters, so an edit can show them again
+	labelPrefix         = "feldcore."
+	composeLabel        = "com.docker.compose.project"
+	composeServiceLabel = "com.docker.compose.service"
 )
 
 var (
