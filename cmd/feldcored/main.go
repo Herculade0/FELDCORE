@@ -151,7 +151,11 @@ func main() {
 	wiz.UseVPN(vpnSvc)
 	proxySvc := &proxy.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
-		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), GatewayPort: pubPort, Log: log,
+		Host:        &proxy.HostCaddy{},
+		DataDir:     cfg.DataDir,
+		ListenPort:  listenPort(cfg.ListenAddr),
+		GatewayPort: pubPort,
+		Log:         log,
 	}
 	pubSvc := &publish.Service{
 		Store: st, Secrets: box, Proxy: proxySvc, Remote: remoteSvc,

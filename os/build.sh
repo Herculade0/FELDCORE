@@ -148,6 +148,7 @@ apply_image() {
 		"${rootfs}/usr/sbin/feldcore-install"
 	sudo rm -f "${rootfs}/usr/sbin/policy-rc.d"
 	install_cloudflared
+	install_caddy
 	sudo chroot "${rootfs}" groupadd -f kvm
 	sudo chroot "${rootfs}" groupadd -f libvirt
 	sudo chroot "${rootfs}" groupadd -f docker
@@ -439,6 +440,37 @@ install_cloudflared() {
 	echo "${sum}  ${tmp}" | sha256sum -c -
 	sudo install -m 755 "${tmp}" "${rootfs}/usr/bin/cloudflared"
 	rm -f "${tmp}"
+}
+
+# install_caddy verifies the pinned official release, then builds that same
+# release with the Cloudflare DNS module. The stock binary cannot issue a
+# public certificate. The result is a static program at /usr/bin/caddy.
+# feldcored supervises it. The appliance does not run feldcore-caddy.
+install_caddy() {
+	local sum ver xcaddy plugin tmp src out
+	read -r sum ver xcaddy plugin < <(awk 'NF && $1 !~ /^#/ {print $1, $2, $3, $4; exit}' "${repo}/os/caddy.sha256")
+	[[ -n ${sum} && -n ${ver} && -n ${xcaddy} && -n ${plugin} ]] || die "os/caddy.sha256 is empty"
+	tmp=$(mktemp)
+	curl -fsSL -o "${tmp}" "https://github.com/caddyserver/caddy/releases/download/v${ver}/caddy_${ver}_linux_amd64.tar.gz"
+	echo "${sum}  ${tmp}" | sha256sum -c -
+	rm -f "${tmp}"
+	src=$(mktemp -d)
+	out="${src}/caddy"
+	# Build outside the FELDCORE module so xcaddy's own module is used.
+	(
+		cd "${src}"
+		GOBIN="${src}/bin" CGO_ENABLED=0 go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${xcaddy}"
+		CGO_ENABLED=0 "${src}/bin/xcaddy" build "v${ver}" \
+			--with "github.com/caddy-dns/cloudflare@${plugin}" \
+			--output "${out}"
+	)
+	"${out}" version | grep -q "v${ver}" || die "caddy build is not v${ver}"
+	"${out}" list-modules | grep -q 'dns.providers.cloudflare' || die "caddy build is missing the Cloudflare DNS module"
+	if ldd "${out}" >/dev/null 2>&1; then
+		die "caddy build is dynamically linked"
+	fi
+	sudo install -m 755 "${out}" "${rootfs}/usr/bin/caddy"
+	rm -rf "${src}"
 }
 
 build_sysexts() {
