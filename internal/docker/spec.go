@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"path"
 	"regexp"
 	"sort"
@@ -24,6 +25,8 @@ const (
 	// icon. FELDCORE writes it too, so an icon set here shows up the same way.
 	unraidIconLabel     = "net.unraid.docker.icon"
 	extraLabel          = "feldcore.extra" // extra parameters, so an edit can show them again
+	appLabel            = "feldcore.app"
+	purposeLabel        = "feldcore.purpose"
 	labelPrefix         = "feldcore."
 	composeLabel        = "com.docker.compose.project"
 	composeServiceLabel = "com.docker.compose.service"
@@ -31,6 +34,7 @@ const (
 
 var (
 	nameRe    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$`)
+	appIDRe   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
 	imageRe   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,254}$`)
 	networkRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$`)
 	volumeRe  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
@@ -52,6 +56,11 @@ func normaliseSpec(s *Spec) error {
 	if s.Icon != "" && httpURL(s.Icon) == "" {
 		return invalid("The icon must be an http or https address.")
 	}
+	s.App = strings.TrimSpace(s.App)
+	if s.App != "" && !appIDRe.MatchString(s.App) {
+		return invalid("That app id is not valid.")
+	}
+	s.Purpose = oneLine(s.Purpose, 80)
 	s.Network = strings.TrimSpace(s.Network)
 	if s.Network == "" || s.Network == "default" {
 		s.Network = "bridge"
@@ -134,6 +143,10 @@ func normaliseSpec(s *Spec) error {
 			}
 			if c.Required && c.HostPort == 0 {
 				return invalid("%s is required.", label)
+			}
+			c.HostIP = strings.TrimSpace(c.HostIP)
+			if c.HostIP != "" && net.ParseIP(c.HostIP) == nil {
+				return invalid("%s bind address must be an IP address, or blank to publish on every interface.", label)
 			}
 		case TypeVariable, TypeLabel:
 			c.Key = strings.TrimSpace(c.Key)
@@ -305,6 +318,12 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 	if s.ExtraParams != "" {
 		labels[extraLabel] = strings.TrimSpace(s.ExtraParams)
 	}
+	if s.App != "" {
+		labels[appLabel] = s.App
+	}
+	if s.Purpose != "" {
+		labels[purposeLabel] = s.Purpose
+	}
 	if s.Isolate == IsolatePrivate && s.VPN == "" && !s.Gateway {
 		labels[netLabel] = IsolatePrivate
 	}
@@ -385,6 +404,8 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 		Icon:          containerIcon(labels),
 		ExtraParams:   labels[extraLabel],
 		Privileged:    host["Privileged"] == true,
+		App:           labels[appLabel],
+		Purpose:       labels[purposeLabel],
 		Configs:       []Config{},
 	}
 	if s.Network == "" || s.Network == "default" {

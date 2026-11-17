@@ -78,6 +78,8 @@ type Port struct {
 	Host      int    `json:"host"`
 	Container int    `json:"container"`
 	Proto     string `json:"proto"`
+	// HostIP is set when the port is bound to one address. Empty means every interface.
+	HostIP string `json:"hostIp,omitempty"`
 }
 
 // Container is a container in a shape the UI can render directly.
@@ -102,9 +104,12 @@ type Container struct {
 	IPs        []string `json:"ips"` // address(es) the container answers on
 	VPN        string   `json:"vpn,omitempty"`
 	VPNGateway bool     `json:"vpnGateway,omitempty"`
-	CPUPct     float64  `json:"cpuPct"` // live, 0 when not running
-	MemUsed    int64    `json:"memUsed"`
-	MemLimit   int64    `json:"memLimit"`
+	// App and Purpose come from store-template labels, when the container has them.
+	App      string  `json:"app,omitempty"`
+	Purpose  string  `json:"purpose,omitempty"`
+	CPUPct   float64 `json:"cpuPct"` // live, 0 when not running
+	MemUsed  int64   `json:"memUsed"`
+	MemLimit int64   `json:"memLimit"`
 	// Role is set for containers FELDCORE runs for itself (tunnel, proxy).
 	Role string `json:"role,omitempty"`
 	// Hostname and PublicHost are filled in by the API from proxy and tunnel
@@ -202,6 +207,11 @@ type Spec struct {
 	// and is not accepted from the HTTP API.
 	VPN     string `json:"vpn,omitempty"`
 	Gateway bool   `json:"-"`
+
+	// App and Purpose are set by a FELDCORE store template. They are written
+	// as labels so an edit keeps them and other apps can recognise the container.
+	App     string `json:"app,omitempty"`
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // SpecInfo is a container's current Spec plus whether it may be edited.

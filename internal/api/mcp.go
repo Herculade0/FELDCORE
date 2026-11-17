@@ -12,6 +12,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/Herculade0/feldcore/internal/auth"
+	"github.com/Herculade0/feldcore/internal/bridge"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/health"
 	"github.com/Herculade0/feldcore/internal/vm"
@@ -21,8 +23,9 @@ import (
 // changes the host. Write tools are a later phase, behind an approval queue.
 
 const mcpInstructions = "Read-only tools for this FELDCORE server. " +
-	"They can look at the host, shares, containers, the App Store, virtual machines, and health. " +
-	"They cannot change anything, and there is no shell."
+	"They can look at the host, shares, containers, the App Store, virtual machines, health, and a configured Proton Bridge mailbox. " +
+	"They cannot change anything, and there is no shell. " +
+	"proton_bridge also needs the mail scope. It returns saved IMAP and SMTP details and does not sign in or stop Bridge."
 
 func (s *Server) initMCP() {
 	server := mcp.NewServer(&mcp.Implementation{
@@ -50,6 +53,8 @@ func (s *Server) initMCP() {
 		"List virtual machines when the VM layer is installed. Nothing is started or stopped."), s.toolListVMs)
 	mcp.AddTool(server, readonly("health_report", "Health report",
 		"Read the latest health checks: SMART, temperatures, disk space, load, containers, VMs, failed services, certificates, and tunnels. Nothing is changed."), s.toolHealthReport)
+	mcp.AddTool(server, readonly("proton_bridge", "Proton Bridge mailbox",
+		"Read the saved Proton Bridge username, app password, and IMAP and SMTP endpoints for AI integration. Requires the mail scope as well as read. Does not sign in, and does not stop or start the container."), s.toolProtonBridge)
 	s.mcpHTTP = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, &mcp.StreamableHTTPOptions{Logger: s.log})
@@ -95,6 +100,20 @@ func (s *Server) toolHealthReport(ctx context.Context, _ *mcp.CallToolRequest, _
 		return nil, health.Report{}, errors.New("Health monitoring is not available.")
 	}
 	return nil, s.health.Report(), nil
+}
+
+func (s *Server) toolProtonBridge(ctx context.Context, req *mcp.CallToolRequest, _ none) (*mcp.CallToolResult, bridge.Status, error) {
+	p, ok := s.principalForMCP(ctx, req)
+	if !ok || !auth.Allows(p.Scopes, auth.ScopeMail) {
+		return nil, bridge.Status{}, errors.New("This token needs the mail scope to read Bridge credentials. read alone is not enough. admin includes mail.")
+	}
+	ctx, cancel := toolCtx(ctx)
+	defer cancel()
+	st, err := s.bridgeStatus(ctx, "")
+	if err != nil {
+		return nil, bridge.Status{}, errors.New("Couldn't read the Proton Bridge mailbox.")
+	}
+	return nil, st, nil
 }
 
 func (s *Server) toolSystemStats(ctx context.Context, _ *mcp.CallToolRequest, _ none) (*mcp.CallToolResult, any, error) {

@@ -37,6 +37,11 @@ type App struct {
 	Support    string   `json:"support,omitempty"`
 	// Requires is Unraid's free-text "this app needs" note, with markup removed.
 	Requires string `json:"requires,omitempty"`
+	// Purpose is set on a FELDCORE template, for example "AI integration".
+	Purpose string `json:"purpose,omitempty"`
+	// Origin is "feldcore" for a template shipped with FELDCORE. Community
+	// Apps leave it empty.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Category is a filter entry. ID matches App.Categories.

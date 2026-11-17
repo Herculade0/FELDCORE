@@ -79,6 +79,7 @@ func TestNormaliseSpecRejectsBadInput(t *testing.T) {
 		"port out of range":  spec(Config{Type: TypePort, HostPort: 70000, ContainerPort: 80}),
 		"port zero":          spec(Config{Type: TypePort, HostPort: 80, ContainerPort: 0}),
 		"bad proto":          spec(Config{Type: TypePort, HostPort: 80, ContainerPort: 80, Proto: "icmp"}),
+		"hostname bind":      spec(Config{Type: TypePort, HostPort: 80, ContainerPort: 80, HostIP: "localhost"}),
 		"env name with =":    spec(Config{Type: TypeVariable, Key: "A=B", Value: "x"}),
 		"env name space":     spec(Config{Type: TypeVariable, Key: "A B", Value: "x"}),
 		"reserved label":     spec(Config{Type: TypeLabel, Key: "feldcore.managed", Value: "false"}),

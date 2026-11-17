@@ -105,7 +105,7 @@ behind authentication:
   leaked state file does not yield usable sessions. The cookie is HttpOnly and
   SameSite=Strict, and Secure when served over TLS.
 - **Agent tokens** are a second credential, for the owner's own agents. Each
-  is named, scoped (`read`, `containers`, `vms`, `files:read`, `files:write`, `storage`, `admin`), and optional
+  is named, scoped (`read`, `containers`, `vms`, `files:read`, `files:write`, `stacks`, `storage`, `backups:read`, `backups:write`, `mail`, `admin`), and optional
   expiry. The secret is shown once. Only a SHA-256 hash is stored. Callers
   send `Authorization: Bearer`. A session cookie is still the administrator
   and is not limited by scopes. A token is. Admin does not include a shell:
@@ -114,6 +114,7 @@ behind authentication:
 - **MCP** is served at `/mcp` on the streamable HTTP transport. It requires a
   bearer token with the `read` scope (admin includes read). A session cookie
   is not accepted. Phase 1 tools are read-only. There is no shell or exec tool.
+  `proton_bridge` also needs the `mail` scope. It returns a saved mailbox and does not stop the container.
 - **Audit**: every call authenticated with a token is recorded (token name,
   action, target, time, result), and so are Citizen ID sign-ins, failures,
   and access denials. Failures for an unknown username are aggregated so they

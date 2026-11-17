@@ -2,7 +2,7 @@
 id: proton
 kind: reference
 title: Proton Drive and Mail
-summary: The Proton VPN preset, the experimental Drive backup, and the notification mail.
+summary: The Proton VPN preset, the experimental Drive backup, notification mail, and the App Store Bridge for other apps.
 icon: mail
 order: 280
 popular: false
@@ -69,3 +69,37 @@ Mail is sent when a container stops unexpectedly (you did not stop, restart, or 
 The Bridge container is `shenxn/protonmail-bridge`, published only on `127.0.0.1:1025`. The first login is interactive, in that container's console. FELDCORE then uses the Bridge SMTP password you paste. Bridge presents its own certificate, so certificate checks are skipped for Bridge and only for Bridge.
 
 **Send test email** delivers one message. The password or token is stored encrypted. Turning notifications off stops delivery and keeps the password.
+
+## Proton Bridge for other apps
+
+[[route:apps|Open the App Store]]
+
+The App Store lists Proton Bridge. Its purpose is AI integration: other FELDCORE apps and bots read the mailbox over IMAP and send through SMTP. This is a different container from the notification Bridge above. The notification one publishes SMTP only on `127.0.0.1:1025`. The App Store one publishes IMAP and SMTP on the LAN, and you can set each bind address to `127.0.0.1` to keep them on this server.
+
+Bridge needs a paid Proton plan: Mail Plus, Unlimited, Family, Duo, or Visionary. Proton Free cannot use Bridge.
+
+The template stores the keychain in a data folder mounted at `/root`. That folder is what keeps the login across restarts. The container restarts unless you stop it.
+
+Sign-in cannot be automated. Proton asks for the account password and a 2FA code.
+
+1. Create the container from the App Store, then open **Mailbox access** on its Docker row.
+2. Start it and open **Console**. That is a shell in the container, the same as `docker exec`.
+3. Bridge is already running, and only one copy can use the keychain. Run:
+
+```
+pkill -x protonmail-bridge || true
+pkill -x socat || true
+/protonmail/entrypoint.sh init
+```
+
+On a new data folder, init creates the GPG key and the pass keychain, then opens the Bridge CLI. If init says the key already exists, run `protonmail-bridge --cli` instead.
+
+4. At the `>>>` prompt, type `login`, then the Proton username, the account password, and the 2FA code. An account with a mailbox password gets one more prompt.
+5. Type `info`. The username and password in that printout are the Bridge credentials. Type `exit`.
+6. Restart the container. Then choose **Read from Bridge**, or paste the username and password from `info`.
+
+Read from Bridge stops the container, runs `info` against the data folder, stores the Bridge password encrypted, and starts the container again. It does not log in. The panel then shows the host and port other apps should use. `info` prints `127.0.0.1` with ports 1143 and 1025, which are inside the container. Clients use the published host ports. Bridge presents its own certificate, so clients skip certificate checks for these ports.
+
+A bot needs the `read` scope to open MCP and the `mail` scope to call `proton_bridge` or `GET /api/v1/integrations/proton-bridge`. `admin` includes `mail`. The password is not written to `state.json` or the log.
+
+When Proton forces a new login, leave the data folder in place. Open the console, stop Bridge with the same `pkill` commands, and run `protonmail-bridge --cli`. If the account is already listed, type `logout`, then `login`, and complete the password and 2FA prompts again. Type `info` and `exit`, restart the container, and read the credentials again whenever `info` shows a new password. Do not delete the data folder to re-authenticate.

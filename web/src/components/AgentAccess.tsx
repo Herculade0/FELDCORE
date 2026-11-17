@@ -4,7 +4,7 @@ import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, Modal, SelectField, TextField, Toggle } from "./form";
 
-type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "stacks" | "storage" | "backups:read" | "backups:write" | "admin";
+type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "stacks" | "storage" | "backups:read" | "backups:write" | "mail" | "admin";
 
 interface Token {
   id: string;
@@ -68,6 +68,11 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
     hint: "Run backups, checks and restores, and change destinations. Includes reading them.",
   },
   {
+    key: "mail",
+    label: "Mail",
+    hint: "Read the Proton Bridge username, app password, and IMAP and SMTP endpoints. Grant read as well so an agent can call the proton_bridge MCP tool. Admin includes this.",
+  },
+  {
     key: "admin",
     label: "Admin",
     hint: "Settings, shares, tokens and every other API call. Includes the scopes above.",
@@ -116,6 +121,7 @@ export default function AgentAccessCard({ onOpenAudit }: { onOpenAudit?: () => v
     storage: false,
     "backups:read": false,
     "backups:write": false,
+    mail: false,
     admin: false,
   });
   const [busy, setBusy] = useState(false);
