@@ -19,21 +19,21 @@ func randomToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-func httpSet(w http.ResponseWriter, r *http.Request, name, value, path string, maxAge int) {
+func (g *Gateway) httpSet(w http.ResponseWriter, r *http.Request, name, value, path string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name: name, Value: value, Path: path, MaxAge: maxAge,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestSecure(r),
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.requestSecure(r),
 	})
 }
 
-func clearCookie(w http.ResponseWriter, name string, r *http.Request) {
+func (g *Gateway) clearCookie(w http.ResponseWriter, name string, r *http.Request) {
 	path := "/"
 	if name == pendingCookie || name == csrfCookie {
 		path = "/citizen"
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: name, Value: "", Path: path, MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestSecure(r),
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.requestSecure(r),
 	})
 }
 
@@ -42,7 +42,7 @@ func (g *Gateway) issueCSRF(w http.ResponseWriter, r *http.Request) (string, err
 	if err != nil {
 		return "", err
 	}
-	httpSet(w, r, csrfCookie, hashKey(token), "/citizen", 3600)
+	g.httpSet(w, r, csrfCookie, hashKey(token), "/citizen", 3600)
 	return token, nil
 }
 

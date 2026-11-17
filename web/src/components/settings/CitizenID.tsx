@@ -136,7 +136,7 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
     setBusy(true);
     setError(null);
     try {
-      await registerPasskey();
+      await registerPasskey(proof, proofCode);
       await load();
     } catch (e) {
       setError(errorMessage(e));
@@ -163,7 +163,7 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
       <CardTitle icon={KeyRound} title="Your sign-in" hint={profile?.username} />
       <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
         An authenticator adds a 6-digit code to every sign-in, including the administrator
-        password. Replacing or removing a sign-in method asks for your password and the current code.
+        password. Adding, replacing or removing a sign-in method asks for your password and the current code.
       </p>
       {error && (
         <div className="mt-4">
@@ -173,8 +173,7 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
       {profile?.totp && !setup && (
         <p className="mt-4 text-sm font-semibold text-ink">An authenticator is enrolled.</p>
       )}
-      {(profile?.totp || (profile?.passkeys.length ?? 0) > 0) && (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <TextField
             label="Your password"
             type="password"
@@ -191,8 +190,7 @@ export function OwnSignIn({ allowReset = false }: { allowReset?: boolean }) {
               autoComplete="one-time-code"
             />
           )}
-        </div>
-      )}
+      </div>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button size="sm" onClick={() => void begin()} loading={busy && !setup}>
           {profile?.totp ? "Replace authenticator" : "Set up authenticator"}

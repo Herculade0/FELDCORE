@@ -113,8 +113,11 @@ export async function loginWithPasskey(): Promise<{ username: string; admin: boo
 }
 
 /** Register a passkey for the signed-in person. */
-export async function registerPasskey(): Promise<void> {
-  const wire = await api<WireOptions>("/citizen/webauthn/register/begin", { method: "POST" });
+export async function registerPasskey(password: string, totp: string): Promise<void> {
+  const wire = await api<WireOptions>("/citizen/webauthn/register/begin", {
+    method: "POST",
+    body: { password, totp },
+  });
   const pk = wire.publicKey;
   if (!pk.user || !pk.rp || !pk.pubKeyCredParams) {
     throw new Error("Passkeys are not available on this address.");
