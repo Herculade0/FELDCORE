@@ -5,7 +5,7 @@
 set -euo pipefail
 export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.11}"
 
-repo=$(cd "$(dirname "$0")/.." && pwd)
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=${FELDCORE_OS_WORK:-/var/tmp/feldcore-os}
 out=${FELDCORE_OS_OUT:-${repo}/dist/os}
 version=${FELDCORE_OS_VERSION:-0.1.0}
@@ -264,6 +264,8 @@ install_packages() {
 	local pkgs
 	pkgs=$(grep -v '^[[:space:]]*#' "${repo}/os/packages.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
 	sudo chroot "${rootfs}" apt-get update
+	# The package list is a space-separated set of names and must be split.
+	# shellcheck disable=SC2086
 	sudo chroot "${rootfs}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${pkgs}
 	configure_containerd
 	sudo chroot "${rootfs}" apt-get clean
@@ -599,6 +601,7 @@ EOF
 		-dir "${out}" -version "${version}" -notes-file "${notes}" \
 		-kernel "${kver}" -channel stable -out "${out}/feldcore-os.json")
 	(cd "${repo}" && go run ./cmd/osmanifest sign -key "${FELDCORE_UPDATE_KEY}" -in "${out}/feldcore-os.json")
+	publish_installer_iso
 	rm -f "${out}/"*.key "${out}/"*.sec
 	if [[ -f ${out}/update.key || -f ${out}/feldcore-os.key ]]; then
 		die "a private key landed in the output directory"
@@ -673,7 +676,11 @@ build_sysexts() {
 	done
 }
 
-require debootstrap mkfs.ext4 mkfs.vfat sgdisk zstd rsync losetup go npm mcopy curl sha256sum
+# shellcheck source=os/assemble-iso.sh
+source "${repo}/os/assemble-iso.sh"
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+require debootstrap mkfs.ext4 mkfs.vfat sgdisk zstd rsync losetup go npm mcopy curl sha256sum xorriso grub-mkimage mksquashfs
 sudo mkdir -p "${work}"
 sudo chown "$(id -u):$(id -g)" "${work}"
 mkdir -p "${out}"
@@ -692,6 +699,8 @@ kernel_files
 make_root_image
 assemble_appliance
 assemble_installer
+assemble_iso
 build_sysexts
 publish
 log "done"
+fi

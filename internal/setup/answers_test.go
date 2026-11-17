@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -86,14 +87,19 @@ func (r *answerRig) joined() string {
 }
 
 type answerCmd struct {
-	mu    sync.Mutex
-	calls []string
+	mu        sync.Mutex
+	calls     []string
+	failMount bool
 }
 
 func (c *answerCmd) Run(_ context.Context, name string, args ...string) (string, error) {
 	c.mu.Lock()
 	c.calls = append(c.calls, name+" "+strings.Join(args, " "))
+	fail := c.failMount && name == "mount"
 	c.mu.Unlock()
+	if fail {
+		return "", errors.New("not a mount point")
+	}
 	if name == "id" {
 		return "", errors.New("no such user")
 	}
@@ -524,6 +530,210 @@ func mustMode(t *testing.T, path string) os.FileMode {
 		t.Fatal(err)
 	}
 	return st.Mode().Perm()
+}
+
+func TestAnswerProbeAndVolumeRule(t *testing.T) {
+	good := []string{
+		`{"version":1}`,
+		`{"version":1.0,"hostname":"feldbox"}`,
+		" \n{\"version\":1}\n",
+	}
+	for _, body := range good {
+		if err := answerProbe([]byte(body)); err != nil {
+			t.Fatalf("rejected %q: %v", body, err)
+		}
+	}
+	bad := []string{
+		``,
+		`[]`,
+		`{"version":"1"}`,
+		`{"version":2}`,
+		`{"version":1}{"version":1}`,
+		`{"hostname":"feldbox"}`,
+		`not json`,
+	}
+	for _, body := range bad {
+		if err := answerProbe([]byte(body)); err == nil {
+			t.Fatalf("accepted %q", body)
+		}
+	}
+	if !answerVolumeEligible("vfat", "", "1", "") ||
+		!answerVolumeEligible("exfat", "OTHER", "0", "usb") ||
+		!answerVolumeEligible("vfat", "FC-ANSWERS", "0", "virtio") ||
+		!answerVolumeEligible("vfat", "FELDCORE-ANSWERS", "0", "virtio") {
+		t.Fatal("eligible volume was rejected")
+	}
+	if answerVolumeEligible("vfat", "OTHER", "0", "virtio") ||
+		answerVolumeEligible("iso9660", "FELDCORE", "1", "usb") ||
+		answerVolumeEligible("ext4", "", "1", "usb") {
+		t.Fatal("ineligible volume was accepted")
+	}
+}
+
+func TestAnswerScanStaysOffWhenEFIRootIsSet(t *testing.T) {
+	rig := newAnswerRig(t)
+	called := false
+	rig.s.answerVolumes = func(context.Context) ([]answerVolume, error) {
+		called = true
+		return nil, nil
+	}
+	res, err := rig.s.ApplyInstallFile(context.Background())
+	if err != nil || res != nil || called {
+		t.Fatalf("res=%v err=%v called=%v", res, err, called)
+	}
+}
+
+func TestAnswerESPBeatsScan(t *testing.T) {
+	rig := newAnswerRig(t)
+	rig.put(t, `{"version":1,"hostname":"fromesp","timezone":"UTC"}`)
+	other := t.TempDir()
+	writeSideAnswer(t, other, "feldcore/"+answerName, `{"version":1,"hostname":"fromstick","timezone":"UTC"}`)
+	called := false
+	rig.s.answerVolumes = func(context.Context) ([]answerVolume, error) {
+		called = true
+		return []answerVolume{{Dir: other, Dev: "/dev/vdb1"}}, nil
+	}
+	res, err := rig.s.ApplyInstallFile(context.Background())
+	if err != nil || res == nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("scan ran even though the ESP file was present")
+	}
+	if rig.st.Snapshot().Wizard == nil || rig.st.Snapshot().Wizard.Hostname != "fromesp" {
+		t.Fatalf("hostname %+v", rig.st.Snapshot().Wizard)
+	}
+}
+
+func TestAnswerScanAppliesSideFile(t *testing.T) {
+	rig := newAnswerRig(t)
+	dir := t.TempDir()
+	path := writeSideAnswer(t, dir, "feldcore/"+answerName, "{\"version\":1}\n")
+	if err := rig.useAnswerVolumes(t, dir); err != nil {
+		t.Fatal(err)
+	}
+	res, err := rig.s.ApplyInstallFile(context.Background())
+	if err != nil || res == nil || res.Already {
+		t.Fatalf("res=%v err=%v", res, err)
+	}
+	if _, err := os.Stat(filepath.Join(rig.dir, appliedName)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("side answer file was left in place after a successful apply")
+	}
+}
+
+func TestAnswerScanPrefersNestedPath(t *testing.T) {
+	rig := newAnswerRig(t)
+	dir := t.TempDir()
+	writeSideAnswer(t, dir, "feldcore/"+answerName, `{"version":1,"hostname":"nested","timezone":"UTC"}`)
+	writeSideAnswer(t, dir, answerName, `{"version":1,"hostname":"atroot","timezone":"UTC"}`)
+	if err := rig.useAnswerVolumes(t, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.s.ApplyInstallFile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if rig.st.Snapshot().Wizard == nil || rig.st.Snapshot().Wizard.Hostname != "nested" {
+		t.Fatalf("hostname %+v", rig.st.Snapshot().Wizard)
+	}
+}
+
+func TestAnswerScanRejectsTwoFiles(t *testing.T) {
+	rig := newAnswerRig(t)
+	a := t.TempDir()
+	b := t.TempDir()
+	writeSideAnswer(t, a, answerName, `{"version":1}`)
+	writeSideAnswer(t, b, "feldcore/"+answerName, `{"version":1}`)
+	if err := rig.useAnswerVolumes(t, a, b); err != nil {
+		t.Fatal(err)
+	}
+	_, err := rig.s.ApplyInstallFile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "/dev/vda1") || !strings.Contains(err.Error(), "/dev/vdb1") {
+		t.Fatal(err)
+	}
+	if rig.st.Snapshot().Wizard != nil {
+		t.Fatal("two answer files changed the system")
+	}
+	if _, err := os.Stat(filepath.Join(rig.dir, appliedName)); !os.IsNotExist(err) {
+		t.Fatal("marker written for an ambiguous answer file")
+	}
+}
+
+func TestAnswerScanDoesNotSkipABadFile(t *testing.T) {
+	rig := newAnswerRig(t)
+	bad := t.TempDir()
+	good := t.TempDir()
+	writeSideAnswer(t, bad, "feldcore/"+answerName, `{"version":2}`)
+	goodPath := writeSideAnswer(t, good, answerName, `{"version":1,"hostname":"kept","timezone":"UTC"}`)
+	if err := rig.useAnswerVolumes(t, bad, good); err != nil {
+		t.Fatal(err)
+	}
+	_, err := rig.s.ApplyInstallFile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "/dev/vda1") {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(goodPath); err != nil {
+		t.Fatal(err)
+	}
+	if rig.st.Snapshot().Wizard != nil {
+		t.Fatal("a bad answer file fell through to another volume")
+	}
+}
+
+func TestAnswerSideDeleteFailureIsAWarning(t *testing.T) {
+	rig := newAnswerRig(t)
+	dir := t.TempDir()
+	path := writeSideAnswer(t, dir, "feldcore/"+answerName, `{"version":1}`)
+	parent := filepath.Dir(path)
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	rig.cmd.failMount = true
+	rig.s.answerSrc = path
+	rig.s.answerMount = dir
+	rig.s.removeAnswerCopies(context.Background())
+	_, statErr := os.Stat(path)
+	warn := strings.Contains(rig.logs.String(), "could not remove the install answer file")
+	if statErr == nil && !warn {
+		t.Fatal("the answer file is still there and no warning was logged")
+	}
+	if statErr != nil && warn {
+		t.Fatal("the answer file was removed and a warning was still logged")
+	}
+}
+
+func (r *answerRig) useAnswerVolumes(t *testing.T, dirs ...string) error {
+	t.Helper()
+	if _, err := os.Stat("/dev/disk/by-label/FC-ESP"); err == nil {
+		t.Skip("this machine has an FC-ESP volume")
+	}
+	if _, err := os.Stat("/efi/feldcore/" + answerName); err == nil {
+		t.Skip("this machine already has an answer file on /efi")
+	}
+	r.s.efiRoot = ""
+	vols := make([]answerVolume, 0, len(dirs))
+	for i, dir := range dirs {
+		vols = append(vols, answerVolume{Dir: dir, Dev: fmt.Sprintf("/dev/vd%c1", 'a'+i)})
+	}
+	r.s.answerVolumes = func(context.Context) ([]answerVolume, error) {
+		return vols, nil
+	}
+	return nil
+}
+
+func writeSideAnswer(t *testing.T, dir, rel, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func readTree(t *testing.T, dir string) string {

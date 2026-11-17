@@ -70,6 +70,13 @@ type Service struct {
 	unixPass func(context.Context, string, string) error
 	// lookupIface supplies the static-address interface when the file omits one.
 	lookupIface func(context.Context) string
+	// answerVolumes, when set, is the side-volume scan. Nil walks sysfs.
+	// Tests set it so a run never mounts the host.
+	answerVolumes func(context.Context) ([]answerVolume, error)
+	// answerSrc is the path readAnswerFile accepted.
+	answerSrc string
+	// answerMount is a mount this process created for answerSrc.
+	answerMount string
 }
 
 // Deps wires the wizard to the rest of the daemon.

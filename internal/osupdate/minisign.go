@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"time"
@@ -123,7 +124,24 @@ func ParsePrivate(text string) (PrivateKey, error) {
 // Sign writes a minisign signature for data. filename is only the comment.
 func Sign(k PrivateKey, filename string, data []byte) ([]byte, error) {
 	sum := blake2b.Sum512(data)
-	sig := ed25519.Sign(k.priv, sum[:])
+	return signDigest(k, filename, sum[:])
+}
+
+// SignStream writes a minisign signature while hashing r. The file is not
+// loaded into one slice, so a multi-gigabyte installer image can be signed.
+func SignStream(k PrivateKey, filename string, r io.Reader) ([]byte, error) {
+	h, err := blake2b.New512(nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(h, r); err != nil {
+		return nil, err
+	}
+	return signDigest(k, filename, h.Sum(nil))
+}
+
+func signDigest(k PrivateKey, filename string, sum []byte) ([]byte, error) {
+	sig := ed25519.Sign(k.priv, sum)
 	body := make([]byte, minisignSigSize)
 	copy(body[0:2], "ED")
 	copy(body[2:10], k.id[:])

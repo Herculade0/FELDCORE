@@ -146,6 +146,7 @@ var (
 // directory and applies it once. A missing file is not an error.
 // A later boot with the applied marker does not run the sections again.
 func (s *Service) ApplyInstallFile(ctx context.Context) (*InstallResult, error) {
+	defer s.unmountAnswer(ctx)
 	if s.installApplied() {
 		s.removeAnswerCopies(ctx)
 		return &InstallResult{Already: true}, nil
@@ -1109,26 +1110,31 @@ func (s *Service) installApplied() bool {
 func (s *Service) readAnswerFile(ctx context.Context) ([]byte, string, error) {
 	esp := filepath.Join(s.espRoot(), "feldcore", answerName)
 	if b, err := os.ReadFile(esp); err == nil {
+		s.answerSrc = esp
 		return b, esp, nil
 	} else if err != nil && !os.IsNotExist(err) {
 		return nil, "", err
 	}
 	state := filepath.Join(s.dataDir, answerName)
 	if b, err := os.ReadFile(state); err == nil {
+		s.answerSrc = state
 		return b, state, nil
 	} else if err != nil && !os.IsNotExist(err) {
 		return nil, "", err
 	}
+	// A test sets efiRoot and must not mount the host or scan its disks.
 	if s.efiRoot != "" {
 		return nil, "", nil
 	}
-	if err := s.mountESP(ctx); err != nil {
-		return nil, "", nil
+	if err := s.mountESP(ctx); err == nil {
+		if b, err := os.ReadFile(esp); err == nil {
+			s.answerSrc = esp
+			return b, esp, nil
+		} else if err != nil && !os.IsNotExist(err) {
+			return nil, "", err
+		}
 	}
-	if b, err := os.ReadFile(esp); err == nil {
-		return b, esp, nil
-	}
-	return nil, "", nil
+	return s.readAnswerVolumes(ctx)
 }
 
 func (s *Service) mountESP(ctx context.Context) error {
@@ -1147,13 +1153,30 @@ func (s *Service) mountESP(ctx context.Context) error {
 }
 
 func (s *Service) removeAnswerCopies(ctx context.Context) {
-	s.removeAnswerPath(ctx, filepath.Join(s.espRoot(), "feldcore", answerName))
+	esp := filepath.Join(s.espRoot(), "feldcore", answerName)
+	s.removeAnswerPath(ctx, esp)
+	if s.answerSrc != "" && s.answerSrc != esp {
+		s.removeAnswerPath(ctx, s.answerSrc)
+	}
 	_ = os.Remove(filepath.Join(s.dataDir, answerName))
+	s.unmountAnswer(ctx)
 }
 
 func (s *Service) removeAnswerPath(ctx context.Context, path string) {
 	err := os.Remove(path)
 	if err == nil || os.IsNotExist(err) {
+		return
+	}
+	if s.answerMount != "" && s.answerMount != "/" && strings.HasPrefix(path, s.answerMount+"/") {
+		if _, rerr := s.cmd.Run(ctx, "mount", "-o", "remount,rw", s.answerMount); rerr != nil {
+			if s.log != nil {
+				s.log.Warn("could not remove the install answer file", "path", path)
+			}
+			return
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) && s.log != nil {
+			s.log.Warn("could not remove the install answer file", "path", path)
+		}
 		return
 	}
 	if s.efiRoot != "" || !strings.HasPrefix(path, "/efi/") {

@@ -20,11 +20,14 @@ The page has one web-administrator path. When the username and password are both
 
 1. `/efi/feldcore/feldcore-install.json` (the ESP, label `FC-ESP`). A hand copy at `/var/lib/feldcore/feldcore-install.json` is also accepted. The ESP copy wins when both exist.
 2. If neither path has the file and `/dev/disk/by-label/FC-ESP` exists, the daemon mounts that device read-only on `/efi` when it is not already mounted, then reads the ESP path.
-3. The file is copied to `/var/lib/feldcore/feldcore-install.json` mode `0600` and then applied.
+3. If those paths are empty, the daemon scans other attached FAT and exFAT volumes. A volume counts when its disk is removable, its bus is USB, or the filesystem label is `FC-ANSWERS`. On each volume the relative paths are `feldcore/feldcore-install.json` and then `feldcore-install.json`. The first file that exists is the candidate. A file that is not one JSON object of version 1 is an error, and the scan does not skip to another path or volume. Two accepted files is an error, and the message names both devices. Zero files is a normal boot.
+4. The file is copied to `/var/lib/feldcore/feldcore-install.json` mode `0600` and then applied.
+
+`feldcore-install` does this copy itself when it writes a new disk. It looks in the same places before it erases the target, including the Ventoy data partition and a second stick, and writes the bytes to `feldcore/feldcore-install.json` on the new ESP. The source file on that stick is left in place. After a successful apply the daemon deletes the copy it actually read. A delete that fails on a side volume is logged and does not fail the apply. The cleartext warning above still applies to the stick.
 
 A missing file is not an error. `EnsureCode` then prints a random setup code, which is the behaviour without an answer file.
 
-On full success the daemon deletes both copies and writes `/var/lib/feldcore/feldcore-install.applied` mode `0600`. The marker records the file version, the sections that were applied, sections that were skipped, warnings, and notes. It does not record passwords, keys, tokens, or the setup code. A later boot that finds the marker does not apply the file again. It still deletes a leftover JSON copy.
+On full success the daemon deletes the ESP copy, the state copy, and the side-volume file it actually read, then writes `/var/lib/feldcore/feldcore-install.applied` mode `0600`. The marker records the file version, the sections that were applied, sections that were skipped, warnings, and notes. It does not record passwords, keys, tokens, or the setup code. A later boot that finds the marker does not apply the file again. It still deletes a leftover JSON copy.
 
 A section that fails for a reason other than a missing package leaves the JSON in place and writes `feldcore-install.partial` with the sections that finished and the step that failed. The error text is redacted. The next boot tries the file again. Hostname, network, SSH, and WiFi overwrite their own files. `applyAdmin` with `skipTotp: true` succeeds when the administrator already exists, so a retry does not roll the account back and does not require the password again.
 

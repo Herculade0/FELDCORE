@@ -1,0 +1,2 @@
+# USB, SATA, and virtio disks have to be visible before the live root mounts.
+MODULES=most

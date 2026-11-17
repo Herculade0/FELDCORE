@@ -26,6 +26,8 @@ func main() {
 		manifest(os.Args[2:])
 	case "sign":
 		sign(os.Args[2:])
+	case "sign-file":
+		signFile(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -39,8 +41,10 @@ func usage() {
   osmanifest pub -key update.key -pub update.pub
   osmanifest manifest -dir dist/os -version 0.2.0 -notes-file NOTES -out dist/os/feldcore-os.json
   osmanifest sign -key update.key -in dist/os/feldcore-os.json
+  osmanifest sign-file -key update.key -in dist/os/feldcore-installer.iso
 
 The key file is the unencrypted signing secret. Keep it out of the repository.
+sign-file streams the input through BLAKE2b and writes a .minisig beside it.
 `)
 }
 
@@ -147,6 +151,37 @@ func sign(args []string) {
 		die(err)
 	}
 	sig, err := osupdate.Sign(k, filepath.Base(*in), data)
+	if err != nil {
+		die(err)
+	}
+	if err := os.WriteFile(*in+".minisig", sig, 0o644); err != nil {
+		die(err)
+	}
+}
+
+func signFile(args []string) {
+	fs := flag.NewFlagSet("sign-file", flag.ExitOnError)
+	key := fs.String("key", "", "private key file")
+	in := fs.String("in", "", "file to sign")
+	_ = fs.Parse(args)
+	if *key == "" || *in == "" {
+		fmt.Fprintln(os.Stderr, "-key and -in are required")
+		os.Exit(2)
+	}
+	secret, err := os.ReadFile(*key)
+	if err != nil {
+		die(err)
+	}
+	k, err := osupdate.ParsePrivate(string(secret))
+	if err != nil {
+		die(err)
+	}
+	f, err := os.Open(*in)
+	if err != nil {
+		die(err)
+	}
+	defer f.Close()
+	sig, err := osupdate.SignStream(k, filepath.Base(*in), f)
 	if err != nil {
 		die(err)
 	}

@@ -145,40 +145,54 @@ The GPT disk has an EFI system partition (`FC-ESP`), slot A (`feldcore-a`),
 slot B (`feldcore-b`), and the state partition. The first image is written
 to slot A. Slot B is empty until an update is staged.
 
-`os/build.sh` builds the appliance disk, an installer disk, and a signed
-manifest. The default root is debootstrap. `FELDCORE_IMAGE_BUILDER=mkosi`
-builds the same package list from `os/mkosi/mkosi.conf`. Output is `dist/os`
-unless `FELDCORE_OS_OUT` is set:
+`os/build.sh` builds the appliance disk, a raw installer disk, a hybrid
+installer ISO, and a signed manifest. The default root is debootstrap.
+`FELDCORE_IMAGE_BUILDER=mkosi` builds the same package list from
+`os/mkosi/mkosi.conf`. It does not build the ISO. Output is `dist/os` unless
+`FELDCORE_OS_OUT` is set:
 
 | File | What it is |
 |------|------------|
 | `feldcore-os.raw.zst` | Bootable appliance disk (zstd-compressed raw GPT image) |
-| `feldcore-installer.raw.zst` | Bootable installer disk |
+| `feldcore-installer.raw.zst` | Bootable raw installer disk |
+| `feldcore-installer.iso` and `feldcore-installer.iso.minisig` | Hybrid UEFI installer. When the ISO is at or over 2 GiB the release has `feldcore-installer.iso.zst` and its `.minisig` instead. The ISO is not listed in `feldcore-os.json`. |
 | `feldcore-root.img.zst`, `vmlinuz`, `initrd.img` | The slot image, kernel, and initrd an update writes |
 | `feldcore-os.json`, `feldcore-os.json.minisig` | Manifest and its minisign signature |
-| `update.pub` | Public key for that signature |
+| `update.pub` | Public key for that signature and for the ISO signature |
 
-The installer does not install itself onto the disk it booted from. On its
-serial console, `feldcore-install --yes /dev/disk` writes the appliance
-layout onto another whole disk. It refuses a partition, the disk it booted
-from, and any disk that has a mounted filesystem.
+The installer does not install itself onto the disk it booted from.
+`feldcore-install --yes /dev/disk` writes the appliance layout onto another
+whole disk. It refuses a partition, the installer medium, and any disk that
+has a mounted filesystem.
 
 ### Installing it (USB) and unattended setup
 
-Flash `feldcore-os.raw.zst` to a USB stick or disk with
-[balenaEtcher](https://etcher.balena.io/) or `zstd -d` plus `dd`. Boot it and
-the appliance comes up on port 8787; it prints a one-time setup code on the
-console.
+Flash `feldcore-installer.iso` with
+[balenaEtcher](https://etcher.balena.io/), or copy the `.iso` onto a Ventoy
+stick and boot that file. If the release asset is `feldcore-installer.iso.zst`,
+check the signature and decompress it first (`minisign -V -p update.pub -m
+feldcore-installer.iso.zst`, then `zstd -d`). Ventoy does not decompress.
 
-To skip the on-screen setup, drop a `feldcore-install.json` **answer file** onto
-the image's EFI partition at `/efi/feldcore/feldcore-install.json` (the ESP is
-FAT, so Windows, macOS and Linux can all write it after flashing). On its first
-boot — before it starts listening — `feldcored` reads the file once and applies
-each section it finds: hostname, network (including WiFi), the administrator
-account or setup code, SSH, and the data pool. WiFi (`wpasupplicant`) and SSH
-(`openssh-server`) are in the image; `sshd` stays off until the answer file
-turns it on, and it is public-key only (root password locked). A missing
-section is skipped.
+Put `feldcore-install.json` on the Ventoy data partition, or on a second
+FAT or exFAT stick, at `feldcore/feldcore-install.json` or at the volume
+root. Boot the installer. On the console (the HDMI tty on a Mac, or the
+serial console under QEMU):
+
+```
+feldcore-install --yes /dev/disk
+```
+
+Name the other whole disk. The command copies the answer file onto the new
+system's EFI partition. With no answer file, the appliance prints a setup
+code and the browser wizard runs after it boots. The copy on the Ventoy
+partition or the second stick is left in place.
+
+On its first boot — before it starts listening — `feldcored` reads the file
+once and applies each section it finds: hostname, network (including WiFi),
+the administrator account or setup code, SSH, and the data pool. WiFi
+(`wpasupplicant`) and SSH (`openssh-server`) are in the image; `sshd` stays
+off until the answer file turns it on, and it is public-key only (root
+password locked). A missing section is skipped.
 
 > The administrator password, the setup code and the WiFi password sit in
 > **clear text** on the USB. Prefer an SSH key, and delete the file (or wipe the
@@ -187,7 +201,7 @@ section is skipped.
 Build the answer file in your browser with the install form at
 [herculade0.github.io/FELDCORE/install](https://herculade0.github.io/FELDCORE/install/).
 It runs entirely client-side — nothing is uploaded — and downloads a
-`feldcore-install.json` you copy onto the ESP. The schema is in
+`feldcore-install.json` you put on the Ventoy partition or the second stick. The schema is in
 [docs/FELDCORE-INSTALL-ANSWER.md](docs/FELDCORE-INSTALL-ANSWER.md).
 
 A release is a git tag matching `v*`. Pushing the tag runs

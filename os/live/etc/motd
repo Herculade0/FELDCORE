@@ -1,0 +1,11 @@
+FELDCORE installer.
+
+This image does not install itself onto the disk it booted from.
+To write the appliance onto another whole disk:
+
+  feldcore-install --yes /dev/disk
+
+The command refuses the booted disk and any disk with a mounted partition.
+A feldcore-install.json file on another FAT or exFAT volume (the Ventoy
+partition, or a second stick) is copied onto the new system. No answer
+file leaves setup to the browser wizard after the appliance boots.

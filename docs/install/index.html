@@ -497,7 +497,7 @@
   <pre id="preview" hidden></pre>
 
   <h2>Where the file goes</h2>
-  <p>Decompress the image and copy <code>feldcore-install.json</code> onto the EFI partition, volume label <code>FC-ESP</code>, at <code>feldcore/feldcore-install.json</code>. The partition starts 1 MiB into the image this repository builds. Nothing on this page is uploaded.</p>
+  <p>Put <code>feldcore-install.json</code> on the Ventoy data partition, or on a second FAT or exFAT stick, at <code>feldcore/feldcore-install.json</code> or at the volume root. Boot <code>feldcore-installer.iso</code> and run <code>feldcore-install</code>. The installer copies the file onto the new system. Nothing on this page is uploaded.</p>
 </main>
 <script>
 function bytes(s) {

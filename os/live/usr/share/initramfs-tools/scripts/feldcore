@@ -1,0 +1,305 @@
+#!/bin/sh
+# shellcheck shell=dash
+# Feldcore live root			-*- shell-script -*-
+# Mount the installer ISO and its squashfs when the kernel was given boot=feldcore.
+# The appliance image does not pass boot=, so its initramfs still uses scripts/local.
+
+# shellcheck source=/dev/null
+. /scripts/functions
+
+feldcore_log() {
+	echo "feldcore: $*" >/dev/console
+	echo "feldcore: $*"
+}
+
+feldcore_modprobe() {
+	local m
+	for m in squashfs isofs vfat exfat nls_cp437 nls_ascii nls_utf8 usb_storage uas loop; do
+		modprobe "$m" 2>/dev/null || true
+	done
+}
+
+feldcore_whole_disks() {
+	local b name
+	for b in /sys/block/sr*; do
+		[ -e "$b" ] || continue
+		name=${b##*/}
+		echo "/dev/${name}"
+	done
+	for b in /sys/block/*; do
+		[ -d "$b" ] || continue
+		name=${b##*/}
+		case "$name" in
+		sr*|loop*|ram*|dm-*|fd*|nbd*|zram*) continue ;;
+		sd*|vd*|nvme*|mmcblk*) echo "/dev/${name}" ;;
+		esac
+	done
+}
+
+# ls -l is the device identity. stat is not in this initramfs. Ventoy
+# normal mode publishes the ISO twice: the device-mapper node and a
+# partition node with the same major and minor. Those are one image.
+feldcore_devid() {
+	dev=$1
+	line=$(ls -l "$dev" 2>/dev/null || true)
+	[ -n "$line" ] || return 0
+	# shellcheck disable=SC2086
+	set -- $line
+	echo "$5:$6"
+}
+
+# Partitions and device-mapper nodes whose blkid type is iso9660. Ventoy
+# normal mode replaces the VTOYEFI partition node with the ISO, so the
+# installer is not a whole disk and the exFAT partition cannot be opened.
+feldcore_mapped_isos() {
+	local dev fstype
+	# dm nodes first. Ventoy's partition alias is the same image, and the
+	# first device we keep is the one that gets mounted.
+	for dev in /dev/dm-* $(feldcore_partitions) /dev/mapper/*; do
+		[ -b "$dev" ] || continue
+		# /dev/mapper/ventoy is a symlink to the dm node, which is listed too.
+		[ -L "$dev" ] && continue
+		case "$dev" in
+		/dev/mapper/control) continue ;;
+		esac
+		fstype=$(blkid -o value -s TYPE "$dev" 2>/dev/null || true)
+		[ "$fstype" = iso9660 ] || continue
+		echo "$dev"
+	done
+}
+
+feldcore_partitions() {
+	local b name p base
+	for b in /sys/block/*; do
+		[ -d "$b" ] || continue
+		name=${b##*/}
+		case "$name" in
+		loop*|ram*|dm-*|fd*|sr*|nbd*|zram*) continue ;;
+		esac
+		for p in "$b"/"${name}"*; do
+			[ -f "$p/partition" ] || continue
+			base=${p##*/}
+			echo "/dev/${base}"
+		done
+	done
+}
+
+# marker text plus the squashfs length. Ventoy's aliases share both.
+# This initramfs has klibc ls, which always prints a long listing and
+# rejects -l as a filename. It has no stat, no wc, and no cp.
+feldcore_image_id() {
+	dev=$1
+	mnt=/run/feldcore/idprobe
+	mkdir -p "$mnt"
+	if ! mount -o ro -t iso9660 "$dev" "$mnt" >/dev/null 2>&1; then
+		return 1
+	fi
+	marker=""
+	IFS= read -r marker <"$mnt/feldcore/installer.marker" || true
+	# -rw-r--r-- 1 uid gid SIZE path
+	# shellcheck disable=SC2046,SC2086
+	set -- $(ls "$mnt/live/filesystem.squashfs" 2>/dev/null || true)
+	sz=$5
+	umount "$mnt" >/dev/null 2>&1 || true
+	case "$sz" in
+	''|*[!0-9]*) return 1 ;;
+	esac
+	[ -n "$marker" ] || return 1
+	echo "${marker}:${sz}"
+}
+
+# Leave the probe mounted when the marker is present. The caller unmounts it.
+feldcore_try_iso() {
+	dev=$1
+	mnt=$2
+	[ -b "$dev" ] || return 1
+	mkdir -p "$mnt"
+	if ! mount -o ro -t iso9660 "$dev" "$mnt" 2>/dev/null; then
+		return 1
+	fi
+	if [ -f "$mnt/feldcore/installer.marker" ]; then
+		return 0
+	fi
+	umount "$mnt" 2>/dev/null || true
+	return 1
+}
+
+# Primary volume descriptor: bytes 1-5 are CD001, bytes 40-71 are FELDCORE.
+feldcore_pvd_ok() {
+	iso=$1
+	pvd=/run/feldcore/pvd
+	mkdir -p /run/feldcore
+	dd if="$iso" of="$pvd" bs=2048 skip=16 count=1 2>/dev/null || return 1
+	id=$(dd if="$pvd" bs=1 skip=1 count=5 2>/dev/null || true)
+	[ "$id" = "CD001" ] || return 1
+	vol=$(dd if="$pvd" bs=1 skip=40 count=32 2>/dev/null || true)
+	want=$(printf '%-32s' 'FELDCORE')
+	[ "$vol" = "$want" ]
+}
+
+feldcore_count() {
+	file=$1
+	n=0
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		n=$((n + 1))
+	done <"$file"
+	echo "$n"
+}
+
+feldcore_panic_matches() {
+	title=$1
+	file=$2
+	feldcore_log "$title"
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		feldcore_log "  $line"
+	done <"$file"
+	panic "feldcore: refusing to guess which installer image to boot"
+}
+
+feldcore_umount_hosts() {
+	local d
+	for d in /run/feldcore/h*; do
+		[ -d "$d" ] || continue
+		umount "$d" 2>/dev/null || true
+	done
+}
+
+mountroot() {
+	feldcore_modprobe
+	if type wait_for_udev >/dev/null 2>&1; then
+		wait_for_udev 10 || true
+	fi
+	udevadm settle --timeout=10 2>/dev/null || true
+	mkdir -p /run/feldcore
+
+	found=""
+	attempt=0
+	while [ "$attempt" -lt 30 ]; do
+		matches=/run/feldcore/matches
+		: >"$matches"
+		probe=/run/feldcore/probe
+		mkdir -p "$probe"
+		seen=""
+		for dev in $(feldcore_whole_disks) $(feldcore_mapped_isos); do
+			id=$(feldcore_devid "$dev")
+			if [ -n "$id" ]; then
+				case " $seen " in
+				*" $id "*) continue ;;
+				esac
+				seen="$seen $id"
+			fi
+			if feldcore_try_iso "$dev" "$probe"; then
+				echo "$dev" >>"$matches"
+				umount "$probe" 2>/dev/null || true
+			fi
+		done
+		count=$(feldcore_count "$matches")
+		# Ventoy publishes one ISO through several device nodes. They share
+		# the marker text and the squashfs size. Two different images still
+		# panic. This initramfs has no grep and no stat.
+		if [ "$count" -gt 1 ]; then
+			kept=/run/feldcore/kept
+			: >"$kept"
+			idents=""
+			while IFS= read -r dev; do
+				[ -n "$dev" ] || continue
+				[ -L "$dev" ] && continue
+				ident=$(feldcore_image_id "$dev") || continue
+				case " $idents " in
+				*" $ident "*) continue ;;
+				esac
+				idents="$idents $ident"
+				echo "$dev" >>"$kept"
+			done <"$matches"
+			# cp is not in this initramfs.
+			: >"$matches"
+			while IFS= read -r dev; do
+				[ -n "$dev" ] || continue
+				echo "$dev" >>"$matches"
+			done <"$kept"
+			count=$(feldcore_count "$matches")
+		fi
+		if [ "$count" -gt 1 ]; then
+			feldcore_panic_matches "more than one installer medium:" "$matches"
+		fi
+		if [ "$count" -eq 1 ]; then
+			IFS= read -r dev <"$matches"
+			mkdir -p /run/feldcore/medium
+			if ! mount -o ro -t iso9660 "$dev" /run/feldcore/medium; then
+				panic "feldcore: found ${dev} but could not mount it"
+			fi
+			found=1
+			break
+		fi
+
+		feldcore_umount_hosts
+		filematches=/run/feldcore/filematches
+		: >"$filematches"
+		n=0
+		for part in $(feldcore_partitions); do
+			fstype=$(blkid -o value -s TYPE "$part" 2>/dev/null || true)
+			case "$fstype" in
+			vfat|exfat) ;;
+			*) continue ;;
+			esac
+			n=$((n + 1))
+			hostmnt=/run/feldcore/h${n}
+			mkdir -p "$hostmnt"
+			if ! mount -o ro -t "$fstype" "$part" "$hostmnt" 2>/dev/null; then
+				continue
+			fi
+			matched=0
+			for iso in "$hostmnt"/feldcore-installer*.iso; do
+				[ -f "$iso" ] || continue
+				if feldcore_pvd_ok "$iso"; then
+					echo "$iso" >>"$filematches"
+					matched=1
+				fi
+			done
+			if [ "$matched" -eq 0 ]; then
+				umount "$hostmnt" 2>/dev/null || true
+			fi
+		done
+		fcount=$(feldcore_count "$filematches")
+		if [ "$fcount" -gt 1 ]; then
+			feldcore_panic_matches "more than one installer image:" "$filematches"
+		fi
+		if [ "$fcount" -eq 1 ]; then
+			IFS= read -r iso <"$filematches"
+			modprobe loop 2>/dev/null || true
+			loopdev=$(losetup -f --show "$iso") || panic "feldcore: losetup failed for ${iso}"
+			mkdir -p /run/feldcore/medium
+			if ! mount -o ro -t iso9660 "$loopdev" /run/feldcore/medium; then
+				panic "feldcore: could not mount ${iso}"
+			fi
+			found=1
+			break
+		fi
+		feldcore_umount_hosts
+		attempt=$((attempt + 1))
+		sleep 2
+		udevadm settle --timeout=5 2>/dev/null || true
+	done
+
+	if [ -z "$found" ]; then
+		panic "feldcore: the installer image was not found"
+	fi
+	if [ ! -f /run/feldcore/medium/live/filesystem.squashfs ]; then
+		panic "feldcore: the installer image has no live filesystem"
+	fi
+	# rootmnt is set by initramfs-tools before it calls mountroot.
+	# shellcheck disable=SC2154
+	mkdir -p "${rootmnt}"
+	if ! mount -o ro -t squashfs /run/feldcore/medium/live/filesystem.squashfs "${rootmnt}"; then
+		panic "feldcore: could not mount the live filesystem"
+	fi
+	# initramfs-tools moves /run onto ${rootmnt}/run after mountroot returns.
+	# A mount placed on ${rootmnt}/run beforehand would be covered by that
+	# move. Keeping the medium on the initramfs /run lands it at
+	# /run/feldcore/medium after switch_root, which is where feldcore-install
+	# reads the payload.
+	mkdir -p "${rootmnt}/run" 2>/dev/null || true
+	feldcore_log "live root mounted"
+}

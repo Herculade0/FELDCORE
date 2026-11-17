@@ -85,14 +85,15 @@ The script builds `feldcored` with `CGO_ENABLED=0` and the embedded web UI, copi
 | File | Role |
 | --- | --- |
 | `feldcore-os.raw.zst` | Bootable appliance disk. |
-| `feldcore-installer.raw.zst` | Bootable installer disk. |
+| `feldcore-installer.raw.zst` | Bootable raw installer disk. |
+| `feldcore-installer.iso` | Hybrid UEFI installer. Published with `feldcore-installer.iso.minisig`. If the ISO is at or over 2 GiB, the release has `feldcore-installer.iso.zst` and its `.minisig` instead, and both sizes are printed if neither fits. The ISO is not a field in `feldcore-os.json`. |
 | `feldcore-root.img.zst` | The slot image an update writes. |
 | `vmlinuz`, `initrd.img` | The kernel and initrd an update copies to the ESP. |
 | `feldcore-os.json` | The signed manifest. |
 | `feldcore-os.json.minisig` | Its minisign signature. |
 | `update.pub` | The matching public key. |
 
-GitHub release assets have a 2 GiB limit. The published files are zstd, not the raw disks. The raw disks are sparse and mostly empty, so the compressed files are the size of the root filesystem.
+GitHub release assets have a 2 GiB limit. The raw disks are zstd. The installer ISO is published as itself when it is under 2 GiB, and as `feldcore-installer.iso.zst` when only the compressed file fits.
 
 ## Signed manifest
 
@@ -102,6 +103,7 @@ GitHub release assets have a 2 GiB limit. The published files are zstd, not the 
 go run ./cmd/osmanifest genkey -pub update.pub -key update.key
 go run ./cmd/osmanifest manifest -dir dist/os -version 0.1.0 -notes-file NOTES -kernel 6.12.0 -out dist/os/feldcore-os.json
 go run ./cmd/osmanifest sign -key update.key -in dist/os/feldcore-os.json
+go run ./cmd/osmanifest sign-file -key update.key -in dist/os/feldcore-installer.iso
 go run ./cmd/osmanifest pub -key update.key -pub update.pub
 ```
 
@@ -167,17 +169,27 @@ NVIDIA, the container toolkit, and libvirt are the examples the manager is meant
 
 ## Installer
 
-`feldcore-installer.raw.zst` is a second disk, not a USB-stick OS. It uses the same systemd-boot setup. Slot A is the installer system. A `feldcore-payload` partition holds the zstd root image, the kernel, the initrd, and `systemd-bootx64.efi`.
+`feldcore-installer.iso` is the installer to flash or to drop on Ventoy. It is ISO 9660, with a real GPT whose EFI system partition is the same FAT image El Torito boots. The ESP label is `FC-ISOEFI`, never `FC-ESP`. GRUB on that ESP loads a small live system (`boot=feldcore`) and the live initrd mounts `live/filesystem.squashfs`. The appliance payload is `/payload` on that ISO: the slot image, the appliance kernel and initrd, `systemd-bootx64.efi`, and the text files the installer reads for version and partition size.
 
-The installer root unlocks a serial autologin so the command can be typed. The appliance image does not. On the serial console:
+`os/build.sh` writes it with xorriso after the raw installer image. The documented xorriso command is tried first. xorriso 1.5.6 rejects `-appended_gpt_with_gaps` and needs `-apm-block-size 2048` plus a bless type before it will combine HFS+ with that GPT. The build then tries those flags, and if that is also rejected it ships the GPT and El Torito image without an HFS+ volume. The HFS+ file names (`System/Library/CoreServices/boot.efi`, `SystemVersion.plist`, an empty `mach_kernel`) are in the ISO tree either way. The layout that was written is `feldcore-installer.iso.layout` in the work directory.
+
+The live image autologins root on tty1 and on ttyS0. The appliance image does not gain a tty1 autologin. On the console:
 
 ```
-feldcore-install --yes /dev/vdb
+feldcore-install --yes /dev/disk
 ```
 
-The command requires `--yes` and a whole disk. It refuses the disk the installer booted from and any disk that has a mounted partition. It writes only the named device: ESP, slot A, slot B, and the state partition. Slot A receives the payload image. The boot entry is `feldcore-a+3.conf`.
+The command requires `--yes` and a whole disk. It refuses the installer medium and any disk that has a mounted partition. Before it erases the target it looks for `feldcore-install.json` on another FAT or exFAT volume: `feldcore/feldcore-install.json`, then the same name at the volume root. A volume counts when its disk is removable, its bus is USB, or its filesystem label is `FC-ANSWERS`. FAT stores 11 characters and exFAT stores 15, so the longer label in the design cannot be written with `mkfs.vfat` or `mkfs.exfat`. A Ventoy data partition and a second stick both count. The bytes are copied to `feldcore/feldcore-install.json` on the new ESP. No file is a normal install: the appliance prints a setup code and the browser wizard runs. The source file is left on the stick.
 
-`feldcore.install=/dev/vdb` on the kernel command line runs the same command once at boot. Without that argument the service exits and the installer waits.
+`feldcore-installer.raw.zst` is still built and published. It is the same payload and the same `feldcore-install` script on a systemd-boot disk, with a serial autologin and a `feldcore-payload` partition. `feldcore.install=/dev/disk` on its kernel command line runs the install once at boot. It stays on the release until the Mac mini checklist below has been done on a published ISO.
+
+Check the ISO with the same public key as the manifest:
+
+```
+minisign -V -p update.pub -m feldcore-installer.iso
+```
+
+When the asset is the zstd wrapper, `-m` names that `.iso.zst` file. Decompress only after the signature verifies.
 
 ## GitHub Actions
 
@@ -208,9 +220,37 @@ On the image built from this tree, that guest marker appeared and the host recei
 These parts were not run end to end on that boot:
 
 - The bless unit was not checked afterwards. The guest was stopped when the smoke marker appeared, so the ESP was not inspected for the stable `feldcore-a.conf` rename.
-- The installer disk was assembled and was not booted, and `feldcore-install` was not pointed at a second disk.
+- The raw installer disk was assembled. The ISO boot, the answer-file copy, and Ventoy are covered by `os/iso-test.sh` and `os/ventoy-test.sh` when those scripts have been run. The result of the run that added the ISO is recorded below.
 - The booted root was built with debootstrap. `mkosi` was not used for that boot.
 - A libvirt guest was not started. The sysext was built and is in the manifest; it was not merged in the QEMU guest.
 - The NVIDIA toolkit sysext was built from NVIDIA's apt repository. The proprietary driver was not downloaded, and no GPU was present in the guest.
 - Secure Boot stayed off.
-- The image ships an empty `/etc/machine-id`. That boot was not used to check that systemd filled the file in.
+
+### Installer ISO
+
+`os/iso-test.sh` and `os/ventoy-test.sh` were run on a tiny payload (`root-mib` 64, `state-mib` 32) built by the same `assemble_iso` path as a release. QEMU 8.2.2 used `OVMF_CODE_4M.fd`. This environment has no usable `/dev/kvm`, so the guest CPU was TCG `qemu64`. `os/boot-test.sh` was left unchanged and was not run again. The full appliance image was not rebuilt here. CI builds that image and then runs these two scripts; the answer-file target disk in `os/iso-test.sh` follows the payload's partition sizes, which is about 21 GB for the default 6144 MiB root and 8192 MiB state.
+
+xorriso 1.5.6 wrote the layout word `hfs`. It rejects `-appended_gpt_with_gaps`. The HFS+ attempt, with `-apm-block-size 2048` and `-hfs-bless-by i`, is the image that booted. The GPT still has an EFI system partition labeled `FC-ISOEFI`, El Torito is one UEFI no-emulation image, and the volume id is `FELDCORE`.
+
+`os/iso-test.sh` passed:
+
+- The answer-file checker accepts version `1` and `1.0` and rejects a second value, an array, and version 2.
+- CD boot (`-cdrom`) reached the motd `FELDCORE installer.` and a root shell on ttyS0.
+- The ISO written onto a disk 1 GiB larger booted, and `sgdisk -v` reported the backup header short of the end of that disk.
+- A second disk labeled `FC-ANSWERS` supplied `feldcore/feldcore-install.json`. The installer copied it to `feldcore/feldcore-install.json` on the new ESP and the bytes matched. The live root did not apply the file.
+- Two accepted answer files made `feldcore-install --yes` exit 1 with `more than one install answer file`. The target disk's sha256 was unchanged and no `FC-ESP` or `feldcore-a` partition was created.
+
+`os/ventoy-test.sh` passed with Ventoy 1.1.18. `VTOY_MENU_TIMEOUT` opens a mode menu and waits, so the test sends Enter. Normal mode is the first line. The GRUB2 boot sends Down, then Enter, and the image name is `feldcore-installer_VTGRUB2.iso`.
+
+Ventoy 1.1.18 sets `rdinit=/vtoy/vtoy` and then runs this ISO's `/boot/grub/grub.cfg` from its own GRUB 2.04. In normal mode it first tries to chainload its EFI helper. That helper prints `cannot load image` and `you need to load the kernel first` for this hybrid ISO, and Ventoy falls through to the configfile path. GRUB2 mode skips that chain. Both paths mounted the live root and reached the same motd. The initrd treats Ventoy's extra iso9660 nodes (the device-mapper image, the partition alias, and `/dev/mapper/ventoy`) as one image when the marker line and the squashfs length match.
+
+The ISO was not signed in this run. `cmd/osmanifest sign-file` streams the file through `SignStream`, and `TestSignStream` covers that path. A release signs whichever of `feldcore-installer.iso` and `feldcore-installer.iso.zst` is under 2 GiB.
+
+These four steps still have to be done by a person on a Late 2012 Mac mini (Macmini6,1). They are not done. The FAT ESP is not a substitute for the HFS+ bless, and `feldcore-installer.raw.zst` stays on the release, until that result is written into `docs/FELDCORE-INSTALLER-ISO.md`:
+
+1. Etcher-flash the published asset. Option-boot the Mac mini. The stick is listed as EFI Boot, or under the name from `SystemVersion.plist`, and it reaches the tty1 motd and a root shell. If the stick never appears, retry through a USB 2 hub before changing the image.
+2. Copy the `.iso` onto a Ventoy stick (decompress first when the asset is `.iso.zst`) and write `feldcore/feldcore-install.json` on that same partition. Option-boot, choose the ISO, and reach the installer without mounting the installer ESP.
+3. Run `feldcore-install --yes` on the internal whole disk. Power off, remove the USB, Option-boot. The internal disk is listed and the appliance answers on port 8787. If the internal disk is absent, stop and do the HFS+ ESP follow-up. Do not bless the disk by hand and call the FAT layout done.
+4. The hostname or SSH access matches the JSON from step 2, and `/var/lib/feldcore/feldcore-install.applied` exists. The source file is still on the Ventoy partition unless someone deleted it.
+
+The image ships an empty `/etc/machine-id`. That boot was not used to check that systemd filled the file in.
