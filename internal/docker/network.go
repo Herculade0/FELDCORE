@@ -13,6 +13,16 @@ import (
 // on other networks unless they are linked.
 const AppNetworkPrefix = "feldcore-app-"
 
+// StackNetworkPrefix is the bridge created for one Compose stack.
+// Every service that does not name its own network joins it, so the stack
+// can talk to itself and cannot reach other stacks or lone containers.
+// The full name is the prefix plus the stack name, for example
+// feldcore-stack-media.
+const StackNetworkPrefix = "feldcore-stack-"
+
+// StackLabel marks a container that a FELDCORE stack deployed.
+const StackLabel = "feldcore.stack"
+
 // Isolation is how a container sits relative to other apps.
 const (
 	// IsolatePrivate gives the container its own bridge. This is the default
@@ -31,6 +41,15 @@ const (
 // AppNetwork is the private bridge name for a container.
 func AppNetwork(name string) string {
 	return AppNetworkPrefix + name
+}
+
+// StackNetwork is the private bridge name for a Compose stack.
+func StackNetwork(name string) string {
+	return StackNetworkPrefix + name
+}
+
+func isStackNetwork(network string) bool {
+	return strings.HasPrefix(network, StackNetworkPrefix)
 }
 
 func isAppNetwork(network, name string) bool {

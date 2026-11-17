@@ -69,6 +69,7 @@ export default function WebAddresses() {
   };
 
   return (
+    <div id="settings-web">
     <Card>
       <CardTitle icon={Globe} title="Web addresses" hint={view?.status === "up" ? "Caddy is running" : "Nothing published"} />
       <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
@@ -156,5 +157,6 @@ export default function WebAddresses() {
         </div>
       </div>
     </Card>
+    </div>
   );
 }

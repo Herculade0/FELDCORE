@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../lib/api";
+import { asBrand, BrandFields, emptyBrand, type SignInBrand } from "../citizen/SignInBrand";
 import { Alert, Button, SelectField, TextField, Toggle } from "../form";
 
 interface PublishFormData {
@@ -13,6 +14,7 @@ interface PublishFormData {
   port: number;
   access: string;
   groups: string[];
+  brand?: SignInBrand;
   tunnelMode: string;
   from: string;
 }
@@ -41,6 +43,7 @@ export default function PublishForm({
   const [port, setPort] = useState("");
   const [access, setAccess] = useState("public");
   const [groups, setGroups] = useState("");
+  const [brand, setBrand] = useState<SignInBrand>(emptyBrand);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,6 +55,7 @@ export default function PublishForm({
     setPort(String(d.port || d.suggestion.port || ""));
     setAccess(d.access || "public");
     setGroups((d.groups ?? []).join(", "));
+    setBrand(asBrand(d.brand));
   };
 
   useEffect(() => {
@@ -78,6 +82,7 @@ export default function PublishForm({
               .split(",")
               .map((g) => g.trim())
               .filter(Boolean),
+            brand,
           },
         },
       );
@@ -165,7 +170,7 @@ export default function PublishForm({
             value={access}
             onChange={(e) => setAccess(e.target.value)}
             disabled={!enabled}
-            hint="public / signed-in / groups / admins. Stored now. Citizen ID enforces it when that package is connected; until then protection still runs and the request is allowed."
+            hint="public / signed-in / groups / admins. Citizen ID enforces this on the published name."
           >
             {ACCESS.map(([value, label]) => (
               <option key={value} value={value}>
@@ -181,7 +186,7 @@ export default function PublishForm({
               onChange={(e) => setGroups(e.target.value)}
               disabled={!enabled}
               placeholder="family, kids"
-              hint="Citizen ID group names, separated by commas. Stored now, not enforced yet."
+              hint="Citizen ID group names, separated by commas."
               autoCapitalize="none"
               spellCheck={false}
             />
@@ -192,6 +197,12 @@ export default function PublishForm({
               : "When the name is public and Remote access is on, the Cloudflare Tunnel hostname is created and removed with this switch."}{" "}
             Home-network names such as {data.suggestion.subdomain}.home.arpa use the local certificate and skip the tunnel.
           </p>
+          <BrandFields
+            value={brand}
+            onChange={setBrand}
+            previewHost={preview}
+            hint="Shown on this app's sign-in page. Blank fields use the Citizen ID defaults."
+          />
           <div className="flex justify-end">
             <Button type="button" variant="primary" loading={busy} onClick={() => void save()}>
               {enabled ? "Publish" : "Save"}

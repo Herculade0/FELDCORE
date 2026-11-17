@@ -89,12 +89,15 @@ type Container struct {
 	Status     string   `json:"status"` // human text, e.g. "Up 3 hours"
 	Created    int64    `json:"created"`
 	Ports      []Port   `json:"ports"`
-	Managed    bool     `json:"managed"`        // created by FELDCORE
-	Compose    bool     `json:"compose"`        // owned by Docker Compose
-	GPU        bool     `json:"gpu"`            // has GPU access granted by FELDCORE
-	WebURL     string   `json:"webUrl"`         // best guess at a browser URL, if any
-	Icon       string   `json:"icon,omitempty"` // http(s) icon, when the container has one
-	Network    string   `json:"network"`        // network name(s)
+	Managed    bool     `json:"managed"`           // created by FELDCORE
+	Compose    bool     `json:"compose"`           // owned by Docker Compose
+	Stack      string   `json:"stack,omitempty"`   // FELDCORE stack name, when one deployed it
+	Project    string   `json:"project,omitempty"` // Compose project name
+	Service    string   `json:"service,omitempty"` // Compose service name
+	GPU        bool     `json:"gpu"`               // has GPU access granted by FELDCORE
+	WebURL     string   `json:"webUrl"`            // best guess at a browser URL, if any
+	Icon       string   `json:"icon,omitempty"`    // http(s) icon, when the container has one
+	Network    string   `json:"network"`           // network name(s)
 	Isolated   bool     `json:"isolated,omitempty"`
 	IPs        []string `json:"ips"` // address(es) the container answers on
 	VPN        string   `json:"vpn,omitempty"`

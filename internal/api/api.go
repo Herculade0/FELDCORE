@@ -20,8 +20,11 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/citizenid"
+	"github.com/Herculade0/feldcore/internal/compose"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/files"
+	"github.com/Herculade0/feldcore/internal/health"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/osupdate"
@@ -31,6 +34,8 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
+	"github.com/Herculade0/feldcore/internal/storage"
+	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/vm"
 	"github.com/Herculade0/feldcore/internal/vpn"
@@ -41,6 +46,7 @@ type Deps struct {
 	System     *system.Collector
 	Sampler    *system.Sampler
 	Auth       *auth.Service
+	Citizen    *citizenid.Gateway
 	Shares     *shares.Manager
 	Docker     *docker.Manager
 	Apps       *apps.Service
@@ -57,6 +63,13 @@ type Deps struct {
 	Mail       *notify.Service
 	Publish    *publish.Service
 	OS         *osupdate.Service
+	// DataDir and SharesRoot enable Compose stacks. Tests that leave DataDir
+	// empty keep the previous API and get 404 for /stacks.
+	DataDir    string
+	SharesRoot string
+	Storage    *storage.Service
+	Health     *health.Service
+	Alerts     *notify.Dispatcher
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -64,6 +77,7 @@ type Server struct {
 	sys        *system.Collector
 	sampler    *system.Sampler
 	auth       *auth.Service
+	citizen    *citizenid.Gateway
 	shares     *shares.Manager
 	docker     *docker.Manager
 	apps       *apps.Service
@@ -80,22 +94,67 @@ type Server struct {
 	vpn        *vpn.Service
 	backups    *backup.Service
 	mail       *notify.Service
+	health     *health.Service
+	alerts     *notify.Dispatcher
 	uploads    *files.Uploads
 	fetcher    *files.Fetcher
 	installs   *install.Runner
 	publish    *publish.Service
 	os         *osupdate.Service
+	stacks     *compose.Service
+	storage    *storage.Service
 }
 
 // New returns a Server.
 func New(d Deps) *Server {
 	s := &Server{
-		sys: d.System, sampler: d.Sampler, auth: d.Auth, shares: d.Shares,
+		sys: d.System, sampler: d.Sampler, auth: d.Auth, citizen: d.Citizen, shares: d.Shares,
 		docker: d.Docker, apps: d.Apps, vms: d.VMs, wiz: d.Setup,
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
-		os: d.OS,
+		os:      d.OS,
+		storage: d.Storage,
+		health:  d.Health, alerts: d.Alerts,
+	}
+	if d.Backups != nil && d.Auth != nil {
+		b, a := d.Backups, d.Auth
+		b.Audit = func(actor, tokenID, action, target, result string) {
+			if err := a.Record(tokenID, store.AuditEvent{
+				TokenName: actor, Action: action, Target: clip(target, 200), Result: result,
+			}); err != nil && d.Log != nil {
+				d.Log.Warn("audit log write failed", "err", err)
+			}
+		}
+	}
+	if d.DataDir != "" {
+		dataDir, sharesRoot := d.DataDir, d.SharesRoot
+		s.stacks = compose.New(compose.Deps{
+			DataDir: dataDir, SharesRoot: sharesRoot, Log: d.Log,
+			Paths: func() compose.PathInfo {
+				info := compose.PathInfo{SharesRoot: sharesRoot}
+				if s.shares != nil {
+					info.Shares = map[string]string{}
+					for _, f := range s.shares.Folders() {
+						info.Shares[strings.ToLower(f.Name)] = f.Path
+					}
+				}
+				return info
+			},
+			Inspect: func(ctx context.Context, id string) (docker.SpecInfo, error) {
+				if s.docker == nil {
+					return docker.SpecInfo{}, &docker.OpError{Msg: "Docker is not available."}
+				}
+				return s.docker.Spec(ctx, id)
+			},
+			Remove: func(ctx context.Context, id string) error {
+				if s.docker == nil {
+					return &docker.OpError{Msg: "Docker is not available."}
+				}
+				_, err := s.docker.Remove(ctx, id, true, false)
+				return err
+			},
+		})
 	}
 	s.uploads = files.NewUploads()
 	s.fetcher = files.NewFetcher(func() bool {
@@ -106,6 +165,10 @@ func New(d Deps) *Server {
 	})
 	s.fetcher.OnSettle = s.settleFetch
 	s.wireInstalls()
+	if s.storage != nil {
+		s.storage.SetAudit(s.auditStorage)
+		s.storage.AttachJobs(s.installs)
+	}
 	s.initMCP()
 	return s
 }
@@ -130,6 +193,33 @@ func (s *Server) Router() http.Handler {
 			r.Post("/auth/setup", s.handleAuthSetup)
 			r.Post("/auth/login", s.handleAuthLogin)
 			r.Post("/auth/logout", s.handleAuthLogout)
+			r.Get("/citizen/brand", s.handleCitizenBrand)
+			r.Post("/citizen/login", s.handleCitizenLogin)
+			r.Post("/citizen/logout", s.handleCitizenLogout)
+			r.Post("/citizen/webauthn/login/begin", s.handlePasskeyLoginBegin)
+			r.Post("/citizen/webauthn/login/finish", s.handlePasskeyLoginFinish)
+		})
+
+		// Signed-in people, including accounts that are not the administrator.
+		r.Group(func(r chi.Router) {
+			r.Use(short)
+			r.Use(s.requireUser)
+			r.Get("/launcher", s.handleLauncher)
+			r.Get("/citizen/me", s.handleCitizenMe)
+			r.Post("/citizen/totp/begin", s.handleTOTPBegin)
+			r.Post("/citizen/totp/confirm", s.handleTOTPConfirm)
+			r.Post("/citizen/webauthn/register/begin", s.handlePasskeyRegisterBegin)
+			r.Post("/citizen/webauthn/register/finish", s.handlePasskeyRegisterFinish)
+			r.Delete("/citizen/passkeys/{id}", s.handlePasskeyDelete)
+		})
+
+		// The wizard is open until an administrator exists, and then only
+		// with a session or an admin-scoped token. It stays outside the
+		// short timeout because a disk step can take a while.
+		r.Group(func(r chi.Router) {
+			r.Use(s.wizardAccess)
+			r.Get("/setup/wizard", s.handleWizardStatus)
+			r.Post("/setup/wizard", s.handleWizard)
 		})
 
 		// Everything else needs a signed-in session or a scoped agent token.
@@ -150,7 +240,6 @@ func (s *Server) Router() http.Handler {
 			// The catalogue is about 20MB; a refresh must not sit under the
 			// short request timeout.
 			r.Post("/apps/refresh", s.handleAppsRefresh)
-			r.Post("/setup/wizard", s.handleWizard)
 			r.Put("/settings/services", s.handleSettingsService)
 			r.Put("/settings/updates", s.handleSettingsUpdates)
 			r.Put("/vpn", s.handleVPNEnabled)
@@ -159,7 +248,22 @@ func (s *Server) Router() http.Handler {
 			r.Post("/vpn/tunnels/{id}/enabled", s.handleVPNTunnelEnabled)
 			r.Post("/backups/test", s.handleBackupsTest)
 			r.Post("/backups/run", s.handleBackupsRun)
+			r.Get("/backup", s.handleBackupOverview)
+			r.Get("/backup/jobs", s.handleBackupJobs)
+			r.Get("/backup/jobs/{id}", s.handleBackupJob)
+			r.Post("/backup/destinations", s.handleBackupCreate)
+			r.Put("/backup/destinations/{id}", s.handleBackupUpdate)
+			r.Delete("/backup/destinations/{id}", s.handleBackupDelete)
+			r.Post("/backup/destinations/{id}/test", s.handleBackupTest)
+			r.Post("/backup/destinations/{id}/run", s.handleBackupRun)
+			r.Post("/backup/destinations/{id}/check", s.handleBackupCheck)
+			r.Post("/backup/destinations/{id}/password", s.handleBackupPassword)
+			r.Get("/backup/destinations/{id}/snapshots", s.handleBackupSnapshots)
+			r.Get("/backup/destinations/{id}/snapshots/{snap}/files", s.handleBackupFiles)
+			r.Post("/backup/restore", s.handleBackupRestore)
 			r.Post("/notifications/test", s.handleNotificationsTest)
+			r.Post("/notifications/channels/{id}/test", s.handleNotifyChannelTest)
+			r.Post("/health/check", s.handleHealthCheck)
 			// Defining a domain and the VNC console are not short requests.
 			r.Post("/vms", s.handleVMCreate)
 			r.Put("/vms/{name}", s.handleVMUpdate)
@@ -175,12 +279,31 @@ func (s *Server) Router() http.Handler {
 			r.Post("/docker/containers/{id}/snapshots", s.handleSnapshotCreate)
 			r.Post("/docker/containers/{id}/snapshots/{snap}/restore", s.handleSnapshotRestore)
 			r.Put("/snapshots", s.handleSnapshotSettings)
+			// Disk inventory runs smartctl, and creating a pool formats disks.
+			// Both can outlive the short request timeout.
+			r.Get("/storage", s.handleStorage)
+			r.Get("/storage/disks", s.handleStorageDisks)
+			r.Post("/storage/pools", s.handlePoolCreate)
+			r.Post("/storage/pools/{name}/mount", s.handlePoolMount)
+			r.Post("/storage/pools/{name}/unmount", s.handlePoolUnmount)
+			r.Post("/storage/pools/{name}/destroy", s.handlePoolDestroy)
+			r.Post("/storage/pools/{name}/disks", s.handlePoolAddDisk)
+			r.Post("/storage/pools/{name}/replace", s.handlePoolReplace)
+			r.Post("/storage/pools/{name}/jobs", s.handlePoolJob)
+			r.Put("/storage/pools/{name}/schedule", s.handlePoolSchedule)
+			r.Put("/storage/spindown", s.handleSpinDown)
+			r.Post("/storage/spindown", s.handleSpinDownNow)
+			r.Post("/storage/cache", s.handleStorageCache)
+			r.Put("/storage/shares/{share}", s.handleStorageShare)
+
 			// File downloads, archives and upload chunks can outlive the short timeout.
 			r.Get("/shares/{name}/files/content", s.handleFileContent)
 			r.Head("/shares/{name}/files/content", s.handleFileContent)
 			r.Post("/shares/{name}/files/zip", s.handleFileZip)
 			r.Post("/shares/{name}/uploads", s.handleUploadCreate)
 			r.Patch("/shares/{name}/uploads/{id}", s.handleUploadPatch)
+			// Cloning a repository can take longer than the short timeout.
+			r.Post("/stacks/import", s.handleStackImport)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -212,8 +335,6 @@ func (s *Server) Router() http.Handler {
 
 				r.Get("/fs/suggest", s.handleFSSuggest)
 
-				r.Get("/setup/wizard", s.handleWizardStatus)
-
 				r.Get("/apps", s.handleApps)
 				r.Get("/apps/{id}", s.handleAppSpec)
 
@@ -237,6 +358,16 @@ func (s *Server) Router() http.Handler {
 				r.Put("/backups", s.handleBackupsSave)
 				r.Get("/notifications", s.handleNotifications)
 				r.Put("/notifications", s.handleNotificationsSave)
+				r.Post("/notifications/channels", s.handleNotifyChannelSave)
+				r.Delete("/notifications/channels/{id}", s.handleNotifyChannelDelete)
+				r.Put("/notifications/routes", s.handleNotifyRoutes)
+				r.Put("/notifications/policy", s.handleNotifyPolicy)
+				r.Get("/notifications/inbox", s.handleNotifyInbox)
+				r.Post("/notifications/inbox/read", s.handleNotifyInboxRead)
+				r.Get("/health/status", s.handleHealthReport)
+				r.Get("/health/history", s.handleHealthHistory)
+				r.Get("/health/thresholds", s.handleHealthThresholds)
+				r.Put("/health/thresholds", s.handleHealthThresholdsSave)
 				r.Get("/vms", s.handleVMs)
 				r.Get("/vms/host", s.handleVMHost)
 				r.Get("/vms/settings", s.handleVMSettings)
@@ -289,6 +420,19 @@ func (s *Server) Router() http.Handler {
 				r.Post("/os/reboot", s.handleOSReboot)
 
 				r.Get("/audit", s.handleAudit)
+				r.Get("/help", s.handleHelp)
+				r.Get("/citizen", s.handleCitizenDirectory)
+				r.Post("/citizen/users", s.handleCitizenUserCreate)
+				r.Put("/citizen/users/{id}", s.handleCitizenUserUpdate)
+				r.Post("/citizen/users/{id}/password", s.handleCitizenPassword)
+				r.Post("/citizen/users/{id}/totp/reset", s.handleCitizenTOTPReset)
+				r.Delete("/citizen/users/{id}", s.handleCitizenUserDelete)
+				r.Delete("/citizen/users/{id}/passkeys/{key}", s.handleCitizenPasskeyDelete)
+				r.Post("/citizen/groups", s.handleCitizenGroupCreate)
+				r.Put("/citizen/groups/{id}", s.handleCitizenGroupUpdate)
+				r.Delete("/citizen/groups/{id}", s.handleCitizenGroupDelete)
+				r.Put("/citizen/apps/{container}", s.handleCitizenAppAccess)
+				r.Put("/citizen/defaults", s.handleCitizenDefaults)
 				r.Get("/agent/tokens", s.handleTokensList)
 				r.Post("/agent/tokens", s.handleTokenCreate)
 				r.Post("/agent/tokens/revoke-all", s.handleTokensRevokeAll)
@@ -298,6 +442,20 @@ func (s *Server) Router() http.Handler {
 				r.Post("/docker/containers/{id}/stop", s.handleDockerStop)
 				r.Post("/docker/containers/{id}/restart", s.handleDockerRestart)
 				r.Delete("/docker/containers/{id}", s.handleDockerRemove)
+
+				r.Get("/stacks", s.handleStacks)
+				r.Post("/stacks", s.handleStackCreate)
+				r.Post("/stacks/preview", s.handleStackPreview)
+				r.Post("/stacks/from-container", s.handleStackFromContainer)
+				r.Get("/stacks/jobs/{id}", s.handleStackJob)
+				r.Get("/stacks/{name}", s.handleStackGet)
+				r.Put("/stacks/{name}", s.handleStackSave)
+				r.Post("/stacks/{name}/diff", s.handleStackDiff)
+				r.Post("/stacks/{name}/deploy", s.handleStackDeploy)
+				r.Post("/stacks/{name}/update", s.handleStackUpdate)
+				r.Post("/stacks/{name}/stop", s.handleStackStop)
+				r.Delete("/stacks/{name}", s.handleStackRemove)
+				r.Get("/stacks/{name}/logs", s.handleStackLogs)
 			})
 		})
 
@@ -305,6 +463,14 @@ func (s *Server) Router() http.Handler {
 			writeError(w, http.StatusNotFound, "No such API endpoint.")
 		})
 	})
+
+	// Citizen ID pages and the proxy's forward_auth check. These sit outside
+	// /api/v1 so a published app can reverse-proxy /citizen/* here.
+	r.Get("/citizen/signin", s.handleCitizenPage)
+	r.Post("/citizen/signin", s.handleCitizenPage)
+	r.Get("/citizen/check", s.handleCitizenCheck)
+	r.Post("/citizen/webauthn/login/begin", s.handlePasskeyLoginBegin)
+	r.Post("/citizen/webauthn/login/finish", s.handlePasskeyLoginFinish)
 
 	// Agents speak MCP here. Bearer token only; a browser session is not enough.
 	if s.mcpHTTP != nil {
@@ -387,6 +553,7 @@ func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, max int64) boo
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var (
 		authInput    *auth.InputError
+		citInput     *citizenid.InputError
 		shareInput   *shares.InputError
 		shareOp      *shares.OpError
 		dockerInput  *docker.InputError
@@ -403,6 +570,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		backupOp     *backup.OpError
 		mailInput    *notify.InputError
 		mailOp       *notify.OpError
+		healthInput  *health.InputError
 		remoteInput  *remote.InputError
 		remoteOp     *remote.OpError
 		proxyInput   *proxy.InputError
@@ -413,14 +581,21 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		snapOp       *snapshots.OpError
 		fileInput    *files.InputError
 		fileOp       *files.OpError
+		diskInput    *storage.InputError
+		diskOp       *storage.OpError
 		fileConflict *files.ConflictError
 		fileForbid   *files.ForbiddenURL
 		osInput      *osupdate.InputError
 		osOp         *osupdate.OpError
+		stackInput   *compose.InputError
+		stackOp      *compose.OpError
+		stackGate    *compose.Gate
 	)
 	switch {
 	case errors.As(err, &authInput):
 		writeError(w, http.StatusBadRequest, authInput.Msg)
+	case errors.As(err, &citInput):
+		writeError(w, http.StatusBadRequest, citInput.Msg)
 	case errors.As(err, &shareInput):
 		writeError(w, http.StatusBadRequest, shareInput.Msg)
 	case errors.As(err, &dockerInput):
@@ -437,6 +612,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, backupInput.Msg)
 	case errors.As(err, &mailInput):
 		writeError(w, http.StatusBadRequest, mailInput.Msg)
+	case errors.As(err, &healthInput):
+		writeError(w, http.StatusBadRequest, healthInput.Msg)
 	case errors.As(err, &remoteInput):
 		writeError(w, http.StatusBadRequest, remoteInput.Msg)
 	case errors.As(err, &proxyInput):
@@ -451,6 +628,18 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.As(err, &fileInput):
 		writeError(w, http.StatusBadRequest, fileInput.Msg)
+	case errors.As(err, &stackInput):
+		writeError(w, http.StatusBadRequest, stackInput.Msg)
+	case errors.As(err, &stackGate):
+		if stackGate.Findings == nil {
+			stackGate.Findings = []compose.Finding{}
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": stackGate.Error(), "findings": stackGate.Findings,
+			"diff": stackGate.Diff, "confirm": stackGate.Confirm, "ack": stackGate.Ack,
+		})
+	case errors.As(err, &diskInput):
+		writeError(w, http.StatusBadRequest, diskInput.Msg)
 	case errors.As(err, &fileForbid):
 		writeError(w, http.StatusBadRequest, fileForbid.Error())
 	case errors.As(err, &fileConflict):
@@ -499,11 +688,21 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		}
 		writeError(w, http.StatusInternalServerError, osOp.Msg)
+	case errors.As(err, &diskOp):
+		if s.log != nil {
+			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, diskOp.Msg)
 	case errors.As(err, &fileOp):
 		if s.log != nil {
 			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		}
 		writeError(w, http.StatusInternalServerError, fileOp.Msg)
+	case errors.As(err, &stackOp):
+		if s.log != nil {
+			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, stackOp.Msg)
 	case errors.Is(err, apps.ErrNotFound):
 		writeError(w, http.StatusNotFound, "That app is not in the catalogue.")
 	case docker.NotFound(err):
@@ -512,9 +711,25 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusNotFound, "That item no longer exists.")
 	case errors.Is(err, auth.ErrSetupDone):
 		writeError(w, http.StatusConflict, "FELDCORE has already been set up. Sign in instead.")
-	case errors.Is(err, auth.ErrInvalidCredentials):
+	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, citizenid.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "Incorrect username or password.")
-	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
+	case errors.Is(err, auth.ErrTOTPRequired):
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"error": "Enter the code from your authenticator.", "totpRequired": true,
+		})
+	case errors.Is(err, auth.ErrTOTPInvalid):
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"error": "That authenticator code is not right.", "totpRequired": true,
+		})
+	case errors.Is(err, citizenid.ErrSecondFactor):
+		writeError(w, http.StatusUnauthorized, "Enter the code from your authenticator.")
+	case errors.Is(err, citizenid.ErrInvalidCode), errors.Is(err, citizenid.ErrPasskey):
+		writeError(w, http.StatusUnauthorized, "That verification could not be confirmed.")
+	case errors.Is(err, citizenid.ErrDisabled):
+		writeError(w, http.StatusForbidden, "This account is disabled.")
+	case errors.Is(err, citizenid.ErrNotFound):
+		writeError(w, http.StatusNotFound, "That item no longer exists.")
+	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, citizenid.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)

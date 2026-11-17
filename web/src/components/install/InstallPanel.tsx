@@ -127,9 +127,10 @@ export function InstallPanel({
   job,
   onRetry,
   busy = false,
-  title = "Install progress",
+  title,
   success,
-  doneLabel = "Installed",
+  doneLabel,
+  kind = "install",
 }: {
   job: InstallJob;
   onRetry?: () => void;
@@ -137,6 +138,8 @@ export function InstallPanel({
   title?: string;
   success?: string;
   doneLabel?: string;
+  /** "job" is a stack action. The install wording stays for package installs. */
+  kind?: "install" | "job";
 }) {
   const ticking = job.state === "queued" || job.state === "running";
   const [now, setNow] = useState(() => Date.now());
@@ -149,10 +152,13 @@ export function InstallPanel({
   const startAt = Date.parse(job.startedAt || job.createdAt);
   const endAt = job.finishedAt ? Date.parse(job.finishedAt) : now;
   const elapsed = formatElapsed(endAt - startAt);
-  const tone =
-    job.state === "succeeded"
-      ? { label: doneLabel, cls: STATE.succeeded.cls }
-      : (STATE[job.state] ?? STATE.queued);
+  const tone = STATE[job.state] ?? STATE.queued;
+  const stateLabel =
+    job.state === "succeeded" && doneLabel
+      ? doneLabel
+      : kind === "job" && job.state === "succeeded"
+        ? "Done"
+        : tone.label;
   const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -166,12 +172,14 @@ export function InstallPanel({
     <div className="w-full space-y-3" aria-busy={ticking}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-3">{title}</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-ink-3">
+            {title ?? (kind === "job" ? "Progress" : "Install progress")}
+          </p>
           <p className="truncate text-sm font-extrabold text-ink">{job.step || job.label}</p>
         </div>
         <div className="flex items-center gap-2">
           <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${tone.cls}`}>
-            {tone.label}
+            {stateLabel}
           </span>
           <span className="font-mono text-xs font-bold tabular-nums text-ink-2" aria-label="Elapsed time">
             {elapsed}
@@ -184,7 +192,11 @@ export function InstallPanel({
       >
         {lines.length ? lines.join("\n") : ticking ? "Waiting for output…" : ""}
       </pre>
-      {job.state === "succeeded" && <Alert tone="info">{success ?? `${job.label} is installed.`}</Alert>}
+      {job.state === "succeeded" && (
+        <Alert tone="info">
+          {success ?? (kind === "job" ? `${job.label} finished.` : `${job.label} is installed.`)}
+        </Alert>
+      )}
       {job.state === "failed" && (
         <>
           <Alert>{job.error || "The install failed."}</Alert>

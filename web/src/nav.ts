@@ -1,16 +1,36 @@
 import {
+  Archive,
+  CircleHelp,
   Container,
   FolderTree,
   HardDrive,
+  HeartPulse,
+  Layers,
   LayoutDashboard,
+  LayoutGrid,
   MonitorPlay,
+  RefreshCw,
   ScrollText,
   Settings,
   Store,
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "audit" | "updates" | "settings";
+export type NavKey =
+  | "dashboard"
+  | "launcher"
+  | "storage"
+  | "shares"
+  | "docker"
+  | "stacks"
+  | "apps"
+  | "vms"
+  | "backups"
+  | "health"
+  | "audit"
+  | "updates"
+  | "settings"
+  | "help";
 
 export interface NavItem {
   key: NavKey;
@@ -30,6 +50,20 @@ export const NAV: NavItem[] = [
     ready: true,
   },
   {
+    key: "launcher",
+    label: "Launcher",
+    desc: "Apps you can open",
+    icon: LayoutGrid,
+    ready: true,
+  },
+  {
+    key: "storage",
+    label: "Storage",
+    desc: "Disks and pools",
+    icon: HardDrive,
+    ready: true,
+  },
+  {
     key: "shares",
     label: "Shares",
     desc: "SMB & NFS folders",
@@ -41,6 +75,13 @@ export const NAV: NavItem[] = [
     label: "Docker",
     desc: "Containers",
     icon: Container,
+    ready: true,
+  },
+  {
+    key: "stacks",
+    label: "Stacks",
+    desc: "Compose stacks",
+    icon: Layers,
     ready: true,
   },
   {
@@ -58,6 +99,20 @@ export const NAV: NavItem[] = [
     ready: true,
   },
   {
+    key: "backups",
+    label: "Backups",
+    desc: "Copies and restore",
+    icon: Archive,
+    ready: true,
+  },
+  {
+    key: "health",
+    label: "Health",
+    desc: "Disks, heat, and services",
+    icon: HeartPulse,
+    ready: true,
+  },
+  {
     key: "audit",
     label: "Audit",
     desc: "Agent calls",
@@ -68,7 +123,7 @@ export const NAV: NavItem[] = [
     key: "updates",
     label: "Updates",
     desc: "OS image and extensions",
-    icon: HardDrive,
+    icon: RefreshCw,
     ready: true,
   },
   {
@@ -76,6 +131,13 @@ export const NAV: NavItem[] = [
     label: "Settings",
     desc: "Appearance & system",
     icon: Settings,
+    ready: true,
+  },
+  {
+    key: "help",
+    label: "Help",
+    desc: "Guides and reference",
+    icon: CircleHelp,
     ready: true,
   },
 ];
