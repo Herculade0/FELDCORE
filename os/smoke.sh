@@ -36,6 +36,7 @@ bins=(
 	ufw
 	cloudflared caddy curl bash
 	systemctl timedatectl hostnamectl
+	sshd wpa_supplicant wpa_cli
 	lspci
 	rtl_eeprom
 )
@@ -80,6 +81,33 @@ if [[ ${mode} == root ]]; then
 	done
 	if run sh -c 'command -v zpool >/dev/null'; then
 		echo "smoke: zpool is in the image; ZFS was left out on purpose" >&2
+		fail=1
+	fi
+	if [[ -s ${root}/etc/machine-id ]]; then
+		echo "smoke: /etc/machine-id is not empty" >&2
+		fail=1
+	fi
+	if [[ ! -L ${root}/var/lib/dbus/machine-id ]]; then
+		echo "smoke: /var/lib/dbus/machine-id is not a symlink" >&2
+		fail=1
+	fi
+	for unit in ssh.service sshd.service feldcore-wifi.service wpa_supplicant.service; do
+		if [[ -L ${root}/etc/systemd/system/multi-user.target.wants/${unit} ]]; then
+			echo "smoke: ${unit} is enabled" >&2
+			fail=1
+		fi
+	done
+	if [[ -L ${root}/etc/systemd/system/sockets.target.wants/ssh.socket ]]; then
+		echo "smoke: ssh.socket is enabled" >&2
+		fail=1
+	fi
+	drop="${root}/etc/ssh/sshd_config.d/00-feldcore.conf"
+	if ! grep -q 'PermitRootLogin prohibit-password' "${drop}" || ! grep -q 'PasswordAuthentication no' "${drop}"; then
+		echo "smoke: sshd drop-in does not lock password login" >&2
+		fail=1
+	fi
+	if grep -q 'PermitRootLogin yes' "${drop}" || grep -q 'PasswordAuthentication yes' "${drop}"; then
+		echo "smoke: sshd drop-in allows password login" >&2
 		fail=1
 	fi
 else

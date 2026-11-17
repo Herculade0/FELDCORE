@@ -1,0 +1,31 @@
+#!/bin/bash
+# Start wpa_supplicant on each wireless interface. The config is written
+# by the install answer file. No wireless hardware is not a boot failure.
+set -euo pipefail
+
+conf=/etc/wpa_supplicant/feldcore.conf
+if [[ ! -s ${conf} ]]; then
+	exit 0
+fi
+
+for _ in 1 2 3 4 5; do
+	started=0
+	for path in /sys/class/net/*; do
+		[[ -e ${path} ]] || continue
+		name=$(basename "${path}")
+		if [[ ! -d ${path}/wireless && ! -e ${path}/phy80211 ]]; then
+			continue
+		fi
+		if ! wpa_cli -i "${name}" status >/dev/null 2>&1; then
+			wpa_supplicant -B -i "${name}" -c "${conf}" -D nl80211,wext
+		fi
+		networkctl reconfigure "${name}" >/dev/null 2>&1 || true
+		started=1
+	done
+	if [[ ${started} -eq 1 ]]; then
+		exit 0
+	fi
+	sleep 2
+done
+echo "feldcore-wifi: no wireless interface" >&2
+exit 0

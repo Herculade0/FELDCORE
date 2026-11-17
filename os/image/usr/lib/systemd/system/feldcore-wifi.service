@@ -1,0 +1,14 @@
+[Unit]
+Description=Join a WiFi network with wpa_supplicant
+After=systemd-networkd.service
+Before=network-online.target
+Wants=systemd-networkd.service
+ConditionPathExists=/etc/wpa_supplicant/feldcore.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/feldcore/wifi-up
+
+[Install]
+WantedBy=multi-user.target

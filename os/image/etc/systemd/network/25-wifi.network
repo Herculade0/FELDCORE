@@ -1,0 +1,7 @@
+[Match]
+Type=wlan
+
+[Network]
+DHCP=yes
+LLMNR=no
+MulticastDNS=no
