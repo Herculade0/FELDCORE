@@ -6,13 +6,13 @@ FELDCORE can publish this server without opening ports on your router, and it ca
 
 Open **Settings → Remote access**.
 
-The connector is [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/). FELDCORE prefers to run it as the container `feldcore-cloudflared`, on a Docker network named `feldcore`, so it stays under FELDCORE's control and is not mixed into the host packages. If Docker is not running, use **Install cloudflared on the host**. That downloads the official binary into FELDCORE's data directory and runs it only while remote access is on.
+The connector is [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/). On FELDCORE OS it is the program shipped at `/usr/bin/cloudflared` (release 2026.11.0). FELDCORE starts that program itself and keeps it running while remote access is on. It is not a container, and it does not wait for Docker. On any other machine that does not have that program, FELDCORE runs the `feldcore-cloudflared` container when Docker is running. If Docker is not running there, use **Install cloudflared on the host**. That downloads the official binary into FELDCORE's data directory and runs it only while remote access is on.
 
 ### Tunnel token
 
 In the Cloudflare dashboard: **Zero Trust → Networks → Tunnels → Create**, then copy the install token.
 
-Paste it and choose **Save and connect**. The token is encrypted with a key that lives in `/var/lib/feldcore/secrets/` (mode `0600`) and is never written to the log, the state file, or the container's command line. The running connector reads it from a mode `0600` file mounted into the container.
+Paste it and choose **Save and connect**. The token is encrypted with a key that lives in `/var/lib/feldcore/secrets/` (mode `0600`) and is never written to the log, the state file, or the command line. The running connector reads it from a mode `0600` file. On FELDCORE OS that file is passed to `/usr/bin/cloudflared` with `--token-file`. The container used on other machines mounts the same file.
 
 A tunnel token only connects this server. It cannot create DNS records. Add an API token as well if you want FELDCORE to publish hostnames for you. Otherwise add the hostnames in the Cloudflare dashboard.
 

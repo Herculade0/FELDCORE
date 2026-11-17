@@ -21,7 +21,7 @@ references: []
 
 **Caddy.** The proxy container (`feldcore-caddy`) that serves names and certificates.
 
-**Cloudflared.** The connector container (`feldcore-cloudflared`) for a Cloudflare Tunnel.
+**Cloudflared.** The Cloudflare Tunnel connector. On FELDCORE OS it is `/usr/bin/cloudflared`. On other systems it is the container `feldcore-cloudflared` when Docker is running.
 
 **DNS-01.** A way to prove you control a domain by a DNS record. Let's Encrypt can issue a certificate without port 80 open to the world. Visitors can still need port 443 unless you use the tunnel.
 
