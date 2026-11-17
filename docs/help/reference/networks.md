@@ -25,7 +25,7 @@ Each container has a network type. The default, **bridge**, is the isolated one:
 
 ## The feldcore network
 
-FELDCORE creates a Docker bridge named `feldcore` for two containers it owns: `feldcore-cloudflared` and `feldcore-caddy`. When you publish an app, that app is attached to the same network so the proxy can reach it by its container address. You do not create this network yourself. A container on the host network is reached via `127.0.0.1` instead.
+FELDCORE creates a Docker bridge named `feldcore` for containers it owns. `feldcore-caddy` is one of them. `feldcore-cloudflared` is the tunnel connector only on a machine that is not FELDCORE OS and does not have the OS copy of cloudflared. On FELDCORE OS the connector is the host program. When you publish an app, that app is attached to this network so the proxy can reach it by its container address. You do not create this network yourself. A container on the host network is reached via `127.0.0.1` instead.
 
 A container on `none`, or one that shares a VPN gateway's network, has no address of its own. A published name cannot be pointed at it.
 

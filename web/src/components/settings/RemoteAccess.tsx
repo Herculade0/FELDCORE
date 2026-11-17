@@ -22,6 +22,7 @@ interface RemoteView {
   exposeAdmin: boolean;
   adminHostname?: string;
   adminWarning?: string;
+  runsOnHost?: boolean;
   routes: Route[];
   status: { state: string; summary: string; connections: number; connector: string; detail?: string };
 }
@@ -120,7 +121,7 @@ export default function RemoteAccess() {
       {error && <Alert>{error}</Alert>}
 
       <Card>
-        <CardTitle icon={Cloud} title="Cloudflare Tunnel" hint={status && status.connector !== "none" ? status.connector : "Not connected"} />
+        <CardTitle icon={Cloud} title="Cloudflare Tunnel" hint={connectorHint(status?.connector)} />
         <div className="mt-4 rounded-2xl border border-line bg-surface-2 px-4 py-3">
           <p className={`text-sm font-bold ${tone}`}>{labelFor(status?.state)}</p>
           <p className="mt-1 text-sm font-medium leading-relaxed text-ink-2">{status?.summary || "Checking the tunnel…"}</p>
@@ -197,7 +198,7 @@ export default function RemoteAccess() {
           <Button variant="primary" loading={busy} onClick={() => void save()}>
             {mode === "off" ? "Turn remote access off" : "Save and connect"}
           </Button>
-          {mode !== "off" && (
+          {mode !== "off" && !view?.runsOnHost && (
             <Button
               onClick={() => void cloudflared.start().catch(() => {})}
               disabled={busy}
@@ -209,7 +210,9 @@ export default function RemoteAccess() {
           {saved && <p className="text-xs font-semibold text-ok">Saved.</p>}
         </div>
         <p className="mt-3 text-xs font-medium leading-relaxed text-ink-3">
-          FELDCORE prefers a cloudflared container, so the connector is updated with Docker and is not mixed into the host. If Docker is not running, it can run the cloudflared program instead. The token file is mode 0600. It is not written into the container command, and it is not logged.
+          {view?.runsOnHost
+            ? "FELDCORE OS runs the connector from the cloudflared program shipped with the image (2026.11.0 at /usr/bin/cloudflared). It is not a container, and it starts even while Docker is still coming up. The token is read from a mode 0600 file. It is not put on the command line, and it is not logged."
+            : "When Docker is running, FELDCORE runs cloudflared as a container. If Docker is not running, it can run the cloudflared program instead. The token file is mode 0600. It is not written into the command, and it is not logged."}
         </p>
         {cloudflared.error && (
           <div className="mt-3">
@@ -279,6 +282,17 @@ export default function RemoteAccess() {
       </Card>
     </div>
   );
+}
+
+function connectorHint(connector?: string) {
+  switch (connector) {
+    case "binary":
+      return "Host program";
+    case "container":
+      return "Container";
+    default:
+      return "Not connected";
+  }
 }
 
 function labelFor(state?: string) {
