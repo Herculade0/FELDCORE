@@ -67,7 +67,6 @@ route {
 	reverse_proxy /citizen/* host.docker.internal:PORT
 	forward_auth host.docker.internal:PORT {
 		uri /citizen/check
-		copy_headers Cookie
 		header_up X-Forwarded-Host {http.request.host}
 		header_up X-Forwarded-Uri {http.request.uri}
 		header_up X-Forwarded-Proto {http.request.scheme}
@@ -79,9 +78,13 @@ route {
 }
 ```
 
-`clean_cookie` is the browser's Cookie header with `feldcore_citizen`, `feldcore_desk`, and `feldcore_session` (and their `__Host-` names) removed. The app keeps its own cookies. When the upstream is the publish listener on port 8791, Caddy leaves the cookie in place and that listener strips it before dialing the container.
+`forward_auth` does not copy `Cookie`. On a successful check Caddy deletes every header named in `copy_headers` and puts back only what the auth response included. `/citizen/check` returns no `Cookie`, so listing it removed `__Host-feldcore_citizen` before the request reached the publish listener and the next GET redirected to sign-in again.
 
-Cloudflare Tunnel ingress for every published app points at that listener (`http://127.0.0.1:8791`, or `host.docker.internal:8791` when the connector runs in Docker). It does not dial the container, so a gated app cannot be opened from the internet by skipping Citizen ID. The publish listener runs the same access check as forward_auth, including group membership.
+`clean_cookie` is the browser's Cookie header with `feldcore_citizen`, `feldcore_desk`, and `feldcore_session` (and their `__Host-` names) removed. The app keeps its own cookies. When the upstream is the publish listener on port 8791, Caddy leaves the citizen cookie in place and that listener strips it before dialing the container.
+
+Cloudflare Tunnel ingress for every published app points at that listener (`http://127.0.0.1:8791`, or `host.docker.internal:8791` when the connector runs in Docker). It does not dial the container, so a gated app cannot be opened from the internet by skipping Citizen ID. The publish listener runs the same access check as forward_auth, including group membership. Administrators are allowed on a `groups` app.
+
+The listener also reverse-proxies `/citizen/*` to feldcored (port 8787 by default): the sign-in page, the sign-in POST, `GET /citizen/check`, and the passkey login posts. A tunnel pointed at `:8791` can finish sign-in there. The public `Host` is preserved, and the session cookie is not stripped on this hop. Caddy, when it is in front, still sends `/citizen/*` straight to feldcored and only sends the app request to the listener after the check.
 
 `next` is a same-origin path, or an http(s) URL whose host is this management UI, an enabled web route, or an enabled published app. Control characters, backslashes, `//`, and a scheme are rejected after decoding. A parent-domain suffix on its own is not enough.
 

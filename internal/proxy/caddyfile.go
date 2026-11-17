@@ -68,6 +68,11 @@ func Build(email string, sites []Site) (string, error) {
 // this hostname. route keeps that order; Caddy would otherwise reorder
 // the directives. The app upstream drops the Citizen ID cookie and
 // Authorization so a published app cannot replay them.
+//
+// Cookie is not listed in copy_headers. After a successful check Caddy
+// deletes each copied header and puts back only what the auth response
+// included. /citizen/check returns no Cookie, so copying it removed the
+// browser session before the publish listener could see it.
 func writeProxy(b *strings.Builder, site Site) {
 	if site.Gate == "" {
 		writeAppProxy(b, site, "\t")
@@ -79,7 +84,6 @@ func writeProxy(b *strings.Builder, site Site) {
 	fmt.Fprintf(b, "\t\t}\n")
 	fmt.Fprintf(b, "\t\tforward_auth %s {\n", site.Gate)
 	fmt.Fprintf(b, "\t\t\turi /citizen/check\n")
-	fmt.Fprintf(b, "\t\t\tcopy_headers Cookie\n")
 	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Uri {http.request.uri}\n")
 	writeForwarded(b, "\t\t\t")
 	fmt.Fprintf(b, "\t\t}\n")

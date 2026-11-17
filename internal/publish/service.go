@@ -68,7 +68,12 @@ type SetInput struct {
 	Access    string
 	Groups    []string
 	Enabled   bool
-	Brand     store.SignInBrand
+	// TLS is optional. Empty keeps the automatic choice: the local CA on a
+	// home name, Let's Encrypt on a public name. "internal" forces the local
+	// CA, including a public name that is only reached through the tunnel.
+	// "acme" asks Let's Encrypt and needs the Cloudflare API token.
+	TLS   string
+	Brand store.SignInBrand
 }
 
 // SettingsInput is the protection form. An empty licence key keeps the
@@ -111,6 +116,7 @@ type Form struct {
 	Port       int               `json:"port"`
 	Access     string            `json:"access"`
 	Groups     []string          `json:"groups"`
+	TLS        string            `json:"tls"`
 	TunnelMode string            `json:"tunnelMode"`
 	From       string            `json:"from"`
 	Brand      store.SignInBrand `json:"brand"`
@@ -170,8 +176,14 @@ type Service struct {
 	Tunnel      func(context.Context, net.IP) bool
 	DataDir     string
 	GatewayPort int
-	Log         *slog.Logger
-	Audit       Auditor
+	// APIPort is feldcored's own listener. /citizen/* on this publish
+	// listener is passed through to it so a tunnel pointed at GatewayPort
+	// can still serve the sign-in page. Zero means 8787.
+	APIPort int
+	// APIAddr overrides APIPort. Tests set it. It is not a user setting.
+	APIAddr string
+	Log     *slog.Logger
+	Audit   Auditor
 
 	// now freezes the rate limiter's clock in tests.
 	now func() time.Time
@@ -225,8 +237,16 @@ func (s *Service) hook() AuthHook {
 }
 
 // Handler is the HTTP entry the proxy and the tunnel dial.
+// /citizen/* is passed through to feldcored. Ingress for a published name
+// points here, so the sign-in page, the sign-in POST and /citizen/check
+// have to be answered on this port. Every other path is route lookup,
+// protection, Citizen ID, then the app.
 func (s *Service) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isCitizenPath(r.URL.Path) {
+			s.proxyCitizen(w, r)
+			return
+		}
 		p := s.protection()
 		h := Handler{
 			Lookup:  s.lookup,
@@ -524,7 +544,13 @@ func (s *Service) Form(ctx context.Context, container, webUI string, ports []int
 		if out.Brand.Links == nil {
 			out.Brand.Links = []store.BrandLink{}
 		}
+		out.TLS = app.TLS
 	}
+	mode, err := certificateMode(out.Hostname, out.TLS)
+	if err != nil {
+		mode, _ = certificateMode(out.Hostname, "")
+	}
+	out.TLS = mode
 	if out.Ports == nil {
 		out.Ports = []int{}
 	}
@@ -628,6 +654,9 @@ func (s *Service) Set(ctx context.Context, in SetInput) (Outcome, error) {
 	var warning string
 	if in.Enabled && !names.Local(next.Hostname) && !s.tunnelOn(ctx) {
 		warning = "The name is published on this server with HTTPS. Remote access is off, so no Cloudflare Tunnel hostname was created. No ports were opened on your router."
+		if next.TLS == "internal" {
+			warning = "The name is published on this server with the local certificate. Remote access is off, so no Cloudflare Tunnel hostname was created. Choose Let's Encrypt if this name should be directly public. No ports were opened on your router."
+		}
 	}
 	return Outcome{App: toApp(next), Warning: warning}, nil
 }
@@ -734,16 +763,16 @@ func (s *Service) prepare(in SetInput) (store.PublishedApp, error) {
 		prev, _ := s.find(container)
 		prev.Container = container
 		prev.Enabled = false
-		if sub, host, port, access, groups, err := s.fields(in); err == nil {
+		if sub, host, port, access, groups, tls, err := s.fields(in); err == nil {
 			if !s.taken(host, container) {
 				prev.Subdomain, prev.Hostname, prev.Port = sub, host, port
-				prev.Access, prev.Groups = access, groups
+				prev.Access, prev.Groups, prev.TLS = access, groups, tls
 			}
 		}
 		prev.Brand = brand
 		return prev, nil
 	}
-	sub, host, port, access, groups, err := s.fields(in)
+	sub, host, port, access, groups, tls, err := s.fields(in)
 	if err != nil {
 		return store.PublishedApp{}, err
 	}
@@ -752,11 +781,11 @@ func (s *Service) prepare(in SetInput) (store.PublishedApp, error) {
 	}
 	return store.PublishedApp{
 		Container: container, Subdomain: sub, Hostname: host, Port: port,
-		Access: access, Groups: groups, Enabled: true, Brand: brand,
+		Access: access, Groups: groups, TLS: tls, Enabled: true, Brand: brand,
 	}, nil
 }
 
-func (s *Service) fields(in SetInput) (sub, host string, port int, access string, groups []string, err error) {
+func (s *Service) fields(in SetInput) (sub, host string, port int, access string, groups []string, tls string, err error) {
 	sub, err = subdomain(in.Subdomain)
 	if err != nil {
 		return
@@ -772,6 +801,10 @@ func (s *Service) fields(in SetInput) (sub, host string, port int, access string
 	}
 	port = in.Port
 	access, groups, err = normalizeAccess(in.Access, in.Groups)
+	if err != nil {
+		return
+	}
+	tls, err = certificateMode(host, in.TLS)
 	return
 }
 
@@ -782,9 +815,12 @@ func (s *Service) wire(ctx context.Context, app store.PublishedApp, enabled bool
 	if enabled && s.GatewayPort <= 0 {
 		return op("The publish proxy has no port configured.")
 	}
-	tlsMode := "internal"
-	if enabled && !names.Local(app.Hostname) {
-		tlsMode = "acme"
+	tlsMode, terr := certificateMode(app.Hostname, app.TLS)
+	if terr != nil {
+		if enabled {
+			return terr
+		}
+		tlsMode = "internal"
 	}
 	host := app.Hostname
 	if !enabled {
@@ -976,6 +1012,31 @@ func describeTunnel(host string, ok bool, rv remote.View) (state, detail string)
 			return "down", rv.Status.Summary
 		}
 		return "down", "The tunnel is not connected."
+	}
+}
+
+// certificateMode chooses how Caddy serves host. An empty choice is the
+// automatic one: the local CA on a home name, Let's Encrypt on a public
+// name. "internal" is also the choice for a tunnel-only public name.
+// Cloudflare terminates that public TLS, so the origin can use the
+// FELDCORE internal CA and does not need the API token. "acme" stays the
+// path for a name that is directly public.
+func certificateMode(host, choice string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(choice)) {
+	case "", "auto":
+		if names.Local(host) {
+			return "internal", nil
+		}
+		return "acme", nil
+	case "internal", "local":
+		return "internal", nil
+	case "acme", "letsencrypt":
+		if names.Local(host) {
+			return "", input(host + " is a home-network name. Use the local certificate. Let's Encrypt only signs public domains.")
+		}
+		return "acme", nil
+	default:
+		return "", input("Choose the local certificate or Let's Encrypt.")
 	}
 }
 

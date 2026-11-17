@@ -156,7 +156,7 @@ func main() {
 	pubSvc := &publish.Service{
 		Store: st, Secrets: box, Proxy: proxySvc, Remote: remoteSvc,
 		Resolve: dockerMgr, Trust: dockerMgr.ProxyPeer, Tunnel: dockerMgr.TunnelPeer,
-		DataDir: cfg.DataDir, GatewayPort: pubPort, Log: log, Audit: authSvc,
+		DataDir: cfg.DataDir, GatewayPort: pubPort, APIPort: listenPort(cfg.ListenAddr), Log: log, Audit: authSvc,
 	}
 	pubSvc.OpenGeo()
 	snapSvc := snapshots.Open(st, dockerMgr, cfg.DataDir, func() string {
