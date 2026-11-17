@@ -1,0 +1,6 @@
+# sha256 of the official caddy_<version>_linux_amd64.tar.gz.
+# install_caddy verifies that archive, then builds the same release with
+# xcaddy and github.com/caddy-dns/cloudflare. The image installs the build,
+# which is what public certificates need. The stock binary has no DNS module.
+# fields: sha256 version xcaddy cloudflare-module
+5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb 2.11.9 v0.4.7 v0.2.4
