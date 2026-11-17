@@ -3,7 +3,7 @@ Description=Prepare the FELDCORE state partition
 DefaultDependencies=no
 After=local-fs.target
 RequiresMountsFor=/var/lib/feldcore
-Before=feldcore.service
+Before=feldcore.service docker.service containerd.service smbd.service nmbd.service nfs-server.service
 
 [Service]
 Type=oneshot

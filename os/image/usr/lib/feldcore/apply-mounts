@@ -1,0 +1,17 @@
+#!/bin/bash
+# Pool mount units are stored on the state partition. /etc/systemd/system is
+# read before that partition is mounted, so they are installed into /run.
+set -euo pipefail
+dir=/var/lib/feldcore/mounts
+[[ -d ${dir} ]] || exit 0
+shopt -s nullglob
+units=("${dir}"/*.mount)
+((${#units[@]})) || exit 0
+mkdir -p /run/systemd/system
+for unit in "${units[@]}"; do
+	install -m 644 "${unit}" "/run/systemd/system/$(basename "${unit}")"
+done
+systemctl daemon-reload
+for unit in "${units[@]}"; do
+	systemctl start "$(basename "${unit}")" || true
+done

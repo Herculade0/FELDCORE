@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/install"
 )
 
@@ -154,6 +155,9 @@ func step(log Log, name string) {
 // InstallCLI installs the Compose v2 plugin with apt when it is missing.
 // It is registered on the shared install job runner.
 func InstallCLI(ctx context.Context) error {
+	if appliance.Is() {
+		return opf("Docker Compose is part of FELDCORE OS and is not installed from this page.")
+	}
 	if ver, err := probeVersion(ctx); err == nil {
 		install.Line(ctx, "Docker Compose "+ver+" is already installed.")
 		return nil
@@ -169,7 +173,7 @@ func InstallCLI(ctx context.Context) error {
 		install.Line(ctx, "Package lists could not be refreshed. Trying the install anyway.")
 	}
 	var last error
-	for _, pkg := range []string{"docker-compose-v2", "docker-compose-plugin"} {
+	for _, pkg := range []string{"docker-compose-v2", "docker-compose-plugin", "docker-compose"} {
 		if _, err := install.Run(ctx, 8*time.Minute, "apt-get", "install", "-y", pkg); err != nil {
 			last = err
 			continue

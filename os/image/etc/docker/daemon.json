@@ -1,0 +1,12 @@
+{
+  "data-root": "/var/lib/feldcore/docker",
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "storage-driver": "overlay2",
+  "live-restore": true,
+  "iptables": true,
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "20m",
+    "max-file": "3"
+  }
+}

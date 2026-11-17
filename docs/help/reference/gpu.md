@@ -22,7 +22,7 @@ references:
 Detection reads `/sys/class/drm/cardN/device/vendor` and keeps AMD, Intel, and NVIDIA. Connector names such as `card0-HDMI-A-1` are skipped.
 
 - AMD and Intel are usable when a `/dev/dri/renderD*` node exists.
-- NVIDIA is detected and marked "NVIDIA sharing isn't supported yet." It needs a container toolkit this build does not install.
+- NVIDIA is detected. Settings offers **Install NVIDIA Container Toolkit**. On FELDCORE OS that is a signed extension. On Debian it uses apt, and NVIDIA's repository has to be configured already. The install does not add the kernel driver.
 - If there is a render node but no matching sysfs card, it is shown as a generic graphics device and can still be shared.
 
 Turning the switch on mounts `/dev/dri` into the container and adds the numeric group ids that own those device nodes. The labels stored on the container are `feldcore.gpu=true` and `feldcore.gpu.groups`. Several containers may share the same device. The switch cannot name a card, and it cannot see a GPU that has no DRM node.
@@ -31,7 +31,7 @@ A create that asks for a GPU when none is usable fails before Docker is called: 
 
 An App Store template that maps the device `/dev/dri` keeps that as an ordinary Device row. `--gpus` in extra parameters is kept and not applied.
 
-There is no Settings → GPUs list in this build, no per-card picker, and no button that installs the NVIDIA Container Toolkit. A design for that exists. It is not what the form does today.
+There is no Settings → GPUs list in this build and no per-card picker. Settings does have a button that installs the NVIDIA Container Toolkit when this machine is FELDCORE OS or an NVIDIA device is present. A fuller design exists. It is not what the form does today.
 
 [[route:docker|Open Docker]]
 
