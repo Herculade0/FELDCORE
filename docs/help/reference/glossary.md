@@ -19,7 +19,7 @@ references: []
 
 **Bridge.** The default Docker network. The container is isolated from your LAN and reached through ports you publish on the host.
 
-**Caddy.** The proxy container (`feldcore-caddy`) that serves names and certificates.
+**Caddy.** The proxy that serves names and certificates. On FELDCORE OS it is `/usr/bin/caddy`. On other systems it is the container `feldcore-caddy`.
 
 **Cloudflared.** The Cloudflare Tunnel connector. On FELDCORE OS it is `/usr/bin/cloudflared`. On other systems it is the container `feldcore-cloudflared` when Docker is running.
 

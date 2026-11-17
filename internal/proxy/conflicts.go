@@ -14,9 +14,10 @@ type Conflict struct {
 	Explanation string `json:"explanation"`
 }
 
-// Explain reports why Caddy cannot bind 80 and 443. Our own proxy container
-// is not a conflict, and listeners are ignored while that container is already
-// running (they are Caddy, or Docker's proxy in front of it).
+// Explain reports why Caddy cannot bind 80 and 443. The proxy container is
+// not a conflict. Listeners are ignored while Caddy is already running: the
+// host program on FELDCORE OS, the container, or Docker's proxy in front of
+// the container.
 func Explain(published []docker.PublishedPort, listening []int, caddyRunning bool) []Conflict {
 	var out []Conflict
 	for _, port := range []int{80, 443} {

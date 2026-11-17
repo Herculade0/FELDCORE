@@ -19,6 +19,7 @@ interface ProxyView {
   uiTls: string;
   status: string;
   summary: string;
+  runsOnHost?: boolean;
   caReady: boolean;
   conflicts: Conflict[];
 }
@@ -74,7 +75,11 @@ export default function WebAddresses() {
       <CardTitle icon={Globe} title="Web addresses" hint={view?.status === "up" ? "Caddy is running" : "Nothing published"} />
       <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
         Give this server, and each container, a name such as <span className="font-mono text-xs">valheim.home.arpa</span> or{" "}
-        <span className="font-mono text-xs">app.example.com</span>. Caddy runs as a container FELDCORE manages and renews certificates on its own. On a home name it uses a local certificate authority. On a domain Cloudflare hosts, it asks Let's Encrypt with the DNS-01 challenge, using the API token from Remote access, so port 80 does not have to be open to the world.
+        <span className="font-mono text-xs">app.example.com</span>.{" "}
+        {view?.runsOnHost
+          ? "On FELDCORE OS, Caddy is the program shipped with the image (2.11.9 at /usr/bin/caddy). It is not a container."
+          : "Caddy runs as a container FELDCORE manages."}{" "}
+        It renews certificates on its own. On a home name it uses a local certificate authority. On a domain Cloudflare hosts, it asks Let's Encrypt with the DNS-01 challenge, using the API token from Remote access, so port 80 does not have to be open to the world.
       </p>
 
       {error && (
