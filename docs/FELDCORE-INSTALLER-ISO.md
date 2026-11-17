@@ -21,7 +21,7 @@ Keep publishing `feldcore-os.raw.zst` and `feldcore-installer.raw.zst`. The raw 
 `fill_esp` writes the ESP with mtools: `EFI/BOOT/BOOTX64.EFI` and `EFI/systemd/systemd-bootx64.efi` (both copies of `systemd-bootx64.efi`), `loader/loader.conf`, `loader/entries/feldcore-a+3.conf`, and `feldcore/a/{vmlinuz,initrd.img}`. The loader line is the same one the appliance uses:
 
 ```
-root=LABEL=feldcore-a ro console=tty0 console=ttyS0,115200 feldcore.slot=a feldcore.version=VERSION
+root=LABEL=feldcore-a ro quiet loglevel=3 console=tty0 console=ttyS0,115200 feldcore.slot=a feldcore.version=VERSION
 ```
 
 `installer_overlay` copies the appliance root and adds a serial autologin. The payload partition holds `feldcore-root.img.zst`, `vmlinuz`, `initrd.img`, `systemd-bootx64.efi`, and the text files `version`, `root-mib`, and `state-mib`. `os/image/usr/sbin/feldcore-install` mounts `LABEL=feldcore-payload` when `/payload` does not already contain those files, then writes a new appliance disk (ESP, slot A, slot B, state) with `sgdisk` on the device it was given.
@@ -149,7 +149,7 @@ configfile ($root)/boot/grub/grub.cfg
 set timeout=3
 set default=0
 menuentry "FELDCORE installer" {
-    linux /boot/vmlinuz boot=feldcore ro console=tty0 console=ttyS0,115200 feldcore.live=1 feldcore.version=VERSION
+    linux /boot/vmlinuz boot=feldcore ro quiet loglevel=3 console=tty0 console=ttyS0,115200 feldcore.live=1 feldcore.version=VERSION
     initrd /boot/initrd.img
 }
 ```

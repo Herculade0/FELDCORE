@@ -6,4 +6,4 @@ package version
 // -X github.com/Herculade0/feldcore/internal/version.Current=<version>.
 // A plain go build keeps this default. It has to be a variable: the
 // linker can set -X only on a string variable, not a constant.
-var Current = "0.1.0"
+var Current = "0.1.2"

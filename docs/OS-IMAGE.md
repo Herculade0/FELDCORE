@@ -18,7 +18,7 @@ The appliance image is a GPT disk:
 The type is the generic Linux type, not the discoverable root type. Two partitions of the discoverable root type make gpt-auto pick one of them at random. The kernel command line names the slot instead:
 
 ```
-root=LABEL=feldcore-SLOT ro console=tty0 console=ttyS0,115200 feldcore.slot=SLOT feldcore.version=VERSION
+root=LABEL=feldcore-SLOT ro quiet loglevel=3 console=tty0 console=ttyS0,115200 feldcore.slot=SLOT feldcore.version=VERSION
 ```
 
 `ro` mounts the root read-only. `/etc/fstab` has no root line, so systemd does not remount it read-write. `/tmp`, `/var/tmp`, `/var/log`, `/var/cache`, `/var/lib/systemd`, and `/home` are tmpfs. The ESP and the state partition are the writable disks. After the state partition is mounted, `feldcore-state.service` overlays `/etc` with an upper directory on that partition, so host configuration (Samba, NFS, ufw, hostname, Docker's daemon.json) survives a reboot without making the OS image writable. `/var/lib/samba` and `/var/lib/nfs` are bind-mounted onto the state partition. Docker's data-root is `/var/lib/feldcore/docker` and containerd's root is `/var/lib/feldcore/containerd`.
@@ -45,7 +45,7 @@ Docker, containerd, and the image smoke unit are enabled. The smoke unit runs on
 
 `/etc/os-release` and `/etc/feldcore-os-release` say `ID=feldcore` and `SYSEXT_LEVEL=1`. The daemon treats the machine as an appliance only when that id is set. A copy of the daemon installed on a normal Debian system can check a signed release, and it refuses to write a slot.
 
-`/usr/bin/apt`, `apt-get`, `apt-cache`, and `apt-mark` are replaced with a script that prints that FELDCORE OS has no apt and exits 1. `sources.list` is empty. dpkg is left in place because systemd scripts may call it. There is no compiler and no DKMS. The root password is locked (`passwd -l root`). openssh-server is installed and `ssh.service` is not enabled. `/etc/ssh/sshd_config.d/00-feldcore.conf` sets `PermitRootLogin prohibit-password` and `PasswordAuthentication no`, so SSH is public-key only and root cannot log in with a password. `PermitRootLogin yes` is not used. An install answer file is what enables sshd. The serial console is enabled so a boot log is visible. The appliance image does not autologin.
+`/usr/bin/apt`, `apt-get`, `apt-cache`, and `apt-mark` are replaced with a script that prints that FELDCORE OS has no apt and exits 1. `sources.list` is empty. dpkg is left in place because systemd scripts may call it. There is no compiler and no DKMS. The root password is locked (`passwd -l root`). openssh-server is installed and `ssh.service` is not enabled. `/etc/ssh/sshd_config.d/00-feldcore.conf` sets `PermitRootLogin prohibit-password` and `PasswordAuthentication no`, so SSH is public-key only and root cannot log in with a password. `PermitRootLogin yes` is not used. An install answer file is what enables sshd. The serial console is enabled so a boot log is visible. The appliance image does not autologin. `quiet loglevel=3` is on the kernel command line so informational printk does not scroll the tty1 login prompt. Debian 13's kernel applies that level to every console, so ttyS0 is quiet at the kernel too. journald forwards info-level messages to `/dev/ttyS0` only, and `feldcored` stdout stays in the journal. On the appliance the daemon rewrites `/etc/issue` with the web UI URL on the primary IPv4 (other addresses listed after it) and, until an administrator exists, the one-time setup code. It restarts a getty that is still at the prompt so the new text is what is on screen, and it does that again when the address or the code changes. The code is still single-use. The startup line on stdout is unchanged.
 
 DNS is a static `/etc/resolv.conf` (1.1.1.1 and 8.8.8.8). Wired interfaces named `e*` use DHCP through systemd-networkd. Wireless interfaces (`Type=wlan`) use DHCP through `25-wifi.network` once `wpa_supplicant` is running. `feldcore-wifi.service` is not enabled. It starts only when `/etc/wpa_supplicant/feldcore.conf` exists and an answer file enables the unit. `iwd` and NetworkManager are not installed.
 
@@ -65,7 +65,7 @@ Useful environment variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `FELDCORE_OS_VERSION` | Image version. Default `0.1.0`. |
+| `FELDCORE_OS_VERSION` | Image version. Default `0.1.2`. |
 | `FELDCORE_OS_WORK` | Work directory. Default `/var/tmp/feldcore-os`. The signing key lives here. |
 | `FELDCORE_OS_OUT` | Output directory. Default `dist/os`. |
 | `FELDCORE_IMAGE_BUILDER` | `debootstrap` (default) or `mkosi`. |

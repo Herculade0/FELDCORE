@@ -8,6 +8,44 @@ import (
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
+func TestCurrentCodeDoesNotCreateOne(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(Deps{Store: st, DataDir: dir, Root: func() bool { return false }})
+	if s.CurrentCode() != "" {
+		t.Fatal("a missing code file should not invent one")
+	}
+	code, err := s.EnsureCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.CurrentCode() != code {
+		t.Fatalf("current %q want %q", s.CurrentCode(), code)
+	}
+	if err := st.Update(func(state *store.State) error {
+		state.Admin = &store.User{Username: "admin"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if s.CurrentCode() != "" {
+		t.Fatal("an administrator should hide the setup code")
+	}
+	s.ConsumeCode()
+	if err := st.Update(func(state *store.State) error {
+		state.Admin = nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if s.CurrentCode() != "" {
+		t.Fatal("consumed code still visible")
+	}
+}
+
 func TestClaimCodeOnce(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(dir)

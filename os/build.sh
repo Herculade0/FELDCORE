@@ -8,7 +8,7 @@ export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.11}"
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=${FELDCORE_OS_WORK:-/var/tmp/feldcore-os}
 out=${FELDCORE_OS_OUT:-${repo}/dist/os}
-version=${FELDCORE_OS_VERSION:-0.1.0}
+version=${FELDCORE_OS_VERSION:-0.1.2}
 builder=${FELDCORE_IMAGE_BUILDER:-debootstrap}
 root_mib=${FELDCORE_ROOT_MIB:-6144}
 esp_mib=256
@@ -452,13 +452,16 @@ write_entry() {
 	else
 		name="feldcore-${slot}.conf"
 	fi
+	# quiet loglevel=3 matches internal/osupdate consoleOptions.
+	# ttyS0 stays last so /dev/console is the serial port. The boot
+	# counter is the file name (${name}); these options do not change it.
 	cat >"${dest}/loader/entries/${name}" <<EOF
 title FELDCORE ${version}
 version ${version}
 sort-key feldcore
 linux /feldcore/${slot}/vmlinuz
 initrd /feldcore/${slot}/initrd.img
-options root=LABEL=feldcore-${slot} ro console=tty0 console=ttyS0,115200 feldcore.slot=${slot} feldcore.version=${version}${extra}
+options root=LABEL=feldcore-${slot} ro quiet loglevel=3 console=tty0 console=ttyS0,115200 feldcore.slot=${slot} feldcore.version=${version}${extra}
 EOF
 }
 
