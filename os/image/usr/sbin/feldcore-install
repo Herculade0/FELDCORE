@@ -1,0 +1,154 @@
+#!/bin/bash
+# Write the FELDCORE OS disk layout onto one whole disk.
+# The running disk, and any disk with a mounted partition, is refused.
+set -euo pipefail
+
+PAYLOAD=${FELDCORE_PAYLOAD:-/payload}
+ESP_MIB=256
+STATE_MIB=1024
+
+usage() {
+	echo "Usage: feldcore-install --yes DISK" >&2
+	echo "       feldcore-install --from-cmdline" >&2
+	exit 2
+}
+
+die() {
+	echo "feldcore-install: $*" >&2
+	exit 1
+}
+
+from_cmdline() {
+	local word disk
+	disk=""
+	for word in $(cat /proc/cmdline); do
+		case ${word} in
+		feldcore.install=/*)
+			disk=${word#feldcore.install=}
+			;;
+		feldcore.install=)
+			die "feldcore.install= did not name a disk"
+			;;
+		esac
+	done
+	if [[ -z ${disk} ]]; then
+		echo "feldcore-install: this boot did not ask for an install"
+		exit 0
+	fi
+	install_disk "${disk}"
+}
+
+part_name() {
+	local disk=$1 n=$2
+	if [[ -b ${disk}${n} ]]; then
+		echo "${disk}${n}"
+	elif [[ -b ${disk}p${n} ]]; then
+		echo "${disk}p${n}"
+	else
+		die "partition ${n} of ${disk} did not appear"
+	fi
+}
+
+booted_disk() {
+	local src pk
+	src=$(findmnt -n -o SOURCE / || true)
+	if [[ -z ${src} ]]; then
+		return 0
+	fi
+	src=${src%%\[*}
+	pk=$(lsblk -no PKNAME "${src}" 2>/dev/null | head -1 || true)
+	if [[ -n ${pk} ]]; then
+		echo "/dev/${pk}"
+	else
+		echo "${src}"
+	fi
+}
+
+install_disk() {
+	local disk=$1
+	local boot mounted part
+	[[ -b ${disk} ]] || die "${disk} is not a block device"
+	if [[ -f /sys/class/block/$(basename "${disk}")/partition ]]; then
+		die "${disk} is a partition. Name the whole disk."
+	fi
+	boot=$(booted_disk || true)
+	if [[ -n ${boot} && ${disk} == "${boot}" ]]; then
+		die "refusing to install onto the disk this system booted from (${boot})"
+	fi
+	mounted=$(lsblk -nr -o MOUNTPOINT "${disk}" | sed '/^$/d' || true)
+	if [[ -n ${mounted} ]]; then
+		die "${disk} has a mounted filesystem. Unmount it first."
+	fi
+	if [[ ! -f ${PAYLOAD}/feldcore-root.img.zst ]]; then
+		mkdir -p "${PAYLOAD}"
+		mount LABEL=feldcore-payload "${PAYLOAD}" || die "the installer payload is not available"
+	fi
+	for part in feldcore-root.img.zst vmlinuz initrd.img systemd-bootx64.efi version root-mib; do
+		[[ -f ${PAYLOAD}/${part} ]] || die "payload is missing ${part}"
+	done
+	local root_mib part_mib
+	root_mib=$(tr -d ' \n' <"${PAYLOAD}/root-mib")
+	part_mib=$((root_mib + 128))
+
+	echo "feldcore-install: writing the appliance layout to ${disk}"
+	sgdisk --zap-all "${disk}"
+	sgdisk \
+		-n "1:1M:+${ESP_MIB}M" -t 1:EF00 -c 1:FC-ESP \
+		-n "2:0:+${part_mib}M" -t 2:8300 -c 2:feldcore-a \
+		-n "3:0:+${part_mib}M" -t 3:8300 -c 3:feldcore-b \
+		-n "4:0:+${STATE_MIB}M" -t 4:8300 -c 4:feldcore-state \
+		"${disk}"
+	partx -u "${disk}" || blockdev --rereadpt "${disk}" || true
+	udevadm settle || true
+	sleep 1
+
+	local esp a b state
+	esp=$(part_name "${disk}" 1)
+	a=$(part_name "${disk}" 2)
+	b=$(part_name "${disk}" 3)
+	state=$(part_name "${disk}" 4)
+
+	mkfs.vfat -F 32 -n FC-ESP "${esp}"
+	mkfs.ext4 -F -L feldcore-b "${b}"
+	mkfs.ext4 -F -L feldcore-state "${state}"
+	echo "feldcore-install: writing the root image into slot A"
+	zstd -d -c "${PAYLOAD}/feldcore-root.img.zst" >"${a}"
+
+	local mnt version
+	mnt=$(mktemp -d)
+	mount "${esp}" "${mnt}"
+	mkdir -p "${mnt}/EFI/BOOT" "${mnt}/EFI/systemd" "${mnt}/feldcore/a" "${mnt}/loader/entries"
+	cp "${PAYLOAD}/systemd-bootx64.efi" "${mnt}/EFI/BOOT/BOOTX64.EFI"
+	cp "${PAYLOAD}/systemd-bootx64.efi" "${mnt}/EFI/systemd/systemd-bootx64.efi"
+	cp "${PAYLOAD}/vmlinuz" "${mnt}/feldcore/a/vmlinuz"
+	cp "${PAYLOAD}/initrd.img" "${mnt}/feldcore/a/initrd.img"
+	version=$(tr -d ' \n' <"${PAYLOAD}/version")
+	cat >"${mnt}/loader/entries/feldcore-a+3.conf" <<EOF
+title FELDCORE ${version}
+version ${version}
+sort-key feldcore
+linux /feldcore/a/vmlinuz
+initrd /feldcore/a/initrd.img
+options root=LABEL=feldcore-a ro console=tty0 console=ttyS0,115200 feldcore.slot=a feldcore.version=${version}
+EOF
+	cat >"${mnt}/loader/loader.conf" <<EOF
+timeout 3
+console-mode max
+editor no
+auto-entries no
+auto-firmware no
+EOF
+	sync
+	umount "${mnt}"
+	rmdir "${mnt}"
+	echo "feldcore-install: ${disk} will boot FELDCORE ${version} from slot A"
+}
+
+if [[ ${1:-} == "--from-cmdline" ]]; then
+	from_cmdline
+	exit 0
+fi
+if [[ ${1:-} != "--yes" || -z ${2:-} ]]; then
+	usage
+fi
+install_disk "$2"

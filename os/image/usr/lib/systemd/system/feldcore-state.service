@@ -1,0 +1,14 @@
+[Unit]
+Description=Prepare the FELDCORE state partition
+DefaultDependencies=no
+After=local-fs.target
+RequiresMountsFor=/var/lib/feldcore
+Before=feldcore.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/feldcore/prepare-state
+
+[Install]
+WantedBy=multi-user.target

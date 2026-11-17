@@ -26,6 +26,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/events"
 	"github.com/Herculade0/feldcore/internal/notify"
+	"github.com/Herculade0/feldcore/internal/osupdate"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
@@ -198,6 +199,16 @@ func main() {
 		}
 	}()
 
+	osSvc := &osupdate.Service{
+		DataDir:       cfg.DataDir,
+		DaemonVersion: version.Current,
+		Store:         st,
+		ManifestURL:   os.Getenv("FELDCORE_UPDATE_URL"),
+		PubKey:        os.Getenv("FELDCORE_UPDATE_PUBKEY"),
+		Root:          os.Getenv("FELDCORE_OS_ROOT"),
+		AllowLocal:    os.Getenv("FELDCORE_UPDATE_ALLOW_LOCAL") == "1",
+		Log:           log,
+	}
 	diskSvc, err := storage.Open(storage.Deps{
 		DataDir: cfg.DataDir, SharesRoot: shareMgr.Root,
 		PermitHostDisks: true, ApplySystem: os.Geteuid() == 0, Log: log,
@@ -262,12 +273,14 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		OS:         osSvc,
 		DataDir:    cfg.DataDir,
 		SharesRoot: cfg.SharesRoot,
 		Storage:    diskSvc,
 		Health:     healthSvc,
 		Alerts:     alerts,
 	})
+	go srv.OSLoop(ctx)
 	go func() {
 		if err := diskSvc.Restore(ctx); err != nil {
 			log.Warn("a storage pool was not mounted", "err", err)

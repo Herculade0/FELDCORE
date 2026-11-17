@@ -1,0 +1,13 @@
+[Unit]
+Description=Install FELDCORE OS onto a disk named on the kernel command line
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/feldcore-install --from-cmdline
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

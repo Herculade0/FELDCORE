@@ -33,7 +33,7 @@ Settings has four tabs. The `?` on this page opens this article. Each card has i
 
 **Agent access** is API tokens. [[help:api-tokens|API tokens and scopes]].
 
-**Updates** has two switches. **Security updates** enables Debian's unattended-upgrades, limited to security updates. **Check for FELDCORE updates** looks for a newer release and tells you. It does not download or install one. Installing an update, and rolling back, are [[help:updates-rollback|not in the app yet]].
+**Updates** has two switches. **Security updates** enables Debian's unattended-upgrades, limited to security updates. **Check for FELDCORE updates** looks for a newer `feldcored` release and tells you. It does not download or install one. Installing an OS image, and rolling back to the previous slot, are on [[help:updates-rollback|Updates]].
 
 **App Store** is the feed URL for the Community Applications JSON.
 

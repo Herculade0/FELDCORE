@@ -28,6 +28,7 @@
   "stacks": { "page": "stacks", "available": true },
   "health": { "page": "health", "available": true },
   "health.thresholds": { "page": "health", "anchor": "health-thresholds", "available": true },
+  "updates": { "page": "updates", "available": true },
   "internal-affairs": {
     "page": "help",
     "help": "internal-affairs",

@@ -70,7 +70,7 @@ var (
 var pages = map[string]bool{
 	"dashboard": true, "launcher": true, "storage": true, "shares": true,
 	"docker": true, "stacks": true, "apps": true, "vms": true, "backups": true,
-	"health": true, "audit": true, "settings": true, "help": true,
+	"health": true, "audit": true, "updates": true, "settings": true, "help": true,
 }
 
 var tabs = map[string]bool{

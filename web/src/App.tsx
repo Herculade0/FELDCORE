@@ -12,6 +12,7 @@ import { IconButton } from "./components/form";
 import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import AuditPage from "./components/AuditPage";
+import UpdatesPage from "./components/UpdatesPage";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
@@ -161,6 +162,8 @@ function ShellFrame() {
             <HealthPage />
           ) : page === "audit" ? (
             <AuditPage />
+          ) : page === "updates" ? (
+            <UpdatesPage />
           ) : page === "settings" ? (
             <SettingsPage
               onOpenAudit={() => go("audit")}
