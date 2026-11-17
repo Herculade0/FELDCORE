@@ -19,7 +19,7 @@ func TestChangePasswordKeepsPasskeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	tok := mustLogin(t, a, testPass)
-	if err := a.ChangePassword(testPass, "a new password"); err != nil {
+	if err := a.ChangePassword(testPass, "a new password", tok); err != nil {
 		t.Fatal(err)
 	}
 	got := a.st.Snapshot().Passkeys

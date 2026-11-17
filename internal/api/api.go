@@ -214,8 +214,8 @@ func (s *Server) Router() http.Handler {
 		})
 
 		// The wizard is open until an administrator exists, and then only
-		// with a session or an admin-scoped token. It stays outside the
-		// short timeout because a disk step can take a while.
+		// with that browser session. An agent token cannot run it. It stays
+		// outside the short timeout because a disk step can take a while.
 		r.Group(func(r chi.Router) {
 			r.Use(s.wizardAccess)
 			r.Get("/setup/wizard", s.handleWizardStatus)
@@ -735,7 +735,9 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, auth.ErrRateLimited), errors.Is(err, citizenid.ErrRateLimited), errors.Is(err, setup.ErrRateLimited):
 		writeError(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a few minutes and try again.")
 	default:
-		s.log.Error("request failed", "path", r.URL.Path, "err", err)
+		if s.log != nil {
+			s.log.Error("request failed", "path", r.URL.Path, "err", err)
+		}
 		writeError(w, http.StatusInternalServerError, "Something went wrong on the server. Check the FELDCORE log.")
 	}
 }

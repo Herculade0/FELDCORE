@@ -21,6 +21,9 @@ type Sets struct {
 	VMs             bool `json:"vms"`
 	InternalAffairs bool `json:"internalAffairs"`
 	Snapshots       bool `json:"snapshots"`
+	// Secrets includes the encrypted secrets directory. It is off unless an
+	// administrator turns it on. A backups:write token cannot set it.
+	Secrets bool `json:"secrets,omitempty"`
 }
 
 // DefaultSets is the first backup set. The Internal Affairs cabinet is included.
@@ -29,7 +32,7 @@ func DefaultSets() Sets {
 }
 
 func (s Sets) any() bool {
-	return s.Config || s.Appdata || s.Compose || s.VMs || s.InternalAffairs || s.Snapshots
+	return s.Config || s.Appdata || s.Compose || s.VMs || s.InternalAffairs || s.Snapshots || s.Secrets
 }
 
 func (s Sets) names() []string {
@@ -51,6 +54,9 @@ func (s Sets) names() []string {
 	}
 	if s.Snapshots {
 		out = append(out, "snapshots")
+	}
+	if s.Secrets {
+		out = append(out, "secrets")
 	}
 	return out
 }

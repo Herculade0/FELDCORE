@@ -161,6 +161,7 @@ export default function Wizard({
   const [password2, setPassword2] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
+  const [currentTotp, setCurrentTotp] = useState("");
   const [skipTotp, setSkipTotp] = useState(false);
   const [disableTotp, setDisableTotp] = useState(false);
   const [remoteMode, setRemoteMode] = useState("none");
@@ -244,7 +245,8 @@ export default function Wizard({
     password,
     password2,
     currentPassword,
-    totpCode,
+    totpCode: disableTotp && !totpCode ? currentTotp : totpCode,
+    currentTotp,
     skipTotp,
     disableTotp,
     remoteMode,
@@ -419,6 +421,7 @@ export default function Wizard({
                   password2={password2}
                   currentPassword={currentPassword}
                   totpCode={totpCode}
+                  currentTotp={currentTotp}
                   skipTotp={skipTotp}
                   disableTotp={disableTotp}
                   busy={busy}
@@ -427,6 +430,7 @@ export default function Wizard({
                   onPassword2={(v) => { touch(); setPassword2(v); }}
                   onCurrent={(v) => { touch(); setCurrentPassword(v); }}
                   onCode={(v) => { touch(); setTotpCode(v); }}
+                  onCurrentTotp={(v) => { touch(); setCurrentTotp(v); }}
                   onSkip={(v) => { touch(); setSkipTotp(v); setDisableTotp(false); }}
                   onDisable={(v) => { touch(); setDisableTotp(v); setSkipTotp(false); }}
                   onEnrol={() => void send({ action: "totp" })}
@@ -647,6 +651,7 @@ function AccountFields(props: {
   password2: string;
   currentPassword: string;
   totpCode: string;
+  currentTotp: string;
   skipTotp: boolean;
   disableTotp: boolean;
   busy: boolean;
@@ -655,6 +660,7 @@ function AccountFields(props: {
   onPassword2: (v: string) => void;
   onCurrent: (v: string) => void;
   onCode: (v: string) => void;
+  onCurrentTotp: (v: string) => void;
   onSkip: (v: boolean) => void;
   onDisable: (v: boolean) => void;
   onEnrol: () => void;
@@ -678,10 +684,18 @@ function AccountFields(props: {
           Two-factor sign-in is optional and strongly recommended. The secret stays in the secrets store, not in the setup file.
         </p>
         {props.view.totpEnabled && props.view.step === "signin" ? (
-          <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-ink">
-            <input type="checkbox" checked={props.disableTotp} onChange={(e) => props.onDisable(e.target.checked)} />
-            Turn the authenticator off
-          </label>
+          <>
+            <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-ink">
+              <input type="checkbox" checked={props.disableTotp} onChange={(e) => props.onDisable(e.target.checked)} />
+              Turn the authenticator off
+            </label>
+            <div className="mt-3">
+              <TextField label="Current authenticator code" value={props.currentTotp} onChange={(e) => props.onCurrentTotp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" spellCheck={false} />
+            </div>
+            <Button className="mt-3" variant="secondary" disabled={props.busy} onClick={props.onEnrol}>
+              Replace authenticator
+            </Button>
+          </>
         ) : (
           <>
             <Button className="mt-3" variant="secondary" disabled={props.busy || props.skipTotp} onClick={props.onEnrol}>

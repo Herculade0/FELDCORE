@@ -41,6 +41,7 @@ func TestDirectoryUserCannotManage(t *testing.T) {
 		t.Fatal(err)
 	}
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"ada","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	login.RemoteAddr = "192.0.2.80:9"
 	rec := httptest.NewRecorder()

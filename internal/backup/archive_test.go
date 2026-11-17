@@ -63,16 +63,16 @@ func TestDestinationRulesAndMountPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Service{DataDir: dir, SharesRoot: filepath.Join(dir, "shares"), Secrets: box, Compose: func(context.Context) []string { return nil }}
-	if _, err := s.SaveDestination(DestinationInput{Name: "bad", Kind: "local", Path: "/etc/feldcore"}, "admin", ""); err == nil {
+	if _, err := s.SaveDestination(DestinationInput{Name: "bad", Kind: "local", Path: "/etc/feldcore"}, "admin", "", true); err == nil {
 		t.Fatal("accepted an operating-system path")
 	}
-	if _, err := s.SaveDestination(DestinationInput{Name: "empty", Kind: "local", Path: filepath.Join(dir, "out"), Sets: &Sets{}}, "admin", ""); err == nil {
+	if _, err := s.SaveDestination(DestinationInput{Name: "empty", Kind: "local", Path: filepath.Join(dir, "out"), Sets: &Sets{}}, "admin", "", true); err == nil {
 		t.Fatal("accepted a destination with nothing to copy")
 	}
 	dest, err := s.SaveDestination(DestinationInput{
 		Name: "Nightly", Kind: "local", Enabled: true, Path: filepath.Join(dir, "out"),
 		ScheduleMode: "daily", ScheduleTime: "03:00", KeepDaily: 7, KeepWeekly: 4, KeepMonthly: 6,
-	}, "admin", "")
+	}, "admin", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	dest, err := s.SaveDestination(DestinationInput{
 		Name: "Nightly", Kind: "local", Enabled: true, Path: filepath.Join(dir, "dest"),
 		ScheduleMode: "manual",
-	}, "ada", "")
+	}, "ada", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestRealResticRoundTrip(t *testing.T) {
 	dest, err := s.SaveDestination(DestinationInput{
 		Name: "Local", Kind: "local", Enabled: true, Path: filepath.Join(dir, "dest"),
 		KeepDaily: 7, KeepWeekly: 4, KeepMonthly: 6, ScheduleMode: "manual",
-	}, "admin", "")
+	}, "admin", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}

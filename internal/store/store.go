@@ -63,7 +63,8 @@ type Group struct {
 }
 
 // AppGrant is who may open one published app. Container matches a web route.
-// Level is public, users, groups or admin. Empty means public.
+// Level is public, users, groups or admin. An empty level on a grant that
+// exists is treated as admin.
 type AppGrant struct {
 	Container string   `json:"container"`
 	Level     string   `json:"level"`

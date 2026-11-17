@@ -58,7 +58,7 @@ func TestRestoreStaysInsideBackupRoots(t *testing.T) {
 	dest, err := s.SaveDestination(DestinationInput{
 		Name: "Nightly", Kind: "local", Enabled: true, Path: filepath.Join(dir, "dest"),
 		ScheduleMode: "manual",
-	}, "ada", "")
+	}, "ada", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Herculade0/feldcore/internal/auth"
 )
 
 const sessionCookie = "feldcore_session"
@@ -37,6 +39,11 @@ func (s *Server) sessionCookieValue(r *http.Request) string {
 		return c.Value
 	}
 	return ""
+}
+
+// sessionToken is the administrator cookie, preferring the __Host- name.
+func (s *Server) sessionToken(r *http.Request) string {
+	return s.sessionCookieValue(r)
 }
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
@@ -167,10 +174,36 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	token, expires, err := s.auth.LoginCode(clientKey(r), in.Username, in.Password, in.Code)
+	from := clientKey(r)
+	if s.citizen != nil {
+		from = s.citizen.ClientIP(r)
+		id, err := s.citizen.Authenticate(r, in.Username, in.Password, in.Code)
+		if err != nil {
+			if s.log != nil {
+				s.log.Warn("failed sign-in", "from", from)
+			}
+			s.fail(w, r, err)
+			return
+		}
+		if !id.Admin {
+			s.fail(w, r, auth.ErrInvalidCredentials)
+			return
+		}
+		if s.onManagement(r) {
+			token, expires, err := s.auth.IssueSession(id.Username)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			s.setSessionCookie(w, r, token, expires)
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"username": id.Username})
+		return
+	}
+	token, expires, err := s.auth.LoginCode(from, in.Username, in.Password, in.Code)
 	if err != nil {
 		if s.log != nil {
-			s.log.Warn("failed sign-in", "from", clientKey(r))
+			s.log.Warn("failed sign-in", "from", from)
 		}
 		s.fail(w, r, err)
 		return
@@ -180,7 +213,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if token := s.sessionCookieValue(r); token != "" {
+	if token := s.sessionToken(r); token != "" {
 		if err := s.auth.Logout(token); err != nil {
 			s.fail(w, r, err)
 			return
@@ -191,4 +224,11 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
+}
+
+func (s *Server) onManagement(r *http.Request) bool {
+	if s.citizen == nil {
+		return true
+	}
+	return s.citizen.ManagementHost(r)
 }

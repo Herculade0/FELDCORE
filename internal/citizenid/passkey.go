@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -75,14 +74,14 @@ func (g *Gateway) FinishPasskeyLogin(w http.ResponseWriter, r *http.Request) (Id
 	cred, err = wa.FinishDiscoverableLogin(g.discover, c.Data, r)
 	if err != nil {
 		g.lim.fail("ip:"+g.clientIP(r), g.now())
-		g.record("", "sign-in failed", "passkey", "denied")
+		g.recordOnce("passkey:"+g.clientIP(r), "", "sign-in failed", "passkey", "denied")
 		if g.log != nil {
 			g.log.Warn("passkey login failed", "err", err)
 		}
 		return Identity{}, ErrPasskey
 	}
 	if cred.Authenticator.CloneWarning {
-		g.record("", "sign-in failed", "passkey", "denied")
+		g.recordOnce("passkey:"+g.clientIP(r), "", "sign-in failed", "passkey", "denied")
 		return Identity{}, ErrPasskey
 	}
 	id, err := g.identityForCredential(cred)
@@ -198,16 +197,16 @@ func (g *Gateway) discover(rawID, userHandle []byte) (webauthn.User, error) {
 
 func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
 	host := strings.ToLower(stripPort(g.forwardedHost(r)))
-	if host == "" || net.ParseIP(host) != nil {
-		return nil, &InputError{"Passkeys need a hostname such as localhost or the server's web address."}
+	if !g.passkeyHost(host) {
+		return nil, &InputError{"Passkeys are not available on this address."}
 	}
 	rpID := host
 	if parent := g.parentDomain(); parent != "" && (host == parent || strings.HasSuffix(host, "."+parent)) {
 		rpID = parent
 	}
-	origin := "http://" + g.clientHost(r)
+	origin := "http://" + g.requestHost(r)
 	if g.requestSecure(r) {
-		origin = "https://" + g.clientHost(r)
+		origin = "https://" + g.requestHost(r)
 	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPDisplayName:               "FELDCORE",

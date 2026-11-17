@@ -119,7 +119,7 @@ func (s *Server) handleSettingsPassword(w http.ResponseWriter, r *http.Request) 
 	if !readJSON(w, r, &body) || s.auth == nil {
 		return
 	}
-	if err := s.auth.ChangePassword(body.Current, body.Next); err != nil {
+	if err := s.auth.ChangePassword(body.Current, body.Next, s.sessionToken(r)); err != nil {
 		s.fail(w, r, err)
 		return
 	}

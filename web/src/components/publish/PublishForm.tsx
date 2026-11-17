@@ -41,7 +41,7 @@ export default function PublishForm({
   const [enabled, setEnabled] = useState(false);
   const [sub, setSub] = useState("");
   const [port, setPort] = useState("");
-  const [access, setAccess] = useState("public");
+  const [access, setAccess] = useState("admins");
   const [groups, setGroups] = useState("");
   const [brand, setBrand] = useState<SignInBrand>(emptyBrand);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export default function PublishForm({
     setEnabled(d.enabled);
     setSub(d.subdomain || d.suggestion.subdomain);
     setPort(String(d.port || d.suggestion.port || ""));
-    setAccess(d.access || "public");
+    setAccess(d.access || "admins");
     setGroups((d.groups ?? []).join(", "));
     setBrand(asBrand(d.brand));
   };
