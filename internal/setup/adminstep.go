@@ -21,8 +21,11 @@ func (s *Service) beginTOTP(req Request) (secret, uri string, err error) {
 	account := strings.TrimSpace(req.Username)
 	if admin := s.st.Snapshot().Admin; admin != nil {
 		account = admin.Username
-		if err := s.accounts.CheckPassword(req.CurrentPassword); err != nil {
+		if err := s.accounts.CheckPassword(req.Client, req.CurrentPassword); err != nil {
 			return "", "", &InputError{"Enter the current password before changing two-factor."}
+		}
+		if err := s.accounts.VerifyCurrentTOTP(req.CurrentTOTP); err != nil {
+			return "", "", err
 		}
 	}
 	if account == "" {
@@ -81,6 +84,12 @@ func (s *Service) enrolExisting(req Request) ([]string, *Grant, error) {
 	if s.accounts == nil {
 		return nil, nil, &OpError{"Two-factor setup is not available."}
 	}
+	if err := s.accounts.CheckPassword(req.Client, req.CurrentPassword); err != nil {
+		return nil, nil, &InputError{"Enter the current password before changing two-factor."}
+	}
+	if err := s.accounts.VerifyCurrentTOTP(req.CurrentTOTP); err != nil {
+		return nil, nil, err
+	}
 	if err := s.accounts.VerifyPending(req.TOTPCode); err != nil {
 		return nil, nil, err
 	}
@@ -101,11 +110,18 @@ func (s *Service) applySignin(req Request) ([]string, error) {
 	if req.SkipTOTP && !req.DisableTOTP {
 		return nil, nil
 	}
-	if err := s.accounts.CheckPassword(req.CurrentPassword); err != nil {
+	if err := s.accounts.CheckPassword(req.Client, req.CurrentPassword); err != nil {
 		return nil, &InputError{"Enter the current password before changing two-factor."}
 	}
+	if err := s.accounts.VerifyCurrentTOTP(req.CurrentTOTP); err != nil {
+		return nil, err
+	}
 	if req.DisableTOTP {
-		if err := s.accounts.DisableTOTP(req.CurrentPassword, req.TOTPCode); err != nil {
+		code := req.TOTPCode
+		if strings.TrimSpace(code) == "" {
+			code = req.CurrentTOTP
+		}
+		if err := s.accounts.DisableTOTP(req.CurrentPassword, code); err != nil {
 			return nil, err
 		}
 		return nil, nil

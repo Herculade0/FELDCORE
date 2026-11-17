@@ -20,12 +20,13 @@ type citizenHook struct {
 }
 
 func (h citizenHook) Allow(r *http.Request, app App) error {
+	level, groups := h.g.PublishedAccess(app.Container, app.Access, app.Groups)
 	decision, err := h.g.Authorize(r, citizenid.AppAccess{
 		ID:       app.Container,
 		Name:     app.Hostname,
 		Host:     app.Hostname,
-		Level:    citizenLevel(app.Access),
-		GroupIDs: h.g.ResolveGroups(app.Groups),
+		Level:    level,
+		GroupIDs: groups,
 	})
 	if err != nil {
 		return err
@@ -37,19 +38,4 @@ func (h citizenHook) Allow(r *http.Request, app App) error {
 		return &DenyError{Status: http.StatusFound, Msg: "Sign in to continue.", Location: decision.Location}
 	}
 	return &DenyError{Status: http.StatusForbidden, Msg: "You do not have access to this app."}
-}
-
-func citizenLevel(access string) string {
-	switch access {
-	case "", AccessPublic:
-		return citizenid.LevelPublic
-	case AccessSignedIn:
-		return citizenid.LevelUsers
-	case AccessGroups:
-		return citizenid.LevelGroups
-	case AccessAdmins:
-		return citizenid.LevelAdmin
-	default:
-		return "unknown"
-	}
 }

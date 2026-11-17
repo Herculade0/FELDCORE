@@ -63,16 +63,16 @@ func TestDestinationRulesAndMountPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Service{DataDir: dir, SharesRoot: filepath.Join(dir, "shares"), Secrets: box, Compose: func(context.Context) []string { return nil }}
-	if _, err := s.SaveDestination(DestinationInput{Name: "bad", Kind: "local", Path: "/etc/feldcore"}, "admin", ""); err == nil {
+	if _, err := s.SaveDestination(DestinationInput{Name: "bad", Kind: "local", Path: "/etc/feldcore"}, "admin", "", true); err == nil {
 		t.Fatal("accepted an operating-system path")
 	}
-	if _, err := s.SaveDestination(DestinationInput{Name: "empty", Kind: "local", Path: filepath.Join(dir, "out"), Sets: &Sets{}}, "admin", ""); err == nil {
+	if _, err := s.SaveDestination(DestinationInput{Name: "empty", Kind: "local", Path: filepath.Join(dir, "out"), Sets: &Sets{}}, "admin", "", true); err == nil {
 		t.Fatal("accepted a destination with nothing to copy")
 	}
 	dest, err := s.SaveDestination(DestinationInput{
 		Name: "Nightly", Kind: "local", Enabled: true, Path: filepath.Join(dir, "out"),
 		ScheduleMode: "daily", ScheduleTime: "03:00", KeepDaily: 7, KeepWeekly: 4, KeepMonthly: 6,
-	}, "admin", "")
+	}, "admin", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,11 +239,11 @@ func TestArchiveRoundTrip(t *testing.T) {
 	dest, err := s.SaveDestination(DestinationInput{
 		Name: "Nightly", Kind: "local", Enabled: true, Path: filepath.Join(dir, "dest"),
 		ScheduleMode: "manual",
-	}, "ada", "")
+	}, "ada", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := s.StartBackup(dest.ID, "ada", "tok")
+	job, err := s.StartBackup(dest.ID, "ada", "tok", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if err != nil || len(view.Entries) != 1 || view.Entries[0].Name != "note.txt" {
 		t.Fatalf("browse %+v %v", view, err)
 	}
-	rest, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Paths: []string{"/data/note.txt"}}, "ada", "tok")
+	rest, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Paths: []string{"/data/note.txt"}}, "ada", "tok", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,12 +280,12 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "restores", rest.ID, "data", "note.txt")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Mode: "replace"}, "ada", ""); err == nil {
+	if _, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Mode: "replace"}, "ada", "", false); err == nil {
 		t.Fatal("replace without the confirmation was accepted")
 	}
 
 	eng.fail = op("the disk filled up")
-	failed, err := s.StartBackup(dest.ID, "ada", "tok")
+	failed, err := s.StartBackup(dest.ID, "ada", "tok", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,11 +334,11 @@ func TestRealResticRoundTrip(t *testing.T) {
 	dest, err := s.SaveDestination(DestinationInput{
 		Name: "Local", Kind: "local", Enabled: true, Path: filepath.Join(dir, "dest"),
 		KeepDaily: 7, KeepWeekly: 4, KeepMonthly: 6, ScheduleMode: "manual",
-	}, "admin", "")
+	}, "admin", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := s.StartBackup(dest.ID, "admin", "")
+	job, err := s.StartBackup(dest.ID, "admin", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}

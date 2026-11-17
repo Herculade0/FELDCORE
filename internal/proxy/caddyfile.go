@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -15,10 +16,13 @@ type Site struct {
 	// Gate, when set, is the Citizen ID forward_auth upstream (host:port).
 	// Empty leaves the site public, which is the default.
 	Gate string
-	// KeepCookies is set when Upstream is the publish listener. That listener
-	// still needs the citizen cookie, and it strips the cookie itself before
-	// the request reaches the container. A direct upstream always strips.
+	// KeepCookies is set when Upstream is the publish listener. That hop still
+	// needs the citizen cookie. Desk, session and passkey cookies are stripped
+	// here, and the listener strips every credential cookie before the app.
 	KeepCookies bool
+	// Passthrough is the management UI. Its cookies reach feldcored. Forwarded
+	// headers are still overwritten so a browser cannot supply them.
+	Passthrough bool
 }
 
 // Build renders a Caddyfile. The Cloudflare token is never written here;
@@ -70,47 +74,61 @@ func writeProxy(b *strings.Builder, site Site) {
 		return
 	}
 	fmt.Fprintf(b, "\troute {\n")
-	fmt.Fprintf(b, "\t\treverse_proxy /citizen/* %s\n", site.Gate)
+	fmt.Fprintf(b, "\t\treverse_proxy /citizen/* %s {\n", site.Gate)
+	writeForwarded(b, "\t\t\t")
+	fmt.Fprintf(b, "\t\t}\n")
 	fmt.Fprintf(b, "\t\tforward_auth %s {\n", site.Gate)
 	fmt.Fprintf(b, "\t\t\turi /citizen/check\n")
 	fmt.Fprintf(b, "\t\t\tcopy_headers Cookie\n")
-	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Host {http.request.host}\n")
 	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Uri {http.request.uri}\n")
-	fmt.Fprintf(b, "\t\t\theader_up X-Forwarded-Proto {http.request.scheme}\n")
+	writeForwarded(b, "\t\t\t")
 	fmt.Fprintf(b, "\t\t}\n")
 	writeAppProxy(b, site, "\t\t")
 	fmt.Fprintf(b, "\t}\n")
 }
 
 func writeAppProxy(b *strings.Builder, site Site, pad string) {
-	if site.KeepCookies {
-		fmt.Fprintf(b, "%sreverse_proxy %s\n", pad, site.Upstream)
-		return
-	}
-	writeCookieScrub(b, pad)
 	fmt.Fprintf(b, "%sreverse_proxy %s {\n", pad, site.Upstream)
-	fmt.Fprintf(b, "%s\theader_up -Authorization\n", pad)
-	fmt.Fprintf(b, "%s\theader_up Cookie {clean_cookie}\n", pad)
+	writeForwarded(b, pad+"\t")
+	if !site.Passthrough {
+		fmt.Fprintf(b, "%s\theader_up -Authorization\n", pad)
+		writeCookieReplace(b, pad+"\t", site.KeepCookies)
+	}
 	fmt.Fprintf(b, "%s}\n", pad)
 }
 
-// writeCookieScrub removes only the Citizen ID and management cookies.
-// Other cookies belong to the app and are forwarded.
-func writeCookieScrub(b *strings.Builder, pad string) {
-	names := []string{"feldcore_citizen", "feldcore_desk", "feldcore_session"}
-	in := "{http.request.header.Cookie}"
-	for i, name := range names {
-		out := fmt.Sprintf("{c%d}", i)
-		if i == len(names)-1 {
-			out = "{clean_cookie}"
-		}
-		fmt.Fprintf(b, "%smap %s %s {\n", pad, in, out)
-		fmt.Fprintf(b, "%s\t~(?i)^(?:__Host-)?%s=[^;]*(?:;\\s*(.*))?$ \"{1}\"\n", pad, name)
-		fmt.Fprintf(b, "%s\t~(?i)^(.*?);\\s*(?:__Host-)?%s=[^;]*(?:;\\s*(.*))?$ \"{1}; {2}\"\n", pad, name)
-		fmt.Fprintf(b, "%s\tdefault %s\n", pad, in)
-		fmt.Fprintf(b, "%s}\n", pad)
-		in = out
+// writeForwarded overwrites the headers a browser can set. CF-Connecting-IP
+// is removed on every Caddy hop. The tunnel connector, which dials the
+// publish listener itself, is the only path that may send it.
+func writeForwarded(b *strings.Builder, pad string) {
+	fmt.Fprintf(b, "%sheader_up -CF-Connecting-IP\n", pad)
+	fmt.Fprintf(b, "%sheader_up X-Forwarded-For {http.request.remote.host}\n", pad)
+	fmt.Fprintf(b, "%sheader_up X-Forwarded-Proto {http.request.scheme}\n", pad)
+	fmt.Fprintf(b, "%sheader_up X-Forwarded-Host {http.request.host}\n", pad)
+}
+
+// cookieScrubPattern matches every FELDCORE credential cookie. Caddy's
+// header_up replacement uses the same RE2 expression and replaces every match.
+func cookieScrubPattern(keepCitizen bool) string {
+	names := "feldcore_citizen|feldcore_desk|feldcore_session|feldcore_passkey"
+	if keepCitizen {
+		names = "feldcore_desk|feldcore_session|feldcore_passkey"
 	}
+	return `(?i)(?:^|;\s*)(?:__Host-)?(?:` + names + `)=[^;]*`
+}
+
+func writeCookieReplace(b *strings.Builder, pad string, keepCitizen bool) {
+	fmt.Fprintf(b, "%sheader_up Cookie \"%s\" \"\"\n", pad, cookieScrubPattern(keepCitizen))
+	fmt.Fprintf(b, "%sheader_up Cookie \"^\\s*;\\s*|\\s*;\\s*$\" \"\"\n", pad)
+	fmt.Fprintf(b, "%sheader_up Cookie \";\\s*;\" \";\"\n", pad)
+}
+
+// ScrubCookies applies the same replacements the Caddyfile emits.
+func ScrubCookies(header string, keepCitizen bool) string {
+	header = regexp.MustCompile(cookieScrubPattern(keepCitizen)).ReplaceAllString(header, "")
+	header = regexp.MustCompile(`^\s*;\s*|\s*;\s*$`).ReplaceAllString(header, "")
+	header = regexp.MustCompile(`;\s*;`).ReplaceAllString(header, ";")
+	return strings.TrimSpace(header)
 }
 
 // dockerfile builds Caddy with the Cloudflare DNS challenge module.

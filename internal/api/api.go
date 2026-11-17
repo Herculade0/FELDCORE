@@ -214,8 +214,8 @@ func (s *Server) Router() http.Handler {
 		})
 
 		// The wizard is open until an administrator exists, and then only
-		// with a session or an admin-scoped token. It stays outside the
-		// short timeout because a disk step can take a while.
+		// with that browser session. An agent token cannot run it. It stays
+		// outside the short timeout because a disk step can take a while.
 		r.Group(func(r chi.Router) {
 			r.Use(s.wizardAccess)
 			r.Get("/setup/wizard", s.handleWizardStatus)

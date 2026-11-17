@@ -8,28 +8,47 @@ import (
 )
 
 // clientIP is the address lockout and the audit log attribute to the caller.
-// CF-Connecting-IP and X-Forwarded-For are used only when the TCP peer is
-// loopback or Trust reports it (Caddy and the Cloudflare Tunnel connector).
-// Any other peer is itself the client. This is the same rule as the publish
-// proxy's client address.
+// CF-Connecting-IP is used only from cloudflared or loopback (the host
+// connector). X-Forwarded-For is used only from Caddy or loopback, and only
+// the rightmost address, which is the hop the proxy added. A direct client
+// is its own TCP peer.
 func (g *Gateway) clientIP(r *http.Request) string {
+	return clientIP(r, g.trust, g.tunnel)
+}
+
+// ClientIP is clientIP for callers outside this package.
+func (g *Gateway) ClientIP(r *http.Request) string {
+	return g.clientIP(r)
+}
+
+func clientIP(r *http.Request, proxy, tunnel trustPeer) string {
 	peer := remoteIP(r)
-	trusted := peer != nil && (peer.IsLoopback() || (g.trust != nil && g.trust(r.Context(), peer)))
-	if trusted {
+	if peer == nil {
+		return ""
+	}
+	loop := peer.IsLoopback()
+	fromTunnel := loop || (tunnel != nil && tunnel(r.Context(), peer))
+	if fromTunnel {
 		if ip := parseIPHeader(r.Header.Get("CF-Connecting-IP")); ip != nil {
 			return ip.String()
 		}
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			first := strings.TrimSpace(strings.Split(xff, ",")[0])
-			if ip := parseIPHeader(first); ip != nil {
-				return ip.String()
-			}
+	}
+	fromProxy := loop || (proxy != nil && proxy(r.Context(), peer))
+	if fromProxy {
+		if ip := rightmostForwarded(r.Header.Get("X-Forwarded-For")); ip != nil {
+			return ip.String()
 		}
 	}
-	if peer != nil {
-		return peer.String()
+	return peer.String()
+}
+
+func rightmostForwarded(xff string) net.IP {
+	if strings.TrimSpace(xff) == "" {
+		return nil
 	}
-	return ""
+	parts := strings.Split(xff, ",")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	return parseIPHeader(last)
 }
 
 func remoteIP(r *http.Request) net.IP {

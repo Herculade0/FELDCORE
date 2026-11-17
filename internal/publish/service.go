@@ -167,6 +167,7 @@ type Service struct {
 	Remote      Tunnel
 	Resolve     Resolver
 	Trust       func(context.Context, net.IP) bool
+	Tunnel      func(context.Context, net.IP) bool
 	DataDir     string
 	GatewayPort int
 	Log         *slog.Logger
@@ -183,6 +184,7 @@ type Service struct {
 	once      sync.Once
 	peerMu    sync.Mutex
 	peers     map[string]peerHit
+	blockAt   map[string]time.Time
 	geoMu     sync.Mutex
 	countries *geoDB
 	geoErr    string
@@ -241,6 +243,7 @@ func (s *Service) protection() *Protection {
 	s.once.Do(func() {
 		s.guard.Policy = s.currentPolicy
 		s.guard.Trust = s.trusted
+		s.guard.Tunnel = s.tunnelPeer
 		s.guard.Geo = geoSource{s}
 		s.guard.Now = func() time.Time {
 			if s.now != nil {
@@ -345,7 +348,7 @@ func (s *Service) trusted(ctx context.Context, ip net.IP) bool {
 	if ip == nil || ip.IsLoopback() {
 		return ip != nil && ip.IsLoopback()
 	}
-	key := ip.String()
+	key := "p:" + ip.String()
 	now := time.Now()
 	s.peerMu.Lock()
 	if hit, ok := s.peers[key]; ok && now.Before(hit.exp) {
@@ -363,10 +366,32 @@ func (s *Service) trusted(ctx context.Context, ip net.IP) bool {
 	return ok
 }
 
+func (s *Service) tunnelPeer(ctx context.Context, ip net.IP) bool {
+	if ip == nil || ip.IsLoopback() {
+		return false
+	}
+	key := "t:" + ip.String()
+	now := time.Now()
+	s.peerMu.Lock()
+	if hit, ok := s.peers[key]; ok && now.Before(hit.exp) {
+		s.peerMu.Unlock()
+		return hit.ok
+	}
+	s.peerMu.Unlock()
+	ok := s.Tunnel != nil && s.Tunnel(ctx, ip)
+	s.peerMu.Lock()
+	if s.peers == nil {
+		s.peers = map[string]peerHit{}
+	}
+	s.peers[key] = peerHit{ok: ok, exp: now.Add(5 * time.Second)}
+	s.peerMu.Unlock()
+	return ok
+}
+
 func (s *Service) recordBlock(r *http.Request, app App, res Result) {
 	ip := res.IP
 	if ip == "" {
-		ip = ClientIP(r, nil)
+		ip = ClientIP(r, nil, nil)
 	}
 	path := "/"
 	if r.URL != nil && r.URL.Path != "" {
@@ -398,6 +423,24 @@ func (s *Service) recordBlock(r *http.Request, app App, res Result) {
 		Host:      app.Hostname,
 		Detail:    detail,
 	}
+	key := ip + "|" + app.Hostname + "|" + res.Reason
+	now := time.Now()
+	if s.now != nil {
+		now = s.now()
+	}
+	s.peerMu.Lock()
+	if s.blockAt == nil {
+		s.blockAt = map[string]time.Time{}
+	}
+	if t, ok := s.blockAt[key]; ok && now.Sub(t) < time.Minute {
+		s.peerMu.Unlock()
+		return
+	}
+	if len(s.blockAt) > 1024 {
+		s.blockAt = map[string]time.Time{}
+	}
+	s.blockAt[key] = now
+	s.peerMu.Unlock()
 	if s.Audit != nil {
 		if err := s.Audit.Record("", ev); err != nil && s.Log != nil {
 			s.Log.Warn("audit log write failed", "err", err)
@@ -450,7 +493,7 @@ func (s *Service) Form(ctx context.Context, container, webUI string, ports []int
 		Subdomain:  sub,
 		Hostname:   sub + "." + domain,
 		Port:       port,
-		Access:     AccessPublic,
+		Access:     AccessAdmins,
 		Groups:     []string{},
 		TunnelMode: s.tunnelMode(ctx),
 		From:       from,
@@ -951,7 +994,9 @@ func subdomain(s string) (string, error) {
 
 func normalizeAccess(access string, groups []string) (string, []string, error) {
 	switch strings.ToLower(strings.TrimSpace(access)) {
-	case "", AccessPublic:
+	case "":
+		return AccessAdmins, nil, nil
+	case AccessPublic:
 		return AccessPublic, nil, nil
 	case AccessSignedIn, "signedin", "authenticated":
 		return AccessSignedIn, nil, nil
