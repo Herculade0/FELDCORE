@@ -60,7 +60,7 @@ In **Web address**, choose **HTTPS with Let's Encrypt** and a hostname on a zone
 
 Visitors still need to reach port 443 on this server, unless you use the tunnel instead. The tunnel terminates TLS at Cloudflare, so a tunnel hostname does not need this certificate.
 
-Caddy publishes ports 80 and 443. If something else holds them, the page names it and does not start the proxy.
+Caddy needs ports 80 and 443. On FELDCORE OS it binds them. Elsewhere the container publishes them. If something else holds them, the page names it and does not start the proxy.
 
 ## Protection in front of every published app
 

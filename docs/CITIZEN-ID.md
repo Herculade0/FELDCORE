@@ -60,7 +60,7 @@ Lifetime follows the session timeout in Settings (1–720 hours), otherwise 7 da
 
 ## Caddy and the tunnel
 
-A route is gated only when its level is `users`, `groups`, or `admin`. The default is public, so an existing hostname stays open until an administrator sets a rule. An unknown level is gated and then denied. `route` keeps source order, so the sign-in page itself is not challenged:
+A route is gated only when its level is `users`, `groups`, or `admin`. The default is public, so an existing hostname stays open until an administrator sets a rule. An unknown level is gated and then denied. `route` keeps source order, so the sign-in page itself is not challenged. On FELDCORE OS, Caddy is `/usr/bin/caddy` and the gate address below is `127.0.0.1`. On any other machine Caddy is the `feldcore-caddy` container and the gate address is `host.docker.internal`:
 
 ```
 route {

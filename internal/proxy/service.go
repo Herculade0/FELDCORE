@@ -1,10 +1,14 @@
 // Package proxy serves friendly names for containers with Caddy.
 //
-// Caddy runs as a container FELDCORE manages. The stock image issues a local
-// certificate authority, which is what a home network needs, and renews those
-// certificates itself. Public names use Let's Encrypt via the Cloudflare
-// DNS-01 challenge, which needs a Caddy build that includes that module.
-// FELDCORE builds that image the first time a public certificate is asked for.
+// On FELDCORE OS, Caddy is the static binary shipped at /usr/bin/caddy.
+// feldcored supervises that process. Its config and certificates live under
+// the data directory on the state partition. On any other machine, Caddy
+// runs as the container feldcore-caddy. The stock image issues a local
+// certificate authority, which is what a home network needs, and renews
+// those certificates itself. Public names use Let's Encrypt via the
+// Cloudflare DNS-01 challenge, which needs a Caddy build that includes that
+// module. On other machines FELDCORE builds that image the first time a
+// public certificate is asked for. The OS image already includes the module.
 // Nothing is published until a hostname is turned on.
 package proxy
 
@@ -15,7 +19,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/names"
@@ -38,7 +44,8 @@ func (e *OpError) Error() string { return e.Msg }
 func input(msg string) error { return &InputError{Msg: msg} }
 func op(msg string) error    { return &OpError{Msg: msg} }
 
-// Engine runs the Caddy container.
+// Engine runs the Caddy container on a host that is not FELDCORE OS.
+// It also attaches apps to the proxy network so that container can reach them.
 type Engine interface {
 	Ready(ctx context.Context) bool
 	ApplySystem(ctx context.Context, spec docker.SystemSpec) error
@@ -64,6 +71,11 @@ type Service struct {
 	// container. Zero keeps the older behaviour: Caddy dials the container.
 	GatewayPort int
 	Log         *slog.Logger
+	// Host supervises the baked Caddy program. FELDCORE OS always uses it.
+	Host *HostCaddy
+	// PreferHost forces the baked program instead of a container.
+	// Nil selects it on FELDCORE OS only. Other hosts keep the container.
+	PreferHost func() bool
 	// Listen reports host ports already in use. Nil uses the kernel tables.
 	Listen func() []int
 }
@@ -87,6 +99,7 @@ type View struct {
 	UITLS      string           `json:"uiTls"`
 	Status     string           `json:"status"`
 	Summary    string           `json:"summary"`
+	RunsOnHost bool             `json:"runsOnHost"`
 	CAReady    bool             `json:"caReady"`
 	Conflicts  []Conflict       `json:"conflicts"`
 	Routes     []store.WebRoute `json:"routes"`
@@ -127,7 +140,7 @@ func (s *Service) View(ctx context.Context) View {
 	return View{
 		Enabled: len(enabledRoutes(cfg)) > 0 || cfg.UIEnabled, Email: cfg.Email, Domain: domain,
 		UIHostname: uiHost, UIEnabled: cfg.UIEnabled, UITLS: tls,
-		Status: status, Summary: summary, CAReady: s.caReady(),
+		Status: status, Summary: summary, RunsOnHost: s.preferHost(), CAReady: s.caReady(),
 		Conflicts: conflicts, Routes: routes,
 	}
 }
@@ -207,20 +220,23 @@ func (s *Service) SetRoute(in RouteInput) error {
 	})
 }
 
-// Apply writes the Caddyfile and starts, reloads or stops the proxy container.
+// Apply writes the Caddyfile and starts, reloads or stops the proxy.
+// FELDCORE OS runs the baked binary. Every other host runs the container,
+// with "caddy" as the program name so the image's empty entrypoint is not
+// asked to execute "run".
 func (s *Service) Apply(ctx context.Context) error {
+	// A leftover feldcore-caddy on the appliance crash-loops on the old
+	// command and can hold ports 80 and 443. Remove it before the port check.
+	if s.preferHost() {
+		s.retireContainer(ctx)
+	}
 	cfg := s.Store.Snapshot().Web
 	sites, err := s.sites(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	if len(sites) == 0 {
-		if s.Engine != nil && s.Engine.Ready(ctx) {
-			if err := s.Engine.StopSystem(ctx, docker.ProxyContainer); err != nil {
-				return op("Could not stop the web proxy.")
-			}
-		}
-		return nil
+		return s.stop(ctx)
 	}
 	if conflicts := s.conflicts(ctx); len(conflicts) > 0 {
 		return input(conflicts[0].Explanation)
@@ -252,14 +268,56 @@ func (s *Service) Apply(ctx context.Context) error {
 	if err := os.MkdirAll(s.dataPath(), 0o700); err != nil {
 		return op("Could not create the proxy folder.")
 	}
+	if err := os.MkdirAll(filepath.Join(s.caddyDir(), "config"), 0o700); err != nil {
+		return op("Could not create the proxy folder.")
+	}
 	if err := os.WriteFile(s.caddyfile(), []byte(file), 0o644); err != nil {
 		return op("Could not write the proxy config.")
 	}
+	if s.preferHost() {
+		return s.applyHost(ctx, file, token, needsACME, len(sites))
+	}
+	return s.applyContainer(ctx, cfg, file, token, needsACME, len(sites))
+}
+
+func (s *Service) applyHost(ctx context.Context, file, token string, needsACME bool, sites int) error {
+	h := s.caddyHost()
+	if !h.Available() {
+		return op("The web proxy could not start. FELDCORE OS runs Caddy " + BakedCaddyVersion + " from " + bakedCaddy + ", and that program is missing.")
+	}
+	if needsACME {
+		ok, err := h.HasModule(ctx, DNSModule)
+		if err != nil {
+			return s.proxyError(err, token)
+		}
+		if !ok {
+			return op("Public certificates need the Cloudflare DNS module. Caddy " + BakedCaddyVersion + " at " + bakedCaddy + " does not include it.")
+		}
+	}
+	spec := runSpec{
+		Config: s.caddyfile(), DataDir: s.dataPath(),
+		ConfigDir: filepath.Join(s.caddyDir(), "config"), Home: s.caddyDir(),
+		Token: token, Stamp: names.Fingerprint("host", file, names.Fingerprint(token)),
+	}
+	already := h.Running()
+	if err := h.Start(ctx, spec); err != nil {
+		return s.proxyError(err, token)
+	}
+	if s.Log != nil && !already {
+		s.Log.Info("starting web proxy", "path", bakedCaddy, "pinned", BakedCaddyVersion, "sites", sites, "acme", needsACME)
+	}
+	return nil
+}
+
+func (s *Service) applyContainer(ctx context.Context, cfg store.WebConfig, file, token string, needsACME bool, sites int) error {
 	if s.Engine == nil {
 		return op("Docker is not available, so the web proxy cannot start.")
 	}
 	if !s.Engine.Ready(ctx) {
 		return op("Docker is not running. Web addresses need Docker so Caddy can run as a container.")
+	}
+	if s.Host != nil {
+		_ = s.Host.Stop()
 	}
 	image := docker.CaddyImage
 	var env []string
@@ -275,10 +333,17 @@ func (s *Service) Apply(ctx context.Context) error {
 			}
 		}
 	}
+	// caddy:2 has no entrypoint. Docker would exec "run" and fail with
+	// "executable file not found". The program name is the first argument.
+	// "caddy-argv" is in the hash so a container created with the old command
+	// is replaced.
+	entry := []string{"caddy"}
+	cmd := []string{"run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"}
 	spec := docker.SystemSpec{
-		Name:    docker.ProxyContainer,
-		Image:   image,
-		Command: []string{"run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"},
+		Name:       docker.ProxyContainer,
+		Image:      image,
+		Entrypoint: entry,
+		Command:    cmd,
 		Binds: []string{
 			s.caddyfile() + ":/etc/caddy/Caddyfile:ro",
 			s.dataPath() + ":/data",
@@ -289,13 +354,10 @@ func (s *Service) Apply(ctx context.Context) error {
 		Network:    docker.ProxyNetwork,
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 		Role:       "proxy",
-		Hash:       names.Fingerprint(file, image, names.Fingerprint(token)),
-	}
-	if err := os.MkdirAll(filepath.Join(s.caddyDir(), "config"), 0o700); err != nil {
-		return op("Could not create the proxy folder.")
+		Hash:       names.Fingerprint("proxy", "caddy-argv", strings.Join(entry, " "), strings.Join(cmd, " "), file, image, names.Fingerprint(token)),
 	}
 	if err := s.Engine.ApplySystem(ctx, spec); err != nil {
-		return op("Could not start the web proxy. " + secrets.Redact(err.Error(), token))
+		return s.proxyError(err, token)
 	}
 	for _, r := range cfg.Routes {
 		if !r.Enabled {
@@ -304,31 +366,121 @@ func (s *Service) Apply(ctx context.Context) error {
 		_ = s.Attach(ctx, r.Container)
 	}
 	if s.Log != nil {
-		s.Log.Info("web proxy applied", "sites", len(sites), "acme", needsACME)
+		s.Log.Info("web proxy applied", "sites", sites, "acme", needsACME)
 	}
 	return nil
 }
 
+func (s *Service) stop(ctx context.Context) error {
+	if s.Host != nil {
+		_ = s.Host.Stop()
+	}
+	if s.preferHost() {
+		s.retireContainer(ctx)
+		return nil
+	}
+	if s.Engine != nil && s.Engine.Ready(ctx) {
+		if err := s.Engine.StopSystem(ctx, docker.ProxyContainer); err != nil {
+			return op("Could not stop the web proxy.")
+		}
+	}
+	return nil
+}
+
+// retireContainer removes a leftover feldcore-caddy. On FELDCORE OS the
+// container is never the proxy. A Docker daemon that is not up yet is skipped.
+func (s *Service) retireContainer(ctx context.Context) {
+	if s.Engine == nil {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if !s.Engine.Ready(cctx) {
+		return
+	}
+	if err := s.Engine.StopSystem(cctx, docker.ProxyContainer); err != nil && s.Log != nil {
+		s.Log.Warn("could not remove the web proxy container", "err", err)
+	}
+}
+
+func (s *Service) caddyHost() *HostCaddy {
+	if s.Host == nil {
+		s.Host = &HostCaddy{}
+	}
+	return s.Host
+}
+
+func (s *Service) preferHost() bool {
+	if s != nil && s.PreferHost != nil {
+		return s.PreferHost()
+	}
+	return appliance.Is()
+}
+
+func (s *Service) proxyError(err error, token string) error {
+	msg := sanitizeProxyDetail(secrets.Redact(strings.TrimSpace(err.Error()), token), s.preferHost())
+	switch {
+	case msg == "":
+		msg = "The web proxy could not start."
+	case strings.HasPrefix(msg, "The web proxy"), strings.HasPrefix(msg, "Docker is not"),
+		strings.HasPrefix(msg, "FELDCORE OS"), strings.HasPrefix(msg, "Public certificates"),
+		strings.HasPrefix(msg, "Caddy could not"), strings.HasPrefix(msg, "The Caddy"):
+	default:
+		msg = "The web proxy could not start. " + msg
+	}
+	return op(msg)
+}
+
+func crypticExec(msg string) bool {
+	return strings.Contains(msg, "executable file not found") || strings.Contains(msg, "exec:")
+}
+
+func sanitizeProxyDetail(msg string, host bool) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" || !crypticExec(msg) {
+		return msg
+	}
+	if host {
+		return "Caddy could not be started at " + bakedCaddy + "."
+	}
+	return "The Caddy container failed to start."
+}
+
 // Attach connects one container to the proxy network when a hostname points
-// at it. A private app bridge is a normal Docker network, so the proxy reaches
-// the app by name once the app is also on the proxy network. That is the same
-// path a container on any user-defined network already uses.
+// at it. A private app bridge is a normal Docker network, so the containerised
+// proxy reaches the app by name once the app is also on the proxy network.
+//
+// On FELDCORE OS the proxy is a host process. It dials the container's IP,
+// which changes when the container is recreated, so Attach writes the config
+// again. Gateway routes do not need this: the publish listener resolves the
+// address on each request.
 //
 // Host and none have no second network. A container that shares another
 // container's network (a VPN workload, network mode container:<gateway>)
 // cannot join one either; its published port stays on the gateway.
 func (s *Service) Attach(ctx context.Context, name string) error {
-	if s == nil || s.Engine == nil || name == "" || s.Store == nil {
+	if s == nil || name == "" || s.Store == nil {
 		return nil
 	}
 	want := false
+	gateway := false
 	for _, r := range s.Store.Snapshot().Web.Routes {
 		if r.Enabled && r.Container == name {
 			want = true
+			gateway = r.Gateway
 			break
 		}
 	}
 	if !want {
+		return nil
+	}
+	if s.preferHost() {
+		if gateway {
+			return nil
+		}
+		return s.Apply(ctx)
+	}
+	if s.Engine == nil {
 		return nil
 	}
 	mode, err := s.Engine.NetworkMode(ctx, name)
@@ -377,7 +529,7 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 			tls = "internal"
 		}
 		sites = append(sites, Site{
-			Hostname: host, Upstream: fmt.Sprintf("host.docker.internal:%d", s.listen()), TLS: tls,
+			Hostname: host, Upstream: fmt.Sprintf("%s:%d", s.dialHost(), s.listen()), TLS: tls,
 			Passthrough: true,
 		})
 	}
@@ -385,23 +537,9 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 		if !r.Enabled {
 			continue
 		}
-		up := fmt.Sprintf("%s:%d", r.Container, r.Port)
-		if s.Engine != nil {
-			mode, err := s.Engine.NetworkMode(ctx, r.Container)
-			if err == nil && mode == "host" {
-				up = fmt.Sprintf("host.docker.internal:%d", r.Port)
-			}
-			if err == nil && mode == "none" {
-				return nil, input(r.Container + " has no network, so a hostname cannot reach it.")
-			}
-		}
-		// Publish routes stop at feldcored. Caddy still obtains the certificate
-		// and terminates TLS; the listener runs protection, Citizen ID, then
-		// the proxy to the container. Nothing new is placed in front of Caddy.
-		keep := false
-		if r.Gateway && s.GatewayPort > 0 {
-			up = fmt.Sprintf("host.docker.internal:%d", s.GatewayPort)
-			keep = true
+		up, keep, err := s.routeUpstream(ctx, r)
+		if err != nil {
+			return nil, err
 		}
 		tls := r.TLS
 		if tls == "" {
@@ -415,14 +553,59 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 	return sites, nil
 }
 
+// routeUpstream is where Caddy dials one route. Publish routes stop at
+// feldcored. Caddy still obtains the certificate and terminates TLS; the
+// listener runs protection, Citizen ID, then the proxy to the container.
+// The host program uses loopback for that hop. A containerised proxy uses
+// host.docker.internal, and reaches other containers by name on the proxy
+// network. The host program cannot use that DNS, so it uses the container IP.
+func (s *Service) routeUpstream(ctx context.Context, r store.WebRoute) (up string, keep bool, err error) {
+	if r.Gateway && s.GatewayPort > 0 {
+		return fmt.Sprintf("%s:%d", s.dialHost(), s.GatewayPort), true, nil
+	}
+	if s.Engine != nil {
+		mode, modeErr := s.Engine.NetworkMode(ctx, r.Container)
+		if modeErr == nil && mode == "host" {
+			return fmt.Sprintf("%s:%d", s.dialHost(), r.Port), false, nil
+		}
+		if modeErr == nil && mode == "none" {
+			return "", false, input(r.Container + " has no network, so a hostname cannot reach it.")
+		}
+	}
+	if s.preferHost() {
+		if u, ok := s.Engine.(interface {
+			Upstream(context.Context, string, int) (string, error)
+		}); ok {
+			addr, uerr := u.Upstream(ctx, r.Container, r.Port)
+			if uerr != nil {
+				return "", false, uerr
+			}
+			return addr, false, nil
+		}
+		return "", false, op(r.Container + " cannot be reached from the host proxy. Start it, then try again.")
+	}
+	return fmt.Sprintf("%s:%d", r.Container, r.Port), false, nil
+}
+
+// dialHost is the address Caddy uses to reach a port on this machine.
+// The container cannot use loopback: that is the container itself.
+func (s *Service) dialHost() string {
+	if s.preferHost() {
+		return "127.0.0.1"
+	}
+	return "host.docker.internal"
+}
+
 func (s *Service) conflicts(ctx context.Context) []Conflict {
 	var published []docker.PublishedPort
-	running := false
+	running := s.Host != nil && s.Host.Running()
 	if s.Engine != nil {
 		if ports, err := s.Engine.PublishedPorts(ctx); err == nil {
 			published = ports
 		}
 		if st, err := s.Engine.SystemState(ctx, docker.ProxyContainer); err == nil && st == "running" {
+			// The container, or Docker's proxy in front of it, already holds
+			// 80 and 443. That is not a conflict with Caddy itself.
 			running = true
 		}
 	}
@@ -445,6 +628,23 @@ func (s *Service) status(ctx context.Context, cfg store.WebConfig, conflicts []C
 	}
 	if len(conflicts) > 0 {
 		return "blocked", conflicts[0].Explanation
+	}
+	if s.preferHost() {
+		h := s.Host
+		if h != nil && h.Running() {
+			return "up", "Caddy is serving your hostnames."
+		}
+		detail := ""
+		if h != nil {
+			detail = sanitizeProxyDetail(h.Detail(), true)
+		}
+		if detail != "" {
+			return "down", detail
+		}
+		if h == nil || !h.Available() {
+			return "down", "The web proxy is not running. FELDCORE OS runs Caddy " + BakedCaddyVersion + " from " + bakedCaddy + ", and that program is missing."
+		}
+		return "down", "The web proxy is not running."
 	}
 	if s.Engine == nil || !s.Engine.Ready(ctx) {
 		return "down", "Docker is not running. The web proxy runs as a Caddy container, so it needs Docker."
@@ -479,7 +679,7 @@ func (s *Service) gate(container string) string {
 	}
 	level, _, set := citizenid.Effective(s.Store.Snapshot(), container)
 	if set && citizenid.Gated(level) {
-		return fmt.Sprintf("host.docker.internal:%d", s.listen())
+		return fmt.Sprintf("%s:%d", s.dialHost(), s.listen())
 	}
 	return ""
 }
