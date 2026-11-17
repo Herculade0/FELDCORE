@@ -60,6 +60,16 @@ type Service struct {
 	drive    DriveSaver
 	box      secretBox
 	check    func(context.Context, []string) ConnStatus
+
+	// etcRoot and efiRoot redirect /etc and /efi in tests. Empty uses the real paths.
+	etcRoot string
+	efiRoot string
+	// feat overrides package detection for the answer file. Nil asks the host.
+	feat installFeat
+	// unixPass sets a Unix password without putting it on a command line.
+	unixPass func(context.Context, string, string) error
+	// lookupIface supplies the static-address interface when the file omits one.
+	lookupIface func(context.Context) string
 }
 
 // Deps wires the wizard to the rest of the daemon.
