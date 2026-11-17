@@ -13,7 +13,7 @@ references:
   - networks
 ---
 
-Publishing stays off until you ask. On FELDCORE OS the tunnel connector is the cloudflared program shipped with the image. On other systems it is the container `feldcore-cloudflared`. `feldcore-caddy` is the proxy that obtains certificates. The walkthrough is [[help:expose-site|How to expose your site]].
+Publishing stays off until you ask. On FELDCORE OS the tunnel connector is the cloudflared program shipped with the image, and the proxy is the Caddy program shipped with the image. On other systems the connector is the container `feldcore-cloudflared` and the proxy is `feldcore-caddy`. The walkthrough is [[help:expose-site|How to expose your site]].
 
 [[route:settings.remote|Open Remote access]]
 
@@ -46,7 +46,7 @@ The last ingress rule is always `http_status:404`. An unknown hostname does not 
 
 [[route:settings.web|Open Web addresses]]
 
-Caddy runs as `feldcore-caddy`. On a home name it uses an internal certificate authority. Download the root from the Web addresses card (`pki/authorities/local/root.crt` under the proxy data) and trust it:
+On FELDCORE OS, Caddy 2.11.9 at `/usr/bin/caddy` is supervised by FELDCORE and is not a container. Its certificates are under `/var/lib/feldcore/caddy`. On any other machine Caddy runs as `feldcore-caddy`. On a home name it uses an internal certificate authority. Download the root from the Web addresses card (`pki/authorities/local/root.crt` under the proxy data) and trust it:
 
 - Windows: Local machine → Trusted Root Certification Authorities
 - Mac: System keychain → Always Trust
@@ -54,11 +54,11 @@ Caddy runs as `feldcore-caddy`. On a home name it uses an internal certificate a
 - Android: Settings → Security → Install a certificate → CA certificate
 - Linux: copy to `/usr/local/share/ca-certificates/feldcore.crt` and run `update-ca-certificates`
 
-Public certificates use DNS-01 and the `caddy-dns/cloudflare` module. The stock `caddy:2` image does not include that module. The first time you ask for Let's Encrypt, FELDCORE builds a local image `feldcore/caddy:2` that adds it. The API token is passed as `CF_API_TOKEN`. The Caddyfile contains `{env.CF_API_TOKEN}`, not the token.
+Public certificates use DNS-01 and the `caddy-dns/cloudflare` module. The OS binary includes that module. The stock `caddy:2` image does not. On a machine that is not FELDCORE OS, the first time you ask for Let's Encrypt, FELDCORE builds a local image `feldcore/caddy:2` that adds it. The container is started as `caddy run`. The API token is passed as `CF_API_TOKEN`. The Caddyfile contains `{env.CF_API_TOKEN}`, not the token.
 
 **Serve this page on a hostname** publishes the FELDCORE UI itself on the home name or, with the tunnel, on a public name. Pair a public admin hostname with Cloudflare Access.
 
-Caddy needs host ports 80 and 443. `feldcore-caddy` is not treated as a conflict with itself. Anything else holding those ports is named, and the proxy is not started.
+Caddy needs host ports 80 and 443. On FELDCORE OS it binds them directly. Elsewhere the container publishes them. `feldcore-caddy` is not treated as a conflict with itself. Anything else holding those ports is named, and the proxy is not started.
 
 ## Where the files are
 
