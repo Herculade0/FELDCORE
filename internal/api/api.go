@@ -27,6 +27,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/health"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/notify"
+	"github.com/Herculade0/feldcore/internal/osupdate"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
@@ -61,6 +62,7 @@ type Deps struct {
 	Backups    *backup.Service
 	Mail       *notify.Service
 	Publish    *publish.Service
+	OS         *osupdate.Service
 	// DataDir and SharesRoot enable Compose stacks. Tests that leave DataDir
 	// empty keep the previous API and get 404 for /stacks.
 	DataDir    string
@@ -98,6 +100,7 @@ type Server struct {
 	fetcher    *files.Fetcher
 	installs   *install.Runner
 	publish    *publish.Service
+	os         *osupdate.Service
 	stacks     *compose.Service
 	storage    *storage.Service
 }
@@ -110,6 +113,7 @@ func New(d Deps) *Server {
 		remote: d.Remote, proxy: d.Proxy, snaps: d.Snaps,
 		skipWizard: d.SkipWizard, webRoot: d.WebRoot, log: d.Log,
 		vpn: d.VPN, backups: d.Backups, mail: d.Mail, publish: d.Publish,
+		os:      d.OS,
 		storage: d.Storage,
 		health:  d.Health, alerts: d.Alerts,
 	}
@@ -405,6 +409,16 @@ func (s *Server) Router() http.Handler {
 				r.Get("/installs/{id}", s.handleInstall)
 				r.Post("/installs", s.handleInstallStart)
 
+				r.Get("/os", s.handleOS)
+				r.Post("/os/check", s.handleOSCheck)
+				r.Post("/os/update", s.handleOSUpdate)
+				r.Post("/os/rollback", s.handleOSRollback)
+				r.Put("/os/schedule", s.handleOSSchedule)
+				r.Put("/os/source", s.handleOSSource)
+				r.Post("/os/sysexts/{id}", s.handleOSSysextInstall)
+				r.Delete("/os/sysexts/{id}", s.handleOSSysextRemove)
+				r.Post("/os/reboot", s.handleOSReboot)
+
 				r.Get("/audit", s.handleAudit)
 				r.Get("/help", s.handleHelp)
 				r.Get("/citizen", s.handleCitizenDirectory)
@@ -571,6 +585,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		diskOp       *storage.OpError
 		fileConflict *files.ConflictError
 		fileForbid   *files.ForbiddenURL
+		osInput      *osupdate.InputError
+		osOp         *osupdate.OpError
 		stackInput   *compose.InputError
 		stackOp      *compose.OpError
 		stackGate    *compose.Gate
@@ -606,6 +622,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, pubInput.Msg)
 	case errors.As(err, &snapInput):
 		writeError(w, http.StatusBadRequest, snapInput.Msg)
+	case errors.As(err, &osInput):
+		writeError(w, http.StatusBadRequest, osInput.Msg)
+	case errors.Is(err, osupdate.ErrBusy):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.As(err, &fileInput):
 		writeError(w, http.StatusBadRequest, fileInput.Msg)
 	case errors.As(err, &stackInput):
@@ -663,6 +683,11 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &snapOp):
 		s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, snapOp.Msg)
+	case errors.As(err, &osOp):
+		if s.log != nil {
+			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, osOp.Msg)
 	case errors.As(err, &diskOp):
 		if s.log != nil {
 			s.log.Warn("operation failed", "path", r.URL.Path, "err", err)

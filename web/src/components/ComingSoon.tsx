@@ -15,6 +15,7 @@ type Pending = Exclude<
   | "health"
   | "backups"
   | "help"
+  | "updates"
 >;
 
 const COPY: Record<Pending, { title: string; body: string }> = {

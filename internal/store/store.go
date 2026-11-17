@@ -225,6 +225,9 @@ type State struct {
 	VPN    VPN    `json:"vpn,omitempty"`
 	Backup Backup `json:"backup,omitempty"`
 	Notify Notify `json:"notify,omitempty"`
+	// OS is the appliance update address and a one-shot schedule.
+	// The signing key is not stored here.
+	OS OSConfig `json:"os,omitempty"`
 	// Health holds the marks for the health page. Readings themselves are
 	// not stored here; they live in a ring file beside state.json.
 	Health HealthConfig `json:"health,omitempty"`
@@ -238,6 +241,14 @@ type State struct {
 	// CitizenBrand is the default Citizen ID sign-in page. A published app
 	// can replace it with its own Brand.
 	CitizenBrand SignInBrand `json:"citizenBrand,omitempty"`
+}
+
+// OSConfig is the update address and the last release that verified.
+type OSConfig struct {
+	ManifestURL string `json:"manifestURL,omitempty"`
+	ScheduleAt  string `json:"scheduleAt,omitempty"`
+	CheckedJSON string `json:"checkedJSON,omitempty"`
+	CheckedAt   string `json:"checkedAt,omitempty"`
 }
 
 // PublicRoute publishes one container through the Cloudflare Tunnel.
@@ -701,6 +712,18 @@ func (s *Store) SetAppdata(path string) error {
 	return s.Update(func(st *State) error {
 		st.Appdata = path
 		return nil
+	})
+}
+
+// OSConfig is the saved update address and schedule.
+func (s *Store) OSConfig() OSConfig {
+	return s.Snapshot().OS
+}
+
+// UpdateOS changes the saved update address and schedule.
+func (s *Store) UpdateOS(fn func(*OSConfig) error) error {
+	return s.Update(func(st *State) error {
+		return fn(&st.OS)
 	})
 }
 

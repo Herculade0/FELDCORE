@@ -1,0 +1,8 @@
+#!/bin/bash
+# Create the directories the state partition holds. The partition itself is
+# mounted from /etc/fstab before this runs.
+set -euo pipefail
+mkdir -p /var/lib/feldcore/sysexts /var/lib/feldcore/updates/incoming
+if [[ ! -e /var/lib/extensions ]]; then
+	ln -s /var/lib/feldcore/sysexts /var/lib/extensions
+fi

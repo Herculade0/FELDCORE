@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   MonitorPlay,
+  RefreshCw,
   ScrollText,
   Settings,
   Store,
@@ -27,6 +28,7 @@ export type NavKey =
   | "backups"
   | "health"
   | "audit"
+  | "updates"
   | "settings"
   | "help";
 
@@ -115,6 +117,13 @@ export const NAV: NavItem[] = [
     label: "Audit",
     desc: "Agent calls",
     icon: ScrollText,
+    ready: true,
+  },
+  {
+    key: "updates",
+    label: "Updates",
+    desc: "OS image and extensions",
+    icon: RefreshCw,
     ready: true,
   },
   {

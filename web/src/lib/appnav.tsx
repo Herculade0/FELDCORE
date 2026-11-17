@@ -62,6 +62,7 @@ const PAGES: readonly NavKey[] = [
   "backups",
   "health",
   "audit",
+  "updates",
   "settings",
   "help",
 ];

@@ -1,0 +1,12 @@
+[Unit]
+Description=Mark this FELDCORE OS boot as good
+After=local-fs.target feldcore.service
+ConditionPathExists=/proc/cmdline
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/feldcore/bless-boot
+
+[Install]
+WantedBy=multi-user.target

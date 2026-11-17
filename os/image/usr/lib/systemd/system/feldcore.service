@@ -1,0 +1,18 @@
+[Unit]
+Description=FELDCORE
+Documentation=https://github.com/Herculade0/FELDCORE
+After=network-online.target feldcore-state.service
+Wants=network-online.target
+RequiresMountsFor=/var/lib/feldcore
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/feldcored
+Environment=FELDCORE_DATA_DIR=/var/lib/feldcore
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -67,6 +67,7 @@ func (s *Server) wireInstalls() {
 			},
 		})
 	}
+	s.registerOSJobs()
 	s.installs.Register("compose", install.Spec{
 		Label: "Docker Compose",
 		Apt:   true,
