@@ -27,13 +27,13 @@ Settings has four tabs. The `?` on this page opens this article. Each card has i
 
 **System** is the host name, time zone, and optional NTP servers. Blank NTP keeps the system's own servers. systemd-timesyncd is what gets used.
 
-**Services** turns Samba, NFS, Docker, and libvirt on or off. Turning one on installs it when it is missing, then starts it. Turning it off stops it. Packages are not removed. Libvirt stays disabled when the CPU cannot virtualise.
+**Services** turns Samba, NFS, Docker, and libvirt on or off. On a Debian or Ubuntu host, turning one on installs it when it is missing, then starts it. On FELDCORE OS, Docker, Samba, and NFS are already in the image, and libvirt is installed as an extension. Turning a service off stops it. Packages are not removed. Libvirt stays disabled when the CPU cannot virtualise. When this machine is FELDCORE OS, or an NVIDIA device is present, **NVIDIA** installs the container toolkit. That does not install the kernel driver.
 
 **Security** is the ufw firewall, your password, and the session length. [[help:secure-your-box|Secure your box]].
 
 **Agent access** is API tokens. [[help:api-tokens|API tokens and scopes]].
 
-**Updates** has two switches. **Security updates** enables Debian's unattended-upgrades, limited to security updates. **Check for FELDCORE updates** looks for a newer `feldcored` release and tells you. It does not download or install one. Installing an OS image, and rolling back to the previous slot, are on [[help:updates-rollback|Updates]].
+**Updates** has two switches. **Security updates** enables Debian's unattended-upgrades, limited to security updates. FELDCORE OS refuses that switch, because the image is replaced instead. **Check for FELDCORE updates** looks for a newer `feldcored` release and tells you. It does not download or install one. Installing an OS image, and rolling back to the previous slot, are on [[help:updates-rollback|Updates]].
 
 **App Store** is the feed URL for the Community Applications JSON.
 

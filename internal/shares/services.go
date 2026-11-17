@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/Herculade0/feldcore/internal/appliance"
 )
 
 // ServiceStatus describes one file-sharing service on this machine.
@@ -27,7 +29,7 @@ type Services struct {
 // Services reports what is installed and running.
 func (m *Manager) Services(ctx context.Context) Services {
 	root := os.Geteuid() == 0
-	_, apt := findBin("apt-get")
+	apt := appliance.RealApt()
 	_, smbd := findBin("smbd")
 	_, exportfs := findBin("exportfs")
 
@@ -89,6 +91,9 @@ func (m *Manager) Install(ctx context.Context, service string) error {
 	pkg, ok := packages[service]
 	if !ok {
 		return ErrNotFound
+	}
+	if appliance.Is() {
+		return &OpError{fmt.Sprintf("%s is part of FELDCORE OS and is not installed from this page.", pkg)}
 	}
 	if os.Geteuid() != 0 {
 		return &OpError{"FELDCORE must run as root to install software."}

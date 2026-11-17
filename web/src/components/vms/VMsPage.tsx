@@ -170,7 +170,8 @@ export default function VMsPage({ focus }: { focus?: { view?: string; nonce: num
               </h2>
               <p className="mt-1 max-w-xl text-sm font-medium text-ink-2">
                 The VM Manager uses libvirt and KVM. Turning the service on installs QEMU, OVMF and a
-                software TPM, then starts libvirtd. It stays off when this CPU cannot virtualise.
+                software TPM, then starts libvirtd. On FELDCORE OS that install is the libvirt extension.
+                It stays off when this CPU cannot virtualise.
               </p>
             </div>
             <Button

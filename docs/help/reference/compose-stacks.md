@@ -19,7 +19,7 @@ A stack is a Docker Compose file FELDCORE stores and runs with `docker compose`.
 
 [[route:stacks|Open Stacks]]
 
-If Compose is not installed, you can still write and check a file. **Install Compose** adds the v2 plugin. Deploy, update, stop, and logs wait for that.
+If Compose is not installed, you can still write and check a file. **Install Compose** adds the v2 plugin on a host that has apt. FELDCORE OS already includes it. Deploy, update, stop, and logs wait until `docker compose` answers. Stacks that come from git need the `git` command, which the image also includes.
 
 ## Add a stack
 

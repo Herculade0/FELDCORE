@@ -15,6 +15,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/disk"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/store"
 )
@@ -245,6 +246,9 @@ func (s *Service) applyHost(ctx context.Context, req Request) error {
 	}
 	switch req.NTP {
 	case "chrony":
+		if appliance.Is() {
+			return &OpError{"FELDCORE OS keeps time with systemd-timesyncd. chrony is not installed on the image."}
+		}
 		if _, err := s.cmd.Run(ctx, "apt-get", "install", "-y", "chrony"); err != nil {
 			return &OpError{"Could not install chrony: " + err.Error()}
 		}
@@ -259,6 +263,9 @@ func (s *Service) applyHost(ctx context.Context, req Request) error {
 }
 
 func (s *Service) packagePlan(ctx context.Context, req Request) []string {
+	if appliance.Is() {
+		return []string{"FELDCORE OS includes Docker, Samba, and NFS. libvirt is an extension, installed from Settings."}
+	}
 	var lines []string
 	add := func(on bool, pkg string) {
 		if !on {
@@ -332,6 +339,19 @@ func (s *Service) runPackages(ctx context.Context, w *store.Wizard, req Request)
 		}
 	}
 	s.appendLog("Checking packages…")
+	if appliance.Is() {
+		s.appendLog("FELDCORE OS already includes these packages.")
+		if req.Docker {
+			_, _ = s.cmd.Run(ctx, "systemctl", "enable", "--now", "docker")
+		}
+		if req.Libvirt && s.virt() {
+			_, _ = s.cmd.Run(ctx, "systemctl", "enable", "--now", "libvirtd")
+		}
+		s.appendLog("Done.")
+		w.Step = nextStep(w.Step)
+		_ = s.saveWizard(*w)
+		return
+	}
 	var need []string
 	for _, p := range pkgs {
 		if s.installed(ctx, p) {
@@ -375,6 +395,9 @@ func (s *Service) appendLog(line string) {
 
 func (s *Service) applySecurity(ctx context.Context, req Request) error {
 	if req.Unattended {
+		if appliance.Is() {
+			return &OpError{"FELDCORE OS updates by replacing the image. Automatic apt upgrades are not used."}
+		}
 		if _, err := s.cmd.Run(ctx, "apt-get", "install", "-y", "unattended-upgrades"); err != nil {
 			return &OpError{"Could not install unattended-upgrades: " + err.Error()}
 		}
@@ -389,8 +412,13 @@ func (s *Service) applySecurity(ctx context.Context, req Request) error {
 	if !req.Firewall {
 		return nil
 	}
-	if _, err := s.cmd.Run(ctx, "apt-get", "install", "-y", "ufw"); err != nil {
-		return &OpError{"Could not install ufw: " + err.Error()}
+	if !haveBin("ufw") {
+		if appliance.Is() {
+			return &OpError{"ufw is part of FELDCORE OS and was not found in this image."}
+		}
+		if _, err := s.cmd.Run(ctx, "apt-get", "install", "-y", "ufw"); err != nil {
+			return &OpError{"Could not install ufw: " + err.Error()}
+		}
 	}
 	// SSH allow rules are first, and sshd's configuration is never edited.
 	for _, c := range UFWCommands(s.listenPort, s.sshPorts(ctx), req.Samba, req.NFS) {

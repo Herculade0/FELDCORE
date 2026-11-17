@@ -106,7 +106,7 @@ func (m *Manager) Host(ctx context.Context) Host {
 		h.Images = append(h.Images, extra)
 	}
 	if !h.Virsh {
-		h.Message = "virsh is not installed. Turn on libvirt in Settings to install KVM, OVMF and the software TPM."
+		h.Message = "virsh is not installed. Turn on libvirt in Settings to install KVM, OVMF and the software TPM. On FELDCORE OS that is the libvirt extension."
 	} else if !m.libvirtUp(ctx) {
 		h.Libvirt = false
 		h.Message = "libvirt is not running. Turn it on in Settings. It stays off when this CPU cannot virtualise."

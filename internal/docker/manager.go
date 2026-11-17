@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/vpn"
 )
@@ -151,10 +152,9 @@ func (m *Manager) Status(ctx context.Context) Status {
 
 func (m *Manager) computeStatus(ctx context.Context) Status {
 	_, installed := lookBin("dockerd")
-	_, hasApt := lookBin("apt-get")
 	s := Status{
 		Installed:  installed,
-		CanInstall: !installed && os.Geteuid() == 0 && hasApt,
+		CanInstall: !installed && os.Geteuid() == 0 && appliance.RealApt(),
 	}
 
 	var v struct {
@@ -162,7 +162,9 @@ func (m *Manager) computeStatus(ctx context.Context) Status {
 		ApiVersion string
 	}
 	if err := m.c.getJSON(ctx, "/version", nil, &v); err != nil {
-		if !installed {
+		if appliance.Is() && !installed {
+			s.Message = "Docker is part of FELDCORE OS, but the engine was not found in this image."
+		} else if !installed {
 			s.Message = "Docker is not installed."
 		} else {
 			s.Message = capitalize(err.Error()) + "."

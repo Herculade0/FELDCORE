@@ -17,7 +17,7 @@ A share is a folder on this server that other computers can open. On a stock ins
 
 ## Create one
 
-1. If Windows file sharing or NFS is not installed, use the button on that card. FELDCORE installs the package with apt and starts it.
+1. If Windows file sharing or NFS is not installed, use the button on that card. On a Debian or Ubuntu host FELDCORE installs the package with apt and starts it. On FELDCORE OS both are already in the image, and the button only starts them.
 2. Press **New share**. The name becomes the folder name. Letters, numbers, hyphens, and underscores. You cannot rename it later.
 3. Turn on SMB, NFS, or both, and save.
 
