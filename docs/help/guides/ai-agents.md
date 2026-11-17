@@ -35,10 +35,16 @@ An agent is a program you trust with a token: Claude Code, Cursor, or anything e
 
 | Scope | Allows |
 | --- | --- |
-| `read` | Look at the host, shares, the App Store, containers, container logs, and VMs. Required for MCP. |
+| `read` | Look at the host, shares, the App Store, containers, container logs, VMs, Compose stacks, health, and the notification inbox. Required for MCP. |
 | `containers` | Create, start, stop, restart, and delete containers over the HTTP API, and take or restore container snapshots. |
 | `vms` | Create, edit, start, stop, and delete virtual machines over the HTTP API. Listing VMs is `read`. |
-| `admin` | Settings, shares, tokens, publishing, and every other API call. Includes the three scopes above. |
+| `files:read` | List, preview, and download files in a share. |
+| `files:write` | Upload, rename, move, copy, and delete files in a share. Includes `files:read`. |
+| `stacks` | Save, deploy, update, stop, and remove Compose stacks. Grant `read` as well so the agent can list them and follow a job. |
+| `storage` | Create and change pools, mount them, and run scrub, balance, and trim. Looking at disks is `read`. |
+| `backups:read` | See destinations, jobs, copies, and the files inside a copy. |
+| `backups:write` | Run backups, checks, and restores, and change destinations. Includes `backups:read`. |
+| `admin` | Settings, shares, tokens, publishing, and every other API call. Includes the scopes above. |
 
 `admin` does not include a shell. The host terminal, a container console, and a VM's VNC console check the signed-in browser. A token that calls them is refused, and the refusal is written to the audit log.
 

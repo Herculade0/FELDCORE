@@ -21,8 +21,10 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
+	"github.com/Herculade0/feldcore/internal/events"
 	"github.com/Herculade0/feldcore/internal/notify"
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/publish"
@@ -32,6 +34,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
+	"github.com/Herculade0/feldcore/internal/storage"
 	"github.com/Herculade0/feldcore/internal/store"
 	"github.com/Herculade0/feldcore/internal/system"
 	"github.com/Herculade0/feldcore/internal/version"
@@ -105,6 +108,7 @@ func main() {
 	wiz := setup.New(setup.Deps{
 		Store: st, Shares: shareMgr, DataDir: cfg.DataDir,
 		ListenPort: listenPort(cfg.ListenAddr), Log: log,
+		Skip: cfg.SkipWizard,
 	})
 	if code, err := wiz.EnsureCode(); err != nil {
 		log.Error("could not prepare the setup code", "err", err)
@@ -127,6 +131,12 @@ func main() {
 		DataDir: cfg.DataDir, Version: version.Current, Log: log,
 	}
 	authSvc := auth.New(st)
+	authSvc.UseSecrets(box)
+	wiz.UseAccounts(authSvc)
+	wiz.UseAudit(authSvc)
+	wiz.UseSecrets(box)
+	wiz.UseMail(mail)
+	wiz.UseDrive(backups)
 	pubPort := publishListenPort()
 	remoteSvc := &remote.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
@@ -136,6 +146,8 @@ func main() {
 		GatewayPort: pubPort,
 		Log:         log,
 	}
+	wiz.UseTunnel(remoteSvc)
+	wiz.UseVPN(vpnSvc)
 	proxySvc := &proxy.Service{
 		Store: st, Secrets: box, Engine: dockerMgr,
 		DataDir: cfg.DataDir, ListenPort: listenPort(cfg.ListenAddr), GatewayPort: pubPort, Log: log,
@@ -145,7 +157,6 @@ func main() {
 		Resolve: dockerMgr, Trust: dockerMgr.TrustedPeer,
 		DataDir: cfg.DataDir, GatewayPort: pubPort, Log: log, Audit: authSvc,
 	}
-	pubSvc.SetAuth(publish.AllowAll{})
 	pubSvc.OpenGeo()
 	snapSvc := snapshots.Open(st, dockerMgr, cfg.DataDir, func() string {
 		return filepath.Join(cfg.SharesRoot, "system", "snapshots")
@@ -153,7 +164,11 @@ func main() {
 	snapSvc.Log = log
 	go vpnSvc.Restore(ctx)
 	go vpnSvc.KeepForwarded(ctx)
+	healthSvc, alerts := wireMonitor(ctx, cfg, st, box, log, mail, dockerMgr, remoteSvc, vpnSvc)
+	backups.Events = events.Default()
+	backups.Root = ctx
 	go backups.Loop(ctx)
+	go backups.ArchiveLoop(ctx)
 	go mail.Watch(ctx, func(ctx context.Context) ([]notify.Container, error) {
 		cs, err := dockerMgr.Containers(ctx)
 		if err != nil {
@@ -183,10 +198,34 @@ func main() {
 		}
 	}()
 
+	diskSvc, err := storage.Open(storage.Deps{
+		DataDir: cfg.DataDir, SharesRoot: shareMgr.Root,
+		PermitHostDisks: true, ApplySystem: os.Geteuid() == 0, Log: log,
+		SetAppdata: st.SetAppdata,
+		ShareNames: func() []string {
+			folders := shareMgr.Folders()
+			names := make([]string, 0, len(folders))
+			for _, f := range folders {
+				names = append(names, f.Name)
+			}
+			return names
+		},
+	})
+	if err != nil {
+		log.Error("cannot open storage", "err", err)
+		os.Exit(1)
+	}
+	// The wizard's storage step and the Storage page share this controller.
+	wiz.UseVolume(diskSvc)
+
+	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: authSvc, Log: log, Trust: dockerMgr.TrustedPeer})
+	authSvc.SetSecondFactor(cid.AdminFactor)
+	pubSvc.SetAuth(publish.CitizenAuth(cid))
 	srv := api.New(api.Deps{
 		System:  collector,
 		Sampler: sampler,
 		Auth:    authSvc,
+		Citizen: cid,
 		Shares:  shareMgr,
 		Docker:  dockerMgr,
 		Apps: apps.New(apps.Deps{
@@ -223,7 +262,18 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		DataDir:    cfg.DataDir,
+		SharesRoot: cfg.SharesRoot,
+		Storage:    diskSvc,
+		Health:     healthSvc,
+		Alerts:     alerts,
 	})
+	go func() {
+		if err := diskSvc.Restore(ctx); err != nil {
+			log.Warn("a storage pool was not mounted", "err", err)
+		}
+		diskSvc.Loop(ctx)
+	}()
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Router(),

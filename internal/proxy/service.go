@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/names"
 	"github.com/Herculade0/feldcore/internal/secrets"
@@ -300,16 +301,41 @@ func (s *Service) Apply(ctx context.Context) error {
 		if !r.Enabled {
 			continue
 		}
-		mode, err := s.Engine.NetworkMode(ctx, r.Container)
-		if err != nil || mode == "host" || mode == "none" {
-			continue
-		}
-		_ = s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, r.Container)
+		_ = s.Attach(ctx, r.Container)
 	}
 	if s.Log != nil {
 		s.Log.Info("web proxy applied", "sites", len(sites), "acme", needsACME)
 	}
 	return nil
+}
+
+// Attach connects one container to the proxy network when a hostname points
+// at it. A private app bridge is a normal Docker network, so the proxy reaches
+// the app by name once the app is also on the proxy network. That is the same
+// path a container on any user-defined network already uses.
+//
+// Host and none have no second network. A container that shares another
+// container's network (a VPN workload, network mode container:<gateway>)
+// cannot join one either; its published port stays on the gateway.
+func (s *Service) Attach(ctx context.Context, name string) error {
+	if s == nil || s.Engine == nil || name == "" || s.Store == nil {
+		return nil
+	}
+	want := false
+	for _, r := range s.Store.Snapshot().Web.Routes {
+		if r.Enabled && r.Container == name {
+			want = true
+			break
+		}
+	}
+	if !want {
+		return nil
+	}
+	mode, err := s.Engine.NetworkMode(ctx, name)
+	if err != nil || mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") {
+		return nil
+	}
+	return s.Engine.ConnectNetwork(ctx, docker.ProxyNetwork, name)
 }
 
 // URLFor returns the browser URL for a container, or "" when it has no name.
@@ -369,14 +395,19 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 		// Publish routes stop at feldcored. Caddy still obtains the certificate
 		// and terminates TLS; the listener runs protection, Citizen ID, then
 		// the proxy to the container. Nothing new is placed in front of Caddy.
+		keep := false
 		if r.Gateway && s.GatewayPort > 0 {
 			up = fmt.Sprintf("host.docker.internal:%d", s.GatewayPort)
+			keep = true
 		}
 		tls := r.TLS
 		if tls == "" {
 			tls = "internal"
 		}
-		sites = append(sites, Site{Hostname: r.Hostname, Upstream: up, TLS: tls, Container: r.Container})
+		sites = append(sites, Site{
+			Hostname: r.Hostname, Upstream: up, TLS: tls, Container: r.Container,
+			Gate: s.gate(r.Container), KeepCookies: keep,
+		})
 	}
 	return sites, nil
 }
@@ -433,6 +464,19 @@ func (s *Service) caddyDir() string { return filepath.Join(s.DataDir, "caddy") }
 func (s *Service) dataPath() string { return filepath.Join(s.caddyDir(), "data") }
 func (s *Service) caddyfile() string {
 	return filepath.Join(s.caddyDir(), "Caddyfile")
+}
+
+// gate is the Citizen ID forward_auth upstream when this container is not public.
+func (s *Service) gate(container string) string {
+	if s.Store == nil {
+		return ""
+	}
+	for _, g := range s.Store.Snapshot().AppGrants {
+		if g.Container == container && citizenid.Gated(g.Level) {
+			return fmt.Sprintf("host.docker.internal:%d", s.listen())
+		}
+	}
+	return ""
 }
 
 func enabledRoutes(cfg store.WebConfig) []store.WebRoute {

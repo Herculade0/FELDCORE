@@ -89,13 +89,17 @@ type Container struct {
 	Status     string   `json:"status"` // human text, e.g. "Up 3 hours"
 	Created    int64    `json:"created"`
 	Ports      []Port   `json:"ports"`
-	Managed    bool     `json:"managed"`        // created by FELDCORE
-	Compose    bool     `json:"compose"`        // owned by Docker Compose
-	GPU        bool     `json:"gpu"`            // has GPU access granted by FELDCORE
-	WebURL     string   `json:"webUrl"`         // best guess at a browser URL, if any
-	Icon       string   `json:"icon,omitempty"` // http(s) icon, when the container has one
-	Network    string   `json:"network"`        // network name(s)
-	IPs        []string `json:"ips"`            // address(es) the container answers on
+	Managed    bool     `json:"managed"`           // created by FELDCORE
+	Compose    bool     `json:"compose"`           // owned by Docker Compose
+	Stack      string   `json:"stack,omitempty"`   // FELDCORE stack name, when one deployed it
+	Project    string   `json:"project,omitempty"` // Compose project name
+	Service    string   `json:"service,omitempty"` // Compose service name
+	GPU        bool     `json:"gpu"`               // has GPU access granted by FELDCORE
+	WebURL     string   `json:"webUrl"`            // best guess at a browser URL, if any
+	Icon       string   `json:"icon,omitempty"`    // http(s) icon, when the container has one
+	Network    string   `json:"network"`           // network name(s)
+	Isolated   bool     `json:"isolated,omitempty"`
+	IPs        []string `json:"ips"` // address(es) the container answers on
 	VPN        string   `json:"vpn,omitempty"`
 	VPNGateway bool     `json:"vpnGateway,omitempty"`
 	CPUPct     float64  `json:"cpuPct"` // live, 0 when not running
@@ -185,6 +189,14 @@ type Spec struct {
 	ExtraParams string `json:"extraParams,omitempty"`
 	Privileged  bool   `json:"privileged,omitempty"`
 
+	// Isolate is "private" or "shared". Empty means private for a new app on
+	// the bridge, and "leave it where it is" when editing. Links are other
+	// containers that join this app's network. DeployAnyway acknowledges
+	// high-risk settings from the security check.
+	Isolate      string   `json:"isolate,omitempty"`
+	Links        []string `json:"links,omitempty"`
+	DeployAnyway bool     `json:"deployAnyway,omitempty"`
+
 	// VPN is the tunnel id this container is routed through. Empty keeps the
 	// container on Network. Gateway marks a tunnel's own gateway container
 	// and is not accepted from the HTTP API.
@@ -214,6 +226,14 @@ type Options struct {
 	GPUs         []GPU       `json:"gpus"`
 	GPUAvailable bool        `json:"gpuAvailable"`
 	VPNs         []VPNChoice `json:"vpns"`
+	// Peers are containers the form can link to this one.
+	Peers []Peer `json:"peers"`
+}
+
+// Peer is a container that can join another app's network.
+type Peer struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
 }
 
 // VPNChoice is one tunnel the container form can route through. The API

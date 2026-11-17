@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   Folder,
+  FolderOpen,
   FolderPlus,
   Pencil,
   Plus,
@@ -17,9 +18,11 @@ import { api, errorMessage } from "../../lib/api";
 import { Card, IconBadge } from "../ui";
 import { Alert, Button, IconButton, Modal } from "../form";
 import { PageHelp } from "../help/PageHelp";
+import FileBrowser from "./FileBrowser";
 import ShareDialog from "./ShareDialog";
 import UsersCard from "./UsersCard";
 import { ACCESS_LABEL, type Overview, type ProtoStatus, type ServiceStatus, type Share } from "./types";
+import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 
 export default function SharesPage() {
   const [data, setData] = useState<Overview | null>(null);
@@ -28,6 +31,7 @@ export default function SharesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<Share | "new" | null>(null);
   const [deleting, setDeleting] = useState<Share | null>(null);
+  const [browsing, setBrowsing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +59,10 @@ export default function SharesPage() {
     setNotice(msg);
     void load();
   };
+
+  if (browsing) {
+    return <FileBrowser name={browsing} onBack={() => setBrowsing(null)} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -128,6 +136,7 @@ export default function SharesPage() {
                   host={host}
                   onEdit={() => setEditing(s)}
                   onDelete={() => setDeleting(s)}
+                  onBrowse={() => setBrowsing(s.name)}
                 />
               ))}
             </section>
@@ -194,21 +203,7 @@ function ServiceCard({
   status: ServiceStatus;
   onInstalled: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const install = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api(`/shares/services/${service}/install`, { method: "POST" });
-      onInstalled();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const inst = useInstall(service === "smb" ? "samba" : "nfs", onInstalled);
 
   const pill = !status.installed
     ? { label: "Not installed", cls: "bg-track text-ink-2" }
@@ -231,19 +226,24 @@ function ServiceCard({
             {pill.label}
           </span>
         ) : (
-          <Button size="sm" variant="primary" onClick={install} loading={busy}>
-            {!busy && <Download size={13} strokeWidth={2.75} />}
-            {busy ? "Installing…" : "Install"}
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => void inst.start().catch(() => {})}
+            loading={inst.active || inst.starting}
+          >
+            {!(inst.active || inst.starting) && <Download size={13} strokeWidth={2.75} />}
+            {inst.active ? "Installing…" : "Install"}
           </Button>
         )}
       </div>
-      {busy && (
-        <p className="mt-3 text-xs font-medium text-ink-3">
-          Downloading and installing. This usually takes under a minute.
-        </p>
+      {(inst.error || status.error) && (
+        <p className="mt-3 text-xs font-semibold text-bad">{inst.error || status.error}</p>
       )}
-      {(error || status.error) && (
-        <p className="mt-3 text-xs font-semibold text-bad">{error || status.error}</p>
+      {showInstall(inst.job, !status.installed) && inst.job && (
+        <div className="mt-3">
+          <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
+        </div>
       )}
     </Card>
   );
@@ -254,11 +254,13 @@ function ShareCard({
   host,
   onEdit,
   onDelete,
+  onBrowse,
 }: {
   share: Share;
   host: string;
   onEdit: () => void;
   onDelete: () => void;
+  onBrowse: () => void;
 }) {
   return (
     <Card>
@@ -293,6 +295,12 @@ function ShareCard({
           detail={share.nfs.readOnly ? "Read-only" : "Read and write"}
           address={`${host}:${share.path}`}
         />
+      </div>
+      <div className="mt-4 flex justify-end">
+        <Button size="sm" variant="primary" onClick={onBrowse}>
+          <FolderOpen size={14} />
+          Browse
+        </Button>
       </div>
     </Card>
   );

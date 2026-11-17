@@ -16,7 +16,7 @@ references:
   - notifications-health
 ---
 
-These three are separate switches. None of them is an official Proton integration. Credentials are encrypted in `/var/lib/feldcore/secrets` and are not written to the log or to `state.json`. Broader backup and health-alert work is still marked coming soon. This page describes the cards that are already there.
+These three are separate switches. None of them is an official Proton integration. Credentials are encrypted in `/var/lib/feldcore/secrets` and are not written to the log or to `state.json`. Versioned copies of the whole server are [[help:backups|Backups]]. Health checks and the other alert channels are [[help:notifications-health|Health]]. This page is the three Settings cards.
 
 ## Proton VPN
 

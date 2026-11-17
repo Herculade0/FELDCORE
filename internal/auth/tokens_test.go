@@ -53,10 +53,19 @@ func TestTokenHashIsSHA256AndSecretIsNotStored(t *testing.T) {
 
 func TestTokenExpiryRevokeAndScopes(t *testing.T) {
 	a := newTestService(t)
-	if !Allows([]string{ScopeAdmin}, ScopeVMs) || !Allows([]string{ScopeAdmin}, ScopeRead) {
+	if !Allows([]string{ScopeAdmin}, ScopeVMs) || !Allows([]string{ScopeAdmin}, ScopeRead) || !Allows([]string{ScopeAdmin}, ScopeFilesWrite) || !Allows([]string{ScopeAdmin}, ScopeStacks) || !Allows([]string{ScopeAdmin}, ScopeStorage) || !Allows([]string{ScopeAdmin}, ScopeBackupsWrite) {
 		t.Fatal("admin should include the other scopes")
 	}
-	if Allows([]string{ScopeRead}, ScopeContainers) || Allows([]string{ScopeAdmin}, "shell") {
+	if Allows([]string{ScopeRead}, ScopeStorage) {
+		t.Fatal("read should not include storage")
+	}
+	if !Allows([]string{ScopeFilesWrite}, ScopeFilesRead) || Allows([]string{ScopeFilesRead}, ScopeFilesWrite) {
+		t.Fatal("files:write should include files:read, and not the other way round")
+	}
+	if !Allows([]string{ScopeBackupsWrite}, ScopeBackupsRead) || Allows([]string{ScopeBackupsRead}, ScopeBackupsWrite) {
+		t.Fatal("backups:write should include backups:read, and not the other way round")
+	}
+	if Allows([]string{ScopeRead}, ScopeContainers) || Allows([]string{ScopeAdmin}, "shell") || Allows([]string{ScopeRead}, ScopeFilesRead) {
 		t.Fatal("scope check allowed too much")
 	}
 	if _, _, err := a.CreateToken("bad", []string{"root"}, 0); err == nil {

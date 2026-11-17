@@ -20,6 +20,7 @@ import VMForm from "./VMForm";
 import VMSettings from "./VMSettings";
 import { emptySpec, type Host, type Snapshot, type Spec, type VM } from "./types";
 import { PageHelp } from "../help/PageHelp";
+import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 
 type View = "list" | "form" | "settings";
 
@@ -40,7 +41,6 @@ export default function VMsPage({ focus }: { focus?: { view?: string; nonce: num
   const [xmlFor, setXmlFor] = useState<string | null>(null);
   const [snapsFor, setSnapsFor] = useState<string | null>(null);
   const [deleteFor, setDeleteFor] = useState<VM | null>(null);
-  const [installing, setInstalling] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +56,11 @@ export default function VMsPage({ focus }: { focus?: { view?: string; nonce: num
       setError(errorMessage(e));
     }
   }, []);
+
+  const libvirt = useInstall("libvirt", () => {
+    setNotice("libvirt is installed and running.");
+    void load();
+  });
 
   useEffect(() => {
     if (!focus?.nonce) return;
@@ -79,20 +84,6 @@ export default function VMsPage({ focus }: { focus?: { view?: string; nonce: num
       await load();
     } catch (e) {
       setError(errorMessage(e));
-    }
-  };
-
-  const installLibvirt = async () => {
-    setInstalling(true);
-    setError(null);
-    try {
-      await api("/settings/services", { method: "PUT", body: { name: "libvirt", enabled: true } });
-      setNotice("libvirt is installed and running.");
-      await load();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setInstalling(false);
     }
   };
 
@@ -171,19 +162,33 @@ export default function VMsPage({ focus }: { focus?: { view?: string; nonce: num
       {message && host?.libvirt && <Alert tone="info">{message}</Alert>}
 
       {host && !host.libvirt && (
-        <Card className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-base font-extrabold text-ink">
-              {host.virsh ? "libvirt is not running" : "libvirt is not installed"}
-            </h2>
-            <p className="mt-1 max-w-xl text-sm font-medium text-ink-2">
-              The VM Manager uses libvirt and KVM. Turning the service on installs QEMU, OVMF and a
-              software TPM, then starts libvirtd. It stays off when this CPU cannot virtualise.
-            </p>
+        <Card className="space-y-4">
+          <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-extrabold text-ink">
+                {host.virsh ? "libvirt is not running" : "libvirt is not installed"}
+              </h2>
+              <p className="mt-1 max-w-xl text-sm font-medium text-ink-2">
+                The VM Manager uses libvirt and KVM. Turning the service on installs QEMU, OVMF and a
+                software TPM, then starts libvirtd. It stays off when this CPU cannot virtualise.
+              </p>
+            </div>
+            <Button
+              variant="primary"
+              loading={libvirt.active || libvirt.starting}
+              onClick={() => void libvirt.start().catch(() => {})}
+            >
+              {libvirt.active ? "Installing…" : host.virsh ? "Start libvirt" : "Install libvirt"}
+            </Button>
           </div>
-          <Button variant="primary" loading={installing} onClick={() => void installLibvirt()}>
-            {host.virsh ? "Start libvirt" : "Install libvirt"}
-          </Button>
+          {libvirt.error && <Alert>{libvirt.error}</Alert>}
+          {showInstall(libvirt.job) && libvirt.job && (
+            <InstallPanel
+              job={libvirt.job}
+              busy={libvirt.starting}
+              onRetry={() => void libvirt.start().catch(() => {})}
+            />
+          )}
         </Card>
       )}
 

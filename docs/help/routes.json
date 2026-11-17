@@ -20,16 +20,19 @@
   "settings.remote": { "page": "settings", "tab": "remote", "anchor": "settings-remote", "available": true },
   "settings.publishing": { "page": "settings", "tab": "publishing", "anchor": "published-apps", "available": true },
   "settings.protection": { "page": "settings", "tab": "publishing", "anchor": "protection-settings", "available": true },
+  "settings.citizen": { "page": "settings", "tab": "citizen", "anchor": "settings-citizen", "available": true },
+  "storage": { "page": "storage", "available": true },
+  "storage.pools": { "page": "storage", "anchor": "storage-pools", "available": true },
+  "backups": { "page": "backups", "available": true },
+  "backups.destinations": { "page": "backups", "anchor": "backup-destinations", "available": true },
+  "stacks": { "page": "stacks", "available": true },
+  "health": { "page": "health", "available": true },
+  "health.thresholds": { "page": "health", "anchor": "health-thresholds", "available": true },
   "internal-affairs": {
     "page": "help",
     "help": "internal-affairs",
     "available": false,
     "note": "Internal Affairs is not in the app yet."
   },
-  "citizen-id": {
-    "page": "help",
-    "help": "citizen-id",
-    "available": false,
-    "note": "Citizen ID is not in the app yet."
-  }
+  "citizen-id": { "page": "settings", "tab": "citizen", "anchor": "settings-citizen", "available": true }
 }

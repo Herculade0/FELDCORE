@@ -1,8 +1,13 @@
 import {
+  Archive,
   CircleHelp,
   Container,
   FolderTree,
+  HardDrive,
+  HeartPulse,
+  Layers,
   LayoutDashboard,
+  LayoutGrid,
   MonitorPlay,
   ScrollText,
   Settings,
@@ -10,7 +15,20 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export type NavKey = "dashboard" | "shares" | "docker" | "apps" | "vms" | "audit" | "settings" | "help";
+export type NavKey =
+  | "dashboard"
+  | "launcher"
+  | "storage"
+  | "shares"
+  | "docker"
+  | "stacks"
+  | "apps"
+  | "vms"
+  | "backups"
+  | "health"
+  | "audit"
+  | "settings"
+  | "help";
 
 export interface NavItem {
   key: NavKey;
@@ -30,6 +48,20 @@ export const NAV: NavItem[] = [
     ready: true,
   },
   {
+    key: "launcher",
+    label: "Launcher",
+    desc: "Apps you can open",
+    icon: LayoutGrid,
+    ready: true,
+  },
+  {
+    key: "storage",
+    label: "Storage",
+    desc: "Disks and pools",
+    icon: HardDrive,
+    ready: true,
+  },
+  {
     key: "shares",
     label: "Shares",
     desc: "SMB & NFS folders",
@@ -44,6 +76,13 @@ export const NAV: NavItem[] = [
     ready: true,
   },
   {
+    key: "stacks",
+    label: "Stacks",
+    desc: "Compose stacks",
+    icon: Layers,
+    ready: true,
+  },
+  {
     key: "apps",
     label: "App Store",
     desc: "Community applications",
@@ -55,6 +94,20 @@ export const NAV: NavItem[] = [
     label: "VMs",
     desc: "Virtual machines",
     icon: MonitorPlay,
+    ready: true,
+  },
+  {
+    key: "backups",
+    label: "Backups",
+    desc: "Copies and restore",
+    icon: Archive,
+    ready: true,
+  },
+  {
+    key: "health",
+    label: "Health",
+    desc: "Disks, heat, and services",
+    icon: HeartPulse,
     ready: true,
   },
   {

@@ -12,7 +12,7 @@ import { api, errorMessage } from "./api";
 
 export interface HelpRoute {
   page: string;
-  tab?: "general" | "network" | "remote" | "publishing";
+  tab?: "general" | "network" | "remote" | "publishing" | "citizen";
   anchor?: string;
   view?: string;
   help?: string;
@@ -52,10 +52,15 @@ export interface Destination {
 
 const PAGES: readonly NavKey[] = [
   "dashboard",
+  "launcher",
+  "storage",
   "shares",
   "docker",
+  "stacks",
   "apps",
   "vms",
+  "backups",
+  "health",
   "audit",
   "settings",
   "help",
@@ -139,4 +144,21 @@ export function useAppNav(): NavApi {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useAppNav must be used inside AppNavProvider");
   return ctx;
+}
+
+/** Scroll to the anchor a help button asked for, once this page is showing. */
+export function useHelpAnchor(page: NavKey) {
+  const { dest } = useAppNav();
+  useEffect(() => {
+    if (dest.page !== page || !dest.anchor) return;
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(dest.anchor!);
+      if (!el) return;
+      el.style.scrollMarginTop = "1.5rem";
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("help-target");
+      window.setTimeout(() => el.classList.remove("help-target"), 1800);
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [dest.nonce, dest.anchor, dest.page, page]);
 }

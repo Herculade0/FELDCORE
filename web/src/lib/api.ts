@@ -1,11 +1,21 @@
 // Thin client for the daemon's JSON API.
 
 export class ApiError extends Error {
+  /** Set when sign-in needs an authenticator code. */
+  totpRequired: boolean;
+
   constructor(
     public status: number,
     message: string,
+    /** Parsed JSON body, when the server sent one. */
+    public body?: unknown,
   ) {
     super(message);
+    this.totpRequired =
+      body !== null &&
+      typeof body === "object" &&
+      "totpRequired" in body &&
+      (body as { totpRequired?: unknown }).totpRequired === true;
   }
 }
 
@@ -47,7 +57,7 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
       data && typeof data === "object" && "error" in data && typeof data.error === "string"
         ? data.error
         : `The request failed (${res.status}).`;
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, data);
   }
   return data as T;
 }
