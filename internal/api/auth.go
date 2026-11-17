@@ -16,49 +16,51 @@ type credentials struct {
 }
 
 // currentUser resolves the request's session cookie to a username.
+// The cookie is ignored unless the browser is on a management host.
 func (s *Server) currentUser(r *http.Request) (string, bool) {
-	if s.auth == nil {
+	if s.auth == nil || !s.managementHost(r) {
 		return "", false
 	}
+	token := s.sessionCookieValue(r)
+	if token == "" {
+		return "", false
+	}
+	return s.auth.Authenticate(token)
+}
+
+func (s *Server) sessionCookieValue(r *http.Request) string {
 	for _, name := range []string{"__Host-" + sessionCookie, sessionCookie} {
 		c, err := r.Cookie(name)
 		if err != nil || c.Value == "" {
 			continue
 		}
-		if user, ok := s.auth.Authenticate(c.Value); ok {
-			return user, true
-		}
+		return c.Value
 	}
-	return "", false
+	return ""
 }
 
-func cookieSecure(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
+	if !s.managementHost(r) {
+		return
 	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-}
-
-func sessionCookieName(r *http.Request) string {
-	if cookieSecure(r) {
-		return "__Host-" + sessionCookie
+	secure := s.sessionSecure(r)
+	name := sessionCookie
+	if secure {
+		name = "__Host-" + sessionCookie
 	}
-	return sessionCookie
-}
-
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName(r),
+		Name:     name,
 		Value:    token,
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,                    // not readable by page scripts
 		SameSite: http.SameSiteStrictMode, // never sent on cross-site requests
-		Secure:   cookieSecure(r),
+		Secure:   secure,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	secure := s.sessionSecure(r)
 	for _, name := range []string{sessionCookie, "__Host-" + sessionCookie} {
 		http.SetCookie(w, &http.Cookie{
 			Name:     name,
@@ -67,9 +69,25 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 			MaxAge:   -1,
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
-			Secure:   cookieSecure(r) || strings.HasPrefix(name, "__Host-"),
+			Secure:   secure || strings.HasPrefix(name, "__Host-"),
 		})
 	}
+}
+
+// restoreCallerSession signs the caller back in when a factor change cleared
+// every API session. Other sessions stay gone.
+func (s *Server) restoreCallerSession(w http.ResponseWriter, r *http.Request, user, old string) {
+	if user == "" || old == "" || s.auth == nil || !s.managementHost(r) {
+		return
+	}
+	if _, ok := s.auth.Authenticate(old); ok {
+		return
+	}
+	token, exp, err := s.auth.IssueSession(user)
+	if err != nil {
+		return
+	}
+	s.setSessionCookie(w, r, token, exp)
 }
 
 // clientKey identifies a caller for login rate limiting. It deliberately
@@ -111,6 +129,9 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
+	if s.refuseForeignHost(w, r) {
+		return
+	}
 	var in credentials
 	if !readJSON(w, r, &in) {
 		return
@@ -134,11 +155,14 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	setSessionCookie(w, r, token, expires)
+	s.setSessionCookie(w, r, token, expires)
 	writeJSON(w, http.StatusOK, map[string]string{"username": in.Username})
 }
 
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if s.refuseForeignHost(w, r) {
+		return
+	}
 	var in credentials
 	if !readJSON(w, r, &in) {
 		return
@@ -151,13 +175,13 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	setSessionCookie(w, r, token, expires)
+	s.setSessionCookie(w, r, token, expires)
 	writeJSON(w, http.StatusOK, map[string]string{"username": in.Username})
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		if err := s.auth.Logout(c.Value); err != nil {
+	if token := s.sessionCookieValue(r); token != "" {
+		if err := s.auth.Logout(token); err != nil {
 			s.fail(w, r, err)
 			return
 		}
@@ -165,6 +189,6 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if s.citizen != nil {
 		_ = s.citizen.Logout(w, r)
 	}
-	clearSessionCookie(w, r)
+	s.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }

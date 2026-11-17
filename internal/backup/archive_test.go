@@ -243,7 +243,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := s.StartBackup(dest.ID, "ada", "tok")
+	job, err := s.StartBackup(dest.ID, "ada", "tok", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pw, err := s.RevealPassword(dest.ID, "ada", "tok")
+	pw, err := s.RevealPassword(dest.ID, "ada", "tok", true)
 	if err != nil || pw == "" {
 		t.Fatal(err)
 	}
@@ -270,22 +270,23 @@ func TestArchiveRoundTrip(t *testing.T) {
 	if err != nil || len(view.Entries) != 1 || view.Entries[0].Name != "note.txt" {
 		t.Fatalf("browse %+v %v", view, err)
 	}
-	rest, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Paths: []string{"/data/note.txt"}}, "ada", "tok")
+	note := filepath.Join(shares, "library", "note.txt")
+	rest, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Paths: []string{note}}, "ada", "tok", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := waitJob(t, s, rest.ID); got.State != jobSucceeded {
 		t.Fatalf("restore %+v", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "restores", rest.ID, "data", "note.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "restores", rest.ID, strings.TrimPrefix(filepath.Clean(note), string(os.PathSeparator)))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Mode: "replace"}, "ada", ""); err == nil {
+	if _, err := s.StartRestore(RestoreInput{DestinationID: dest.ID, SnapshotID: done.SnapshotID, Mode: "replace"}, "ada", "", true); err == nil {
 		t.Fatal("replace without the confirmation was accepted")
 	}
 
 	eng.fail = op("the disk filled up")
-	failed, err := s.StartBackup(dest.ID, "ada", "tok")
+	failed, err := s.StartBackup(dest.ID, "ada", "tok", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +339,7 @@ func TestRealResticRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := s.StartBackup(dest.ID, "admin", "")
+	job, err := s.StartBackup(dest.ID, "admin", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +431,8 @@ func (m *memEng) List(context.Context, Repo, string) ([]Node, error) {
 }
 func (m *memEng) Restore(_ context.Context, _ Repo, _ string, paths []string, target string, _ ProgressFunc) error {
 	for _, p := range paths {
-		full := filepath.Join(target, p)
+		rel := strings.TrimPrefix(filepath.Clean(p), string(os.PathSeparator))
+		full := filepath.Join(target, rel)
 		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 			return err
 		}

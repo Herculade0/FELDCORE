@@ -239,7 +239,7 @@ func (g *Gateway) Authorize(r *http.Request, app AppAccess) (Decision, error) {
 	}
 	// A gated app on plain HTTP is only answered for a local client.
 	// A public address must use TLS before a session cookie is accepted.
-	if !requestSecure(r) && !localClient(g.clientIP(r)) {
+	if !g.requestSecure(r) && !localClient(g.clientIP(r)) {
 		g.record("", "access denied", appLabel(app), "denied")
 		return Decision{Allow: false, Reason: "forbidden"}, nil
 	}
@@ -335,7 +335,7 @@ func (g *Gateway) Middleware(app AppAccess) func(http.Handler) http.Handler {
 // the proxy sets to the app the browser asked for.
 func (g *Gateway) ServeCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	host := forwardedHost(r)
+	host := g.forwardedHost(r)
 	app, ok := g.AppForHost(host)
 	if !ok {
 		http.Error(w, "That hostname is not published.", http.StatusForbidden)
@@ -374,13 +374,8 @@ func (g *Gateway) AppForHost(host string) (AppAccess, bool) {
 	if route == nil {
 		return AppAccess{}, false
 	}
-	app := AppAccess{ID: route.Container, Name: route.Hostname, Host: route.Hostname, Level: LevelPublic}
-	for _, gr := range snap.AppGrants {
-		if gr.Container == route.Container && gr.Level != "" {
-			app.Level = gr.Level
-			app.GroupIDs = append([]string(nil), gr.GroupIDs...)
-		}
-	}
+	level, groups := g.Effective(route.Container, route.Hostname)
+	app := AppAccess{ID: route.Container, Name: route.Hostname, Host: route.Hostname, Level: level, GroupIDs: groups}
 	return app, true
 }
 
@@ -580,7 +575,7 @@ func (g *Gateway) StartDesk(w http.ResponseWriter, r *http.Request, id Identity)
 	g.cookieMu.Lock()
 	defer g.cookieMu.Unlock()
 	name := deskCookie
-	secure := requestSecure(r)
+	secure := g.requestSecure(r)
 	if secure {
 		name = "__Host-" + deskCookie
 	}
@@ -644,7 +639,7 @@ func (g *Gateway) dropDeskLocked(w http.ResponseWriter, r *http.Request) {
 		if err != nil || c.Value == "" {
 			continue
 		}
-		secure := requestSecure(r) || strings.HasPrefix(name, "__Host-")
+		secure := g.requestSecure(r) || strings.HasPrefix(name, "__Host-")
 		g.sessions.Cookie.Name = name
 		g.sessions.Cookie.Domain = ""
 		g.sessions.Cookie.Secure = secure
@@ -684,7 +679,7 @@ func (g *Gateway) ResolveGroups(names []string) []string {
 func (g *Gateway) prepareCookie(r *http.Request) {
 	g.sessions.Lifetime = g.lifetime()
 	domain := g.cookieDomain(r)
-	secure := requestSecure(r)
+	secure := g.requestSecure(r)
 	name := cookieName
 	// __Host- forbids a Domain attribute. The parent-domain cookie therefore
 	// keeps the plain name. On a host-only HTTPS sign-in the prefix is used.
@@ -707,12 +702,15 @@ func (g *Gateway) load(r *http.Request) (context.Context, error) {
 }
 
 func (g *Gateway) loadLocked(r *http.Request) (context.Context, error) {
+	// Prefer the host-only cookie. A planted plain cookie must not override it,
+	// and a present __Host- value is not replaced by the plain name when it
+	// fails to load.
+	if c, err := r.Cookie("__Host-" + cookieName); err == nil && c.Value != "" {
+		return g.sessions.Load(r.Context(), c.Value)
+	}
 	token := ""
-	for _, name := range []string{cookieName, "__Host-" + cookieName} {
-		if c, err := r.Cookie(name); err == nil && c.Value != "" {
-			token = c.Value
-			break
-		}
+	if c, err := r.Cookie(cookieName); err == nil {
+		token = c.Value
 	}
 	return g.sessions.Load(r.Context(), token)
 }
@@ -738,13 +736,13 @@ func (g *Gateway) writeClear(w http.ResponseWriter, r *http.Request) {
 	for _, name := range []string{cookieName, "__Host-" + cookieName} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name, Value: "", Path: "/", Domain: g.sessions.Cookie.Domain,
-			MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: requestSecure(r) || strings.HasPrefix(name, "__Host-"),
+			MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.requestSecure(r) || strings.HasPrefix(name, "__Host-"),
 		})
 	}
 	for _, name := range []string{deskCookie, "__Host-" + deskCookie} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
-			SameSite: http.SameSiteStrictMode, Secure: requestSecure(r) || strings.HasPrefix(name, "__Host-"),
+			SameSite: http.SameSiteStrictMode, Secure: g.requestSecure(r) || strings.HasPrefix(name, "__Host-"),
 		})
 	}
 }
@@ -758,7 +756,7 @@ func (g *Gateway) lifetime() time.Duration {
 }
 
 func (g *Gateway) cookieDomain(r *http.Request) string {
-	host := strings.ToLower(stripPort(forwardedHost(r)))
+	host := strings.ToLower(stripPort(g.forwardedHost(r)))
 	parent := g.parentDomain()
 	if parent == "" || host == "" || host == "localhost" || net.ParseIP(host) != nil {
 		return ""
@@ -805,10 +803,10 @@ func clip(s string, n int) string {
 
 func (g *Gateway) returnURL(r *http.Request) string {
 	proto := "http"
-	if requestSecure(r) {
+	if g.requestSecure(r) {
 		proto = "https"
 	}
-	host := forwardedHost(r)
+	host := g.forwardedHost(r)
 	if host == "" {
 		host = "localhost"
 	}
@@ -904,18 +902,55 @@ func q(raw string) string {
 	return "?" + raw
 }
 
-func forwardedHost(r *http.Request) string {
-	if h := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); h != "" {
-		return stripPort(h)
+// headersTrusted reports whether this TCP peer may set X-Forwarded-Proto and
+// X-Forwarded-Host. Loopback and the trusted-peer callback (Caddy and the
+// containerized cloudflared) qualify. Anyone else is ignored, so a client
+// cannot spoof https or the public hostname.
+func (g *Gateway) headersTrusted(r *http.Request) bool {
+	if r == nil {
+		return false
 	}
-	return stripPort(r.Host)
+	return g.Trusts(r.Context(), remoteIP(r))
 }
 
-func requestSecure(r *http.Request) bool {
-	if r.TLS != nil {
+// Trusts reports whether ip is loopback or a proxy this gateway was told to trust.
+func (g *Gateway) Trusts(ctx context.Context, ip net.IP) bool {
+	if ip != nil && ip.IsLoopback() {
 		return true
 	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	return g != nil && ip != nil && g.trust != nil && g.trust(ctx, ip)
+}
+
+// clientHost is the host the browser used, including a port. The forwarded
+// host is read only from a trusted peer.
+func (g *Gateway) clientHost(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if g.headersTrusted(r) {
+		if h := firstForwarded(r.Header.Get("X-Forwarded-Host")); h != "" {
+			return h
+		}
+	}
+	return strings.TrimSpace(r.Host)
+}
+
+func (g *Gateway) forwardedHost(r *http.Request) string {
+	return stripPort(g.clientHost(r))
+}
+
+func (g *Gateway) requestSecure(r *http.Request) bool {
+	if r != nil && r.TLS != nil {
+		return true
+	}
+	if !g.headersTrusted(r) {
+		return false
+	}
+	return strings.EqualFold(firstForwarded(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+func firstForwarded(v string) string {
+	return strings.TrimSpace(strings.Split(v, ",")[0])
 }
 
 func stripPort(host string) string {

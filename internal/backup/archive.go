@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -229,7 +230,10 @@ func (s *Service) TestDestination(ctx context.Context, id, actor, tokenID string
 	return "Reached " + dest.Name + ". The repository will be created on the first backup if it is not there yet.", nil
 }
 
-func (s *Service) RevealPassword(id, actor, tokenID string) (string, error) {
+func (s *Service) RevealPassword(id, actor, tokenID string, admin bool) (string, error) {
+	if !admin {
+		return "", input("The repository password is shown to an administrator.")
+	}
 	if !idRe.MatchString(id) {
 		return "", input("That backup destination is gone.")
 	}
@@ -247,8 +251,9 @@ func (s *Service) RevealPassword(id, actor, tokenID string) (string, error) {
 	return pw, nil
 }
 
-func (s *Service) StartBackup(id, actor, tokenID string) (Job, error) {
+func (s *Service) StartBackup(id, actor, tokenID string, admin bool) (Job, error) {
 	return s.launchKind(id, "backup", actor, tokenID, func(j *bjob) func(context.Context) error {
+		j.admin = admin
 		return func(ctx context.Context) error { return s.runBackup(ctx, j) }
 	})
 }
@@ -260,7 +265,7 @@ func (s *Service) StartCheck(id string, readData bool, actor, tokenID string) (J
 	})
 }
 
-func (s *Service) StartRestore(in RestoreInput, actor, tokenID string) (Job, error) {
+func (s *Service) StartRestore(in RestoreInput, actor, tokenID string, admin bool) (Job, error) {
 	if !idRe.MatchString(in.DestinationID) || !snapRe.MatchString(in.SnapshotID) {
 		return Job{}, input("Choose a destination and a copy to restore.")
 	}
@@ -274,13 +279,22 @@ func (s *Service) StartRestore(in RestoreInput, actor, tokenID string) (Job, err
 	if mode == "replace" && in.Confirm != "replace" {
 		return Job{}, input("Type replace to put the files back where they came from.")
 	}
+	if mode == "replace" && !admin {
+		return Job{}, input("Replacing files on this server needs an administrator.")
+	}
 	var paths []string
 	for _, p := range in.Paths {
 		c, err := cleanSnapPath(p)
 		if err != nil {
 			return Job{}, err
 		}
+		if !s.restoreAllowed(c) {
+			return Job{}, input("That path is outside the folders this server backs up.")
+		}
 		paths = append(paths, c)
+	}
+	if len(paths) == 0 {
+		return Job{}, input("Choose a file or folder from the backup.")
 	}
 	return s.launchKind(in.DestinationID, "restore", actor, tokenID, func(j *bjob) func(context.Context) error {
 		j.snap = strings.ToLower(in.SnapshotID)
@@ -365,7 +379,7 @@ func (s *Service) scheduled(ctx context.Context, now time.Time) {
 		if err != nil || !due {
 			continue
 		}
-		if _, err := s.StartBackup(d.ID, "scheduler", ""); err != nil && s.Log != nil {
+		if _, err := s.StartBackup(d.ID, "scheduler", "", true); err != nil && s.Log != nil {
 			s.Log.Warn("scheduled backup did not start", "dest", d.Name, "err", err)
 		}
 	}
@@ -490,6 +504,43 @@ func (s *Service) trimJobs() {
 		delete(s.jobM, s.jobQ[drop])
 		s.jobQ = append(s.jobQ[:drop], s.jobQ[drop+1:]...)
 	}
+}
+
+// restoreAllowed limits a restore to folders this server backs up: the
+// shares root, appdata, and Compose roots. The directory does not have to
+// exist yet. "/" is never an allow-all.
+func (s *Service) restoreAllowed(p string) bool {
+	p = filepath.Clean(p)
+	if p == "/" || p == "." || !filepath.IsAbs(p) {
+		return false
+	}
+	for _, root := range s.restoreRoots() {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "/" || root == "." || !filepath.IsAbs(root) {
+			continue
+		}
+		if p == root || strings.HasPrefix(p, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) restoreRoots() []string {
+	root := strings.TrimSpace(s.SharesRoot)
+	if root == "" {
+		root = "/srv/feldcore"
+	}
+	roots := []string{root, s.appdataDir()}
+	roots = append(roots,
+		filepath.Join(s.DataDir, "compose"),
+		filepath.Join(root, "compose"),
+		filepath.Join(root, "stacks"),
+	)
+	if s.Compose != nil {
+		roots = append(roots, s.Compose(context.Background())...)
+	}
+	return roots
 }
 
 func (s *Service) composePresent() bool {

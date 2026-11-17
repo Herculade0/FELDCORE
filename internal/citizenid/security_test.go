@@ -325,7 +325,7 @@ func TestHostCookieOnHTTPS(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "https://feldcore.home.arpa/login", nil)
 	req.Host = "feldcore.home.arpa"
-	req.RemoteAddr = "192.0.2.33:9"
+	req.RemoteAddr = "127.0.0.1:9"
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
 	id, err := g.Login(rec, req, "ada", "correct horse", "")

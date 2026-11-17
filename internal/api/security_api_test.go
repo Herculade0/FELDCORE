@@ -46,6 +46,7 @@ func TestAppAccessReportsProxyFailure(t *testing.T) {
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	login.RemoteAddr = "192.0.2.90:9"
 	lrec := httptest.NewRecorder()
@@ -63,6 +64,7 @@ func TestAppAccessReportsProxyFailure(t *testing.T) {
 		t.Fatal("no management session")
 	}
 	save := httptest.NewRequest(http.MethodPut, "/api/v1/citizen/apps/files", strings.NewReader(`{"level":"users"}`))
+	save.Host = "127.0.0.1"
 	save.Header.Set("Content-Type", "application/json")
 	save.AddCookie(session)
 	srec := httptest.NewRecorder()
@@ -84,6 +86,7 @@ func TestAppAccessReportsProxyFailure(t *testing.T) {
 func TestChangingAFactorRequiresReauth(t *testing.T) {
 	srv, _ := citizenServer(t)
 	login := httptest.NewRequest(http.MethodPost, "/api/v1/citizen/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	login.Host = "127.0.0.1"
 	login.Header.Set("Content-Type", "application/json")
 	login.RemoteAddr = "192.0.2.91:9"
 	lrec := httptest.NewRecorder()
@@ -103,6 +106,7 @@ func TestChangingAFactorRequiresReauth(t *testing.T) {
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Host = "127.0.0.1"
 		if body != "" {
 			req.Header.Set("Content-Type", "application/json")
 		}

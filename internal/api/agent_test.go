@@ -99,6 +99,8 @@ func TestScopeFor(t *testing.T) {
 		{http.MethodPut, "/api/v1/stacks/media", auth.ScopeStacks},
 		{http.MethodPost, "/api/v1/stacks/media/deploy", auth.ScopeStacks},
 		{http.MethodPost, "/api/v1/stacks/media/update", auth.ScopeStacks},
+		{http.MethodPut, "/api/v1/vms/box/xml", auth.ScopeAdmin},
+		{http.MethodPost, "/api/v1/vms/box/start", auth.ScopeVMs},
 		{http.MethodDelete, "/api/v1/stacks/media", auth.ScopeStacks},
 		{http.MethodPost, "/api/v1/stacks/import", auth.ScopeStacks},
 		{http.MethodGet, "/api/v1/storage", auth.ScopeRead},
@@ -143,6 +145,7 @@ func newAgentServer(t *testing.T) (*Server, *store.Store) {
 func loginCookie(t *testing.T, srv *Server) *http.Cookie {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"correct horse"}`))
+	req.Host = "127.0.0.1"
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
@@ -164,6 +167,7 @@ func call(srv *Server, method, path, body, bearer string, cookie *http.Cookie) *
 		r = httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 	}
+	r.Host = "127.0.0.1"
 	if bearer != "" {
 		r.Header.Set("Authorization", "Bearer "+bearer)
 	}

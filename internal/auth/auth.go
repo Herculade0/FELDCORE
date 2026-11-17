@@ -321,6 +321,8 @@ func (a *Service) ChangePassword(current, next string) error {
 		s.Admin.PasswordHash = string(hash)
 		// Citizen ID sessions carry this number. The original session cookie
 		// does not, so this sign-in keeps working exactly as before.
+		// Passkeys stay: this person still has them, and proved the current
+		// password. An administrator reset removes passkeys instead.
 		s.Admin.SessionVersion++
 		return nil
 	})

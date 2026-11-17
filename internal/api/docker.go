@@ -50,7 +50,7 @@ func (s *Server) handleDockerCreate(w http.ResponseWriter, r *http.Request) {
 	if !readJSONLimit(w, r, &spec, 1<<20) {
 		return
 	}
-	if !s.allowRisk(w, &spec) {
+	if !s.allowRisk(w, r, &spec) {
 		return
 	}
 	if err := s.syncVPN(r, spec); err != nil {
@@ -83,15 +83,22 @@ func (s *Server) handleDockerReview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"spec": spec, "findings": findings})
 }
 
-// allowRisk rejects a high-risk spec until the caller sets deployAnyway.
-func (s *Server) allowRisk(w http.ResponseWriter, spec *docker.Spec) bool {
+// allowRisk rejects a high-risk spec until an administrator sets deployAnyway.
+// The flag acknowledges the warning. It does not authorise a lesser token.
+func (s *Server) allowRisk(w http.ResponseWriter, r *http.Request, spec *docker.Spec) bool {
 	findings := docker.Review(*spec)
-	if docker.NeedsAck(findings) && !spec.DeployAnyway {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":    "This setup has high-risk settings. Read the warnings, apply a safer setting, or choose Deploy anyway.",
-			"findings": findings,
-		})
-		return false
+	if docker.NeedsAck(findings) {
+		if !s.isAdmin(r) {
+			writeError(w, http.StatusForbidden, "High-risk settings need an administrator.")
+			return false
+		}
+		if !spec.DeployAnyway {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":    "This setup has high-risk settings. Read the warnings, apply a safer setting, or choose Deploy anyway.",
+				"findings": findings,
+			})
+			return false
+		}
 	}
 	spec.DeployAnyway = false
 	return true
@@ -137,7 +144,7 @@ func (s *Server) handleDockerUpdate(w http.ResponseWriter, r *http.Request) {
 	if spec.Name != "" {
 		s.quietName(r, spec.Name)
 	}
-	if !s.allowRisk(w, &spec) {
+	if !s.allowRisk(w, r, &spec) {
 		return
 	}
 	if s.snaps != nil {

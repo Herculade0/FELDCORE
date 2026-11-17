@@ -92,7 +92,7 @@ func (g *Gateway) FinishPasskeyLogin(w http.ResponseWriter, r *http.Request) (Id
 	if err := g.saveCredential(id.ID, *cred); err != nil {
 		return Identity{}, err
 	}
-	clearCookie(w, passkeyCookie, r)
+	g.clearCookie(w, passkeyCookie, r)
 	if err := g.startSession(w, r, id, "passkey"); err != nil {
 		return Identity{}, err
 	}
@@ -156,7 +156,7 @@ func (g *Gateway) FinishPasskeyRegister(w http.ResponseWriter, r *http.Request, 
 	if err := g.addPasskey(id, *cred); err != nil {
 		return err
 	}
-	clearCookie(w, passkeyCookie, r)
+	g.clearCookie(w, passkeyCookie, r)
 	return nil
 }
 
@@ -197,7 +197,7 @@ func (g *Gateway) discover(rawID, userHandle []byte) (webauthn.User, error) {
 }
 
 func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
-	host := strings.ToLower(stripPort(forwardedHost(r)))
+	host := strings.ToLower(stripPort(g.forwardedHost(r)))
 	if host == "" || net.ParseIP(host) != nil {
 		return nil, &InputError{"Passkeys need a hostname such as localhost or the server's web address."}
 	}
@@ -205,9 +205,9 @@ func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
 	if parent := g.parentDomain(); parent != "" && (host == parent || strings.HasSuffix(host, "."+parent)) {
 		rpID = parent
 	}
-	origin := "http://" + requestHost(r)
-	if requestSecure(r) {
-		origin = "https://" + requestHost(r)
+	origin := "http://" + g.clientHost(r)
+	if g.requestSecure(r) {
+		origin = "https://" + g.clientHost(r)
 	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPDisplayName:               "FELDCORE",
@@ -224,13 +224,6 @@ func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
 		return nil, &InputError{"Passkeys are not available on this address."}
 	}
 	return wa, nil
-}
-
-func requestHost(r *http.Request) string {
-	if h := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); h != "" {
-		return h
-	}
-	return r.Host
 }
 
 func (g *Gateway) waUser(id Identity) (waUser, error) {
@@ -429,7 +422,7 @@ func (g *Gateway) stash(w http.ResponseWriter, r *http.Request, c ceremony) erro
 	}
 	g.ceremonies[hashKey(token)] = c
 	g.mu.Unlock()
-	httpSet(w, r, passkeyCookie, token, "/", 120)
+	g.httpSet(w, r, passkeyCookie, token, "/", 120)
 	return nil
 }
 
