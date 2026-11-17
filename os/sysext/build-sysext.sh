@@ -86,7 +86,13 @@ fi
 		[[ -n ${kver} ]] || { echo "the rootfs has no kernel modules" >&2; exit 1; }
 		echo "KERNEL=${kver}"
 	fi
-} >"${work}/tree/usr/lib/extension-release.d/extension-release.${id}"
+} | {
+	# dpkg-deb -x extracts package trees as root, so usr/lib may now be
+	# root-owned. Create the dir and write the release file with the same
+	# privilege so the redirect cannot hit EACCES.
+	sudo mkdir -p "${work}/tree/usr/lib/extension-release.d"
+	sudo tee "${work}/tree/usr/lib/extension-release.d/extension-release.${id}" >/dev/null
+}
 
 mkdir -p "$(dirname "${out}")"
 mksquashfs "${work}/tree" "${out}" -noappend -comp zstd
