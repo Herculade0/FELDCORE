@@ -4,25 +4,32 @@ FELDCORE is provided as is. Downloading, installing or running it is at your own
 
 A modern, self-hostable server management UI — the parts of the Unraid
 experience that are useful on *any* Linux box, minus the array/parity storage
-model. Drop one binary onto a Debian (or any systemd) machine and you get a
-clean web UI to manage the system, shares, Docker and virtual machines.
+model. It ships two ways: one binary you drop onto a Debian (or any systemd)
+machine, and a bootable OS image. Either way you get a web UI for the
+system, shares, Docker and virtual machines.
 
 > **Status: pre-alpha.** The dashboard, sign-in, first-start setup, Shares,
-> Docker, the App Store and virtual machines work. See
-> [docs/VMS.md](docs/VMS.md) for the VM manager.
+> Docker, the App Store, virtual machines, and the Updates page work. See
+> [docs/VMS.md](docs/VMS.md) for the VM manager. The bootable image is
+> [below](#feldcore-os-bootable-image).
 
 ## Why
 
 Unraid's web UI is, underneath, a friendly wrapper over standard Linux
 primitives: a share is a directory exported via Samba/NFS, the "app store" is a
 catalog of Docker container templates, and VMs are libvirt/KVM domains.
-FELDCORE rebuilds the *good parts* of that experience as a modern app that runs
-anywhere — no custom OS, no licence, no disk/parity lock-in.
+FELDCORE rebuilds the *good parts* of that experience as a modern app. There
+is no licence and no disk/parity lock-in. The same daemon runs on a Debian or
+systemd machine you already have, and it is also the system on the bootable
+FELDCORE OS image.
 
 ## What it is
 
 - **Single binary.** The Go daemon (`feldcored`) embeds the compiled web UI, so
-  deployment is one file plus a systemd unit. No runtime to install on targets.
+  deployment onto an existing machine is one file plus a systemd unit. No
+  runtime to install on targets.
+- **Bootable OS image.** FELDCORE OS is a read-only Debian disk. UEFI firmware,
+  systemd-boot, two root slots. The image runs the same `feldcored` daemon.
 - **Modern UI.** React + TypeScript + Tailwind, live metrics over WebSocket.
 - **Thin over the OS.** Features are implemented by generating standard service
   configs (Samba, NFS) and driving `systemd` and the Docker/libvirt APIs — not
@@ -43,6 +50,7 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 | **Agent access** — scoped bearer tokens, a read-only MCP server, and an audit log | ✅ working |
 | **Terminal** — host shell, and a console in each running container. Agent tokens cannot open it | ✅ working |
 | **VMs** — KVM/libvirt: create and edit, CPU pinning, UEFI/TPM, disks, ISO and VirtIO drivers, VNC in the browser, passthrough, snapshots. Agent tokens cannot open the console | ✅ working |
+| **Updates** — FELDCORE OS image: check a minisign-signed release, write it to the inactive A/B slot, and boot the previous image after three failed tries. On a Debian install the page can check the release; staging runs on the OS image | ✅ working |
 
 ## Architecture
 
@@ -65,7 +73,12 @@ anywhere — no custom OS, no licence, no disk/parity lock-in.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detail.
 
-## Install on a fresh server
+## Install
+
+Two paths. The single binary is copied onto a machine that already runs
+Debian or another systemd distribution. The OS image is a disk you boot.
+
+### On a Debian or systemd machine
 
 A new Debian machine does not need Go or Node installed. Once a GitHub
 release exists:
@@ -116,6 +129,89 @@ For a scripted install, start the daemon with `-skip-wizard` (or
 account. With the wizard skipped, `-default-shares` (the default) creates
 `appdata`, `system`, `domains` and `isos` on startup.
 
+## FELDCORE OS (bootable image)
+
+FELDCORE OS is an immutable amd64 disk image. You boot it on bare metal.
+The firmware is UEFI and the bootloader is systemd-boot. Secure Boot is off.
+The root is Debian 13 (trixie), an ext4 filesystem mounted read-only. `apt`,
+`apt-get`, and the other apt commands are replaced with a script that exits,
+so packages are not installed onto the running system. State is a separate
+partition labeled `feldcore-state`, mounted at `/var/lib/feldcore`, including
+an overlay for `/etc`. An image swap leaves that partition in place. The
+daemon is `/usr/bin/feldcored` and listens on port 8787, the same UI as the
+single-binary install.
+
+The GPT disk has an EFI system partition (`FC-ESP`), slot A (`feldcore-a`),
+slot B (`feldcore-b`), and the state partition. The first image is written
+to slot A. Slot B is empty until an update is staged.
+
+`os/build.sh` builds the appliance disk, an installer disk, and a signed
+manifest. The default root is debootstrap. `FELDCORE_IMAGE_BUILDER=mkosi`
+builds the same package list from `os/mkosi/mkosi.conf`. Output is `dist/os`
+unless `FELDCORE_OS_OUT` is set:
+
+| File | What it is |
+|------|------------|
+| `feldcore-os.raw.zst` | Bootable appliance disk (zstd-compressed raw GPT image) |
+| `feldcore-installer.raw.zst` | Bootable installer disk |
+| `feldcore-root.img.zst`, `vmlinuz`, `initrd.img` | The slot image, kernel, and initrd an update writes |
+| `feldcore-os.json`, `feldcore-os.json.minisig` | Manifest and its minisign signature |
+| `update.pub` | Public key for that signature |
+
+The installer does not install itself onto the disk it booted from. On its
+serial console, `feldcore-install --yes /dev/disk` writes the appliance
+layout onto another whole disk. It refuses a partition, the disk it booted
+from, and any disk that has a mounted filesystem.
+
+A release is a git tag matching `v*`. Pushing the tag runs
+[`.github/workflows/os-image.yml`](.github/workflows/os-image.yml) and
+[`.github/workflows/release.yml`](.github/workflows/release.yml). Neither
+workflow creates the tag. The OS workflow builds the image, sets the version
+from the tag (the leading `v` is removed), and minisign-signs
+`feldcore-os.json` with `cmd/osmanifest`. It publishes the files above on
+that tag's GitHub Release. The binary workflow publishes `feldcored` for
+linux/amd64 and linux/arm64 on the same release. The OS image is amd64.
+Publishing the image on the release requires the signing key configured for
+the OS workflow. If that key is not available, the image is uploaded as a
+workflow artifact and the OS job fails before it attaches those files to
+the release.
+
+`os/build.sh` installs the public half of the signing key at
+`/usr/share/feldcore/update.pub`. It uses `FELDCORE_UPDATE_KEY` when that
+path is set, and otherwise generates a key under the work directory
+(`/var/tmp/feldcore-os` unless `FELDCORE_OS_WORK` is set). The private half
+stays out of the image and out of `dist/os`. The Updates page (nav key
+`updates`) downloads
+`https://github.com/Herculade0/FELDCORE/releases/latest/download/feldcore-os.json`
+and verifies `feldcore-os.json.minisig` with the public key baked into the
+image. A file at `/var/lib/feldcore/update.pub` is used first when it is
+present. `FELDCORE_UPDATE_PUBKEY`, when set, is the only key that is
+accepted. `FELDCORE_UPDATE_URL`, when set, is the manifest address and the
+page cannot change it; otherwise a saved address is used, then the URL
+above. The boot entry is written only after the decoded root, kernel, and
+initrd match the SHA-256 and the size in the signed manifest.
+
+**Update now** streams the new root onto the inactive slot and adds a
+systemd-boot entry with three tries (`feldcore-b+3.conf` when slot B is
+inactive). The running slot is left as it is. A boot that reaches userspace
+runs `feldcore-bless.service`, which drops the counter and pins that slot.
+systemd-boot counts the tries down. After three failed boots the entry
+sorts last and the previous image is selected. **Roll back** selects the
+earlier image for the next start. Reboot is a separate button, shown when
+the next boot is another slot. A schedule is one time. It is cleared when
+the update starts.
+
+On a machine that is not this image, including the Debian single-binary
+install, Updates can check a signed release. Staging, rollback, restart,
+and extensions stay disabled.
+
+Extensions on that page are signed systemd-sysext images stored on the
+state partition. libvirt and the NVIDIA container toolkit are offered when
+a release includes them.
+
+The layout, the manifest, and the update jobs are in
+[docs/OS-IMAGE.md](docs/OS-IMAGE.md).
+
 ## Development
 
 Requires Go 1.24+ and Node 20+.
@@ -152,6 +248,11 @@ the warning at the top of the file and run it only on a development machine
 or a disposable VM.
 
 ## What FELDCORE changes on your system
+
+On the single-binary install, the daemon changes the host as listed below.
+On FELDCORE OS the root is read-only and apt is not available; the OS
+changes when an image is swapped. State is still
+`/var/lib/feldcore/state.json`.
 
 - State lives in `/var/lib/feldcore/state.json` (root-only).
 - Share folders are created under `/srv/feldcore` (`-shares-root` to change).
@@ -217,6 +318,7 @@ or a disposable VM.
 
 ```
 cmd/feldcored      daemon entrypoint
+cmd/osmanifest     build and minisign-sign the OS update manifest
 internal/system    live host metrics (gopsutil)
 internal/api       HTTP/WebSocket surface, MCP at /mcp, SPA serving
 internal/auth      administrator account, sessions and agent tokens
@@ -228,11 +330,13 @@ internal/compose   Compose stacks: files, checks, and the Compose v2 CLI
 internal/apps      App Store: cached Community Applications catalogue
 internal/setup     guided setup wizard and the one-time claim code
 internal/storage   disk inventory the wizard calls (single-disk format only)
+internal/osupdate  signed A/B OS image updates
+os/                FELDCORE OS image build (`build.sh`, mkosi config, installer)
 scripts/           integration tests
 web/               React front-end (Vite + Tailwind), embedded via go:embed
 deploy/            install.sh, get.sh and the systemd unit
-.github/workflows  release build (tag v*, does not run until you push a tag)
-docs/              architecture, roadmap and agent access
+.github/workflows  binary release and OS image (tag v*; neither runs until you push a tag)
+docs/              architecture, the OS image, roadmap, and agent access
 ```
 
 ## Licence
