@@ -13,6 +13,7 @@
     --line: rgba(11, 40, 110, 0.14);
     --panel: #fff;
     --accent: #0b5cff;
+    --accent-2: #38bdf8;
     --warn-bg: #fff7ed;
     --warn: #9a3412;
     --bad: #b42318;
@@ -26,6 +27,28 @@
   }
   main { max-width: 42rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
   h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 0.75rem; }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    margin: 0 0 1.15rem;
+    max-width: 100%;
+  }
+  .brand svg { width: 44px; height: 44px; flex: none; display: block; }
+  .wordmark { line-height: 1; min-width: 0; }
+  .wordmark-name {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    color: var(--ink);
+  }
+  .wordmark-sub {
+    margin-top: 0.375rem;
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0.32em;
+    color: var(--muted);
+  }
   h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   p, li { color: var(--muted); }
   a { color: var(--accent); }
@@ -37,7 +60,7 @@
     padding: 0.75rem 1rem;
     margin: 0 0 1.25rem;
   }
-  form, section.card {
+  form {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -87,18 +110,25 @@
 </head>
 <body>
 <main>
+  <header class="brand">
+    <svg width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="feldcore-mark" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="var(--accent)" />
+          <stop offset="100%" stop-color="var(--accent-2)" />
+        </linearGradient>
+      </defs>
+      <polygon points="16,1.5 28.6,8.75 28.6,23.25 16,30.5 3.4,23.25 3.4,8.75" fill="url(#feldcore-mark)" />
+      <polygon points="16,6 24.66,11 24.66,21 16,26 7.34,21 7.34,11" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="1" />
+      <polygon points="16,10.5 20.76,13.25 20.76,18.75 16,21.5 11.24,18.75 11.24,13.25" fill="#fff" />
+    </svg>
+    <div class="wordmark">
+      <div class="wordmark-name">FELDCORE</div>
+      <div class="wordmark-sub">A FELDCORP SYSTEM</div>
+    </div>
+  </header>
   <h1>Install answer file</h1>
   <p class="warn">This file is not encrypted. The administrator password, the setup code, and the WiFi password are written in the clear on the USB stick until the first boot deletes the file. Deleting the file does not scrub those bytes from the stick. Use an SSH public key instead of a password.</p>
-
-  <section class="card">
-    <h2>Signed OS image</h2>
-    <p>Download the latest signed appliance image from the GitHub release. This page does not fetch it for you.</p>
-    <ul>
-      <li><a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/feldcore-os.raw.zst">feldcore-os.raw.zst</a></li>
-      <li><a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/feldcore-os.json">feldcore-os.json</a>, <a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/feldcore-os.json.minisig">feldcore-os.json.minisig</a>, and <a href="https://github.com/Herculade0/FELDCORE/releases/latest/download/update.pub">update.pub</a></li>
-      <li><a href="https://github.com/Herculade0/FELDCORE/releases/latest">Release page</a></li>
-    </ul>
-  </section>
 
   <h2>Answer file</h2>
   <form id="form">
@@ -106,18 +136,36 @@
       <input name="hostname" autocomplete="off" value="feldbox" required>
     </label>
     <label>Time zone
-      <input name="timezone" list="zones" value="Europe/London" required>
-      <span class="hint">A zone such as Europe/London or UTC.</span>
+      <input name="timezone" list="zones" value="Australia/Brisbane" required>
+      <span class="hint">A zone such as Australia/Brisbane or UTC.</span>
     </label>
     <datalist id="zones">
+      <option value="Australia/Brisbane"></option>
+      <option value="Australia/Sydney"></option>
+      <option value="Australia/Melbourne"></option>
+      <option value="Australia/Adelaide"></option>
+      <option value="Australia/Perth"></option>
+      <option value="Australia/Darwin"></option>
+      <option value="Australia/Hobart"></option>
+      <option value="Australia/Broken_Hill"></option>
+      <option value="Australia/Lord_Howe"></option>
+      <option value="Australia/Lindeman"></option>
+      <option value="Australia/Eucla"></option>
       <option value="UTC"></option>
       <option value="Europe/London"></option>
       <option value="Europe/Paris"></option>
+      <option value="Europe/Berlin"></option>
       <option value="America/New_York"></option>
       <option value="America/Chicago"></option>
       <option value="America/Denver"></option>
       <option value="America/Los_Angeles"></option>
-      <option value="Australia/Sydney"></option>
+      <option value="America/Sao_Paulo"></option>
+      <option value="Asia/Tokyo"></option>
+      <option value="Asia/Shanghai"></option>
+      <option value="Asia/Singapore"></option>
+      <option value="Asia/Kolkata"></option>
+      <option value="Asia/Dubai"></option>
+      <option value="Pacific/Auckland"></option>
     </datalist>
 
     <fieldset>
@@ -157,30 +205,272 @@
         <span class="hint">8 to 63 characters, or 64 hex digits. Empty means an open network.</span>
       </label>
       <label>Country
-        <input name="country" maxlength="2" autocomplete="off" placeholder="GB">
+        <select name="country">
+          <option value="">—</option>
+          <option value="AF">Afghanistan</option>
+          <option value="AX">Åland Islands</option>
+          <option value="AL">Albania</option>
+          <option value="DZ">Algeria</option>
+          <option value="AS">American Samoa</option>
+          <option value="AD">Andorra</option>
+          <option value="AO">Angola</option>
+          <option value="AI">Anguilla</option>
+          <option value="AQ">Antarctica</option>
+          <option value="AG">Antigua and Barbuda</option>
+          <option value="AR">Argentina</option>
+          <option value="AM">Armenia</option>
+          <option value="AW">Aruba</option>
+          <option value="AU" selected>Australia</option>
+          <option value="AT">Austria</option>
+          <option value="AZ">Azerbaijan</option>
+          <option value="BS">Bahamas</option>
+          <option value="BH">Bahrain</option>
+          <option value="BD">Bangladesh</option>
+          <option value="BB">Barbados</option>
+          <option value="BY">Belarus</option>
+          <option value="BE">Belgium</option>
+          <option value="BZ">Belize</option>
+          <option value="BJ">Benin</option>
+          <option value="BM">Bermuda</option>
+          <option value="BT">Bhutan</option>
+          <option value="BO">Bolivia</option>
+          <option value="BQ">Bonaire, Sint Eustatius and Saba</option>
+          <option value="BA">Bosnia and Herzegovina</option>
+          <option value="BW">Botswana</option>
+          <option value="BV">Bouvet Island</option>
+          <option value="BR">Brazil</option>
+          <option value="IO">British Indian Ocean Territory</option>
+          <option value="BN">Brunei</option>
+          <option value="BG">Bulgaria</option>
+          <option value="BF">Burkina Faso</option>
+          <option value="BI">Burundi</option>
+          <option value="CV">Cabo Verde</option>
+          <option value="KH">Cambodia</option>
+          <option value="CM">Cameroon</option>
+          <option value="CA">Canada</option>
+          <option value="KY">Cayman Islands</option>
+          <option value="CF">Central African Republic</option>
+          <option value="TD">Chad</option>
+          <option value="CL">Chile</option>
+          <option value="CN">China</option>
+          <option value="CX">Christmas Island</option>
+          <option value="CC">Cocos (Keeling) Islands</option>
+          <option value="CO">Colombia</option>
+          <option value="KM">Comoros</option>
+          <option value="CG">Congo</option>
+          <option value="CD">Congo (Democratic Republic)</option>
+          <option value="CK">Cook Islands</option>
+          <option value="CR">Costa Rica</option>
+          <option value="CI">Côte d'Ivoire</option>
+          <option value="HR">Croatia</option>
+          <option value="CU">Cuba</option>
+          <option value="CW">Curaçao</option>
+          <option value="CY">Cyprus</option>
+          <option value="CZ">Czechia</option>
+          <option value="DK">Denmark</option>
+          <option value="DJ">Djibouti</option>
+          <option value="DM">Dominica</option>
+          <option value="DO">Dominican Republic</option>
+          <option value="EC">Ecuador</option>
+          <option value="EG">Egypt</option>
+          <option value="SV">El Salvador</option>
+          <option value="GQ">Equatorial Guinea</option>
+          <option value="ER">Eritrea</option>
+          <option value="EE">Estonia</option>
+          <option value="SZ">Eswatini</option>
+          <option value="ET">Ethiopia</option>
+          <option value="FK">Falkland Islands</option>
+          <option value="FO">Faroe Islands</option>
+          <option value="FJ">Fiji</option>
+          <option value="FI">Finland</option>
+          <option value="FR">France</option>
+          <option value="GF">French Guiana</option>
+          <option value="PF">French Polynesia</option>
+          <option value="TF">French Southern Territories</option>
+          <option value="GA">Gabon</option>
+          <option value="GM">Gambia</option>
+          <option value="GE">Georgia</option>
+          <option value="DE">Germany</option>
+          <option value="GH">Ghana</option>
+          <option value="GI">Gibraltar</option>
+          <option value="GR">Greece</option>
+          <option value="GL">Greenland</option>
+          <option value="GD">Grenada</option>
+          <option value="GP">Guadeloupe</option>
+          <option value="GU">Guam</option>
+          <option value="GT">Guatemala</option>
+          <option value="GG">Guernsey</option>
+          <option value="GN">Guinea</option>
+          <option value="GW">Guinea-Bissau</option>
+          <option value="GY">Guyana</option>
+          <option value="HT">Haiti</option>
+          <option value="HM">Heard Island and McDonald Islands</option>
+          <option value="VA">Holy See</option>
+          <option value="HN">Honduras</option>
+          <option value="HK">Hong Kong</option>
+          <option value="HU">Hungary</option>
+          <option value="IS">Iceland</option>
+          <option value="IN">India</option>
+          <option value="ID">Indonesia</option>
+          <option value="IR">Iran</option>
+          <option value="IQ">Iraq</option>
+          <option value="IE">Ireland</option>
+          <option value="IM">Isle of Man</option>
+          <option value="IL">Israel</option>
+          <option value="IT">Italy</option>
+          <option value="JM">Jamaica</option>
+          <option value="JP">Japan</option>
+          <option value="JE">Jersey</option>
+          <option value="JO">Jordan</option>
+          <option value="KZ">Kazakhstan</option>
+          <option value="KE">Kenya</option>
+          <option value="KI">Kiribati</option>
+          <option value="KW">Kuwait</option>
+          <option value="KG">Kyrgyzstan</option>
+          <option value="LA">Laos</option>
+          <option value="LV">Latvia</option>
+          <option value="LB">Lebanon</option>
+          <option value="LS">Lesotho</option>
+          <option value="LR">Liberia</option>
+          <option value="LY">Libya</option>
+          <option value="LI">Liechtenstein</option>
+          <option value="LT">Lithuania</option>
+          <option value="LU">Luxembourg</option>
+          <option value="MO">Macao</option>
+          <option value="MG">Madagascar</option>
+          <option value="MW">Malawi</option>
+          <option value="MY">Malaysia</option>
+          <option value="MV">Maldives</option>
+          <option value="ML">Mali</option>
+          <option value="MT">Malta</option>
+          <option value="MH">Marshall Islands</option>
+          <option value="MQ">Martinique</option>
+          <option value="MR">Mauritania</option>
+          <option value="MU">Mauritius</option>
+          <option value="YT">Mayotte</option>
+          <option value="MX">Mexico</option>
+          <option value="FM">Micronesia</option>
+          <option value="MD">Moldova</option>
+          <option value="MC">Monaco</option>
+          <option value="MN">Mongolia</option>
+          <option value="ME">Montenegro</option>
+          <option value="MS">Montserrat</option>
+          <option value="MA">Morocco</option>
+          <option value="MZ">Mozambique</option>
+          <option value="MM">Myanmar</option>
+          <option value="NA">Namibia</option>
+          <option value="NR">Nauru</option>
+          <option value="NP">Nepal</option>
+          <option value="NL">Netherlands</option>
+          <option value="NC">New Caledonia</option>
+          <option value="NZ">New Zealand</option>
+          <option value="NI">Nicaragua</option>
+          <option value="NE">Niger</option>
+          <option value="NG">Nigeria</option>
+          <option value="NU">Niue</option>
+          <option value="NF">Norfolk Island</option>
+          <option value="KP">North Korea</option>
+          <option value="MK">North Macedonia</option>
+          <option value="MP">Northern Mariana Islands</option>
+          <option value="NO">Norway</option>
+          <option value="OM">Oman</option>
+          <option value="PK">Pakistan</option>
+          <option value="PW">Palau</option>
+          <option value="PS">Palestine</option>
+          <option value="PA">Panama</option>
+          <option value="PG">Papua New Guinea</option>
+          <option value="PY">Paraguay</option>
+          <option value="PE">Peru</option>
+          <option value="PH">Philippines</option>
+          <option value="PN">Pitcairn</option>
+          <option value="PL">Poland</option>
+          <option value="PT">Portugal</option>
+          <option value="PR">Puerto Rico</option>
+          <option value="QA">Qatar</option>
+          <option value="RE">Réunion</option>
+          <option value="RO">Romania</option>
+          <option value="RU">Russia</option>
+          <option value="RW">Rwanda</option>
+          <option value="BL">Saint Barthélemy</option>
+          <option value="SH">Saint Helena, Ascension and Tristan da Cunha</option>
+          <option value="KN">Saint Kitts and Nevis</option>
+          <option value="LC">Saint Lucia</option>
+          <option value="MF">Saint Martin</option>
+          <option value="PM">Saint Pierre and Miquelon</option>
+          <option value="VC">Saint Vincent and the Grenadines</option>
+          <option value="WS">Samoa</option>
+          <option value="SM">San Marino</option>
+          <option value="ST">Sao Tome and Principe</option>
+          <option value="SA">Saudi Arabia</option>
+          <option value="SN">Senegal</option>
+          <option value="RS">Serbia</option>
+          <option value="SC">Seychelles</option>
+          <option value="SL">Sierra Leone</option>
+          <option value="SG">Singapore</option>
+          <option value="SX">Sint Maarten</option>
+          <option value="SK">Slovakia</option>
+          <option value="SI">Slovenia</option>
+          <option value="SB">Solomon Islands</option>
+          <option value="SO">Somalia</option>
+          <option value="ZA">South Africa</option>
+          <option value="GS">South Georgia and the South Sandwich Islands</option>
+          <option value="KR">South Korea</option>
+          <option value="SS">South Sudan</option>
+          <option value="ES">Spain</option>
+          <option value="LK">Sri Lanka</option>
+          <option value="SD">Sudan</option>
+          <option value="SR">Suriname</option>
+          <option value="SJ">Svalbard and Jan Mayen</option>
+          <option value="SE">Sweden</option>
+          <option value="CH">Switzerland</option>
+          <option value="SY">Syria</option>
+          <option value="TW">Taiwan</option>
+          <option value="TJ">Tajikistan</option>
+          <option value="TZ">Tanzania</option>
+          <option value="TH">Thailand</option>
+          <option value="TL">Timor-Leste</option>
+          <option value="TG">Togo</option>
+          <option value="TK">Tokelau</option>
+          <option value="TO">Tonga</option>
+          <option value="TT">Trinidad and Tobago</option>
+          <option value="TN">Tunisia</option>
+          <option value="TR">Türkiye</option>
+          <option value="TM">Turkmenistan</option>
+          <option value="TC">Turks and Caicos Islands</option>
+          <option value="TV">Tuvalu</option>
+          <option value="UG">Uganda</option>
+          <option value="UA">Ukraine</option>
+          <option value="AE">United Arab Emirates</option>
+          <option value="GB">United Kingdom</option>
+          <option value="US">United States</option>
+          <option value="UM">United States Minor Outlying Islands</option>
+          <option value="UY">Uruguay</option>
+          <option value="UZ">Uzbekistan</option>
+          <option value="VU">Vanuatu</option>
+          <option value="VE">Venezuela</option>
+          <option value="VN">Vietnam</option>
+          <option value="VG">Virgin Islands (British)</option>
+          <option value="VI">Virgin Islands (U.S.)</option>
+          <option value="WF">Wallis and Futuna</option>
+          <option value="EH">Western Sahara</option>
+          <option value="YE">Yemen</option>
+          <option value="ZM">Zambia</option>
+          <option value="ZW">Zimbabwe</option>
+        </select>
+        <span class="hint">Optional. Stored as a two-letter code, and only when a WiFi network name is set.</span>
       </label>
     </fieldset>
 
     <fieldset>
       <legend>Web administrator</legend>
-      <label class="check"><input type="radio" name="claim" value="admin"> Create the web administrator in this file</label>
-      <label class="check"><input type="radio" name="claim" value="code"> Use a setup code I choose</label>
-      <label class="check"><input type="radio" name="claim" value="console" checked> Print a random setup code on the console</label>
-      <div data-claim="admin">
-        <label>Username
-          <input name="adminUser" autocomplete="off" value="admin">
-        </label>
-        <label>Password
-          <input name="adminPass" type="password" autocomplete="new-password">
-          <span class="hint">At least 12 characters. This is the FELDCORE web account, not a Unix login. Two-factor stays off until you turn it on after boot.</span>
-        </label>
-      </div>
-      <div data-claim="code">
-        <label>Setup code
-          <input name="setupCode" autocomplete="off" placeholder="ABCD-2345">
-          <span class="hint">Eight characters from ABCDEFGHJKLMNPQRSTUVWXYZ23456789. Dashes are optional.</span>
-        </label>
-      </div>
+      <p>Leave the username and password blank and this file will not set an administrator. The device then prints a random setup code on the console.</p>
+      <label>Username
+        <input name="adminUser" autocomplete="off" placeholder="admin">
+      </label>
+      <label>Password
+        <input name="adminPass" type="password" autocomplete="new-password">
+        <span class="hint">At least 12 characters when you set one. This is the FELDCORE web account, not a Unix login. Two-factor stays off until you turn it on after boot.</span>
+      </label>
     </fieldset>
 
     <fieldset>
@@ -192,19 +482,6 @@
           <textarea name="rootKeys" spellcheck="false" placeholder="ssh-ed25519 AAAA... comment"></textarea>
           <span class="hint">One OpenSSH public key per line. Paste the public key, not a private key. Password login stays off.</span>
         </label>
-        <label>Unix user
-          <input name="userName" autocomplete="off" placeholder="optional">
-          <span class="hint">Optional. Separate from the web administrator. The home directory is on the state partition, because /home is not kept.</span>
-        </label>
-        <label>Unix user public key
-          <textarea name="userKeys" spellcheck="false"></textarea>
-        </label>
-        <label>Unix password
-          <input name="userPass" type="password" autocomplete="new-password">
-          <span class="hint">Optional, and only for the console. SSH will not accept it. Prefer the public key.</span>
-        </label>
-        <label class="check"><input type="checkbox" name="userSudo"> Grant sudo if sudo is installed</label>
-        <p>The OS image does not install sudo. Checking this records the choice; the account is still created and sudo is skipped until the package exists.</p>
       </div>
     </fieldset>
 
@@ -232,10 +509,8 @@ function buildInstall(v) {
   var hostRe = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
   var tzRe = /^[A-Za-z0-9+_/-]{1,64}$/;
   var ifaceRe = /^[A-Za-z0-9_.:-]{1,32}$/;
-  var userRe = /^[a-z_][a-z0-9_-]{0,31}$/;
   var adminRe = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
   var keyRe = /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/=]+( .*)?$/;
-  var alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
   function trim(s) { return String(s || "").trim(); }
   function push(msg) { errors.push(msg); }
@@ -244,7 +519,7 @@ function buildInstall(v) {
   var timezone = trim(v.timezone);
   if (!hostname || !timezone) push("Enter a hostname and a time zone.");
   if (hostname && !hostRe.test(hostname)) push("Host names use letters, numbers, and hyphens.");
-  if (timezone && (!tzRe.test(timezone) || timezone.indexOf("..") >= 0)) push("Choose a time zone like Europe/London.");
+  if (timezone && (!tzRe.test(timezone) || timezone.indexOf("..") >= 0)) push("Choose a time zone like Australia/Brisbane.");
 
   var mode = trim(v.netMode) || "dhcp";
   var iface = trim(v.iface);
@@ -255,7 +530,7 @@ function buildInstall(v) {
   var ssid = trim(v.ssid);
   var psk = String(v.psk || "");
   var country = trim(v.country);
-  var wifi = ssid !== "" || psk.trim() !== "" || country !== "";
+  var wifi = ssid !== "" || psk.trim() !== "";
   if (wifi && !ssid) push("Enter a WiFi network name.");
   if (bytes(ssid) > 32) push("The WiFi network name must be at most 32 bytes.");
   if (/[\u0000-\u001f\u007f]/.test(ssid) || /[\u0000-\u001f\u007f]/.test(psk)) {
@@ -282,36 +557,22 @@ function buildInstall(v) {
     }
   }
 
-  var claim = v.claim || "console";
-  if (claim === "admin") {
-    var adminUser = trim(v.adminUser);
-    var adminPass = String(v.adminPass || "");
-    if (!adminRe.test(adminUser)) push("The administrator name must start with a letter or number and be at most 32 characters.");
-    var pw = strong(adminUser, adminPass);
-    if (pw) push("Administrator password: " + pw);
-  } else if (claim === "code") {
-    var code = trim(v.setupCode).toUpperCase().replace(/[-\s]/g, "");
-    if (code.length !== 8 || code.split("").some(function (ch) { return alphabet.indexOf(ch) < 0; })) {
-      push("The setup code must be 8 characters from ABCDEFGHJKLMNPQRSTUVWXYZ23456789.");
+  var adminUser = trim(v.adminUser);
+  var adminPass = String(v.adminPass || "");
+  if (adminUser !== "" || adminPass !== "") {
+    if (!adminUser) push("Enter an administrator username, or clear the password.");
+    else if (!adminRe.test(adminUser)) push("The administrator name must start with a letter or number and be at most 32 characters.");
+    if (adminPass) {
+      var pw = strong(adminUser, adminPass);
+      if (pw) push("Administrator password: " + pw);
+    } else {
+      push("Enter an administrator password, or leave the username and password blank.");
     }
-  } else if (claim !== "console") {
-    push("Choose an administrator, a setup code, or the console code.");
   }
 
   var rootKeys = keys(v.rootKeys, keyRe, push, "Root");
-  var userKeys = keys(v.userKeys, keyRe, push, "Unix user");
-  var userName = trim(v.userName);
-  var userPass = String(v.userPass || "");
-  var userOn = userName !== "" || userPass !== "" || !!v.userSudo || userKeys.length > 0;
-  if (!v.ssh && ((rootKeys && rootKeys.length) || userOn)) {
-    push("Turn SSH on to use the public key or Unix user, or clear those fields.");
-  }
-  if (userOn) {
-    if (!userRe.test(userName) || userName === "root") push("Unix user names start with a lowercase letter or underscore. root is not allowed.");
-    if (userPass) {
-      var up = strong(userName, userPass);
-      if (up) push("Unix password: " + up);
-    }
+  if (!v.ssh && rootKeys && rootKeys.length) {
+    push("Turn SSH on to use the public key, or clear that field.");
   }
 
   if (errors.length) return { errors: errors, json: "" };
@@ -329,18 +590,11 @@ function buildInstall(v) {
     if (psk.trim()) file.wifi.psk = psk.trim();
     if (country) file.wifi.country = country.toUpperCase();
   }
-  if (claim === "admin") {
-    file.admin = { username: trim(v.adminUser), password: String(v.adminPass || ""), skipTotp: true };
-  } else if (claim === "code") {
-    file.setupCode = trim(v.setupCode).toUpperCase().replace(/[-\s]/g, "");
+  if (adminUser !== "" || adminPass !== "") {
+    file.admin = { username: adminUser, password: adminPass, skipTotp: true };
   }
   if (v.ssh) {
     file.ssh = { enable: true, permitRoot: !!v.permitRoot, authorizedKeys: rootKeys };
-  }
-  if (userOn) {
-    file.user = { name: userName, sudo: !!v.userSudo };
-    if (userPass) file.user.password = userPass;
-    if (userKeys.length) file.user.authorizedKeys = userKeys;
   }
   file.dataPool = !!v.dataPool;
   return { errors: [], json: JSON.stringify(file, null, 2) + "\n" };
@@ -438,17 +692,11 @@ function readForm(form) {
     ssid: data.get("ssid"),
     psk: data.get("psk"),
     country: data.get("country"),
-    claim: data.get("claim"),
     adminUser: data.get("adminUser"),
     adminPass: data.get("adminPass"),
-    setupCode: data.get("setupCode"),
     ssh: data.get("ssh") === "on",
     permitRoot: data.get("permitRoot") === "on",
     rootKeys: data.get("rootKeys"),
-    userName: data.get("userName"),
-    userPass: data.get("userPass"),
-    userSudo: data.get("userSudo") === "on",
-    userKeys: data.get("userKeys"),
     dataPool: data.get("dataPool") === "on"
   };
 }
@@ -462,10 +710,6 @@ function wire() {
     var mode = form.netMode.value;
     Array.prototype.forEach.call(form.querySelectorAll("[data-show]"), function (el) {
       el.hidden = el.getAttribute("data-show") !== mode;
-    });
-    var claim = (form.querySelector('input[name="claim"]:checked') || {}).value;
-    Array.prototype.forEach.call(form.querySelectorAll("[data-claim]"), function (el) {
-      el.hidden = el.getAttribute("data-claim") !== claim;
     });
     var ssh = form.ssh.checked;
     Array.prototype.forEach.call(form.querySelectorAll("[data-ssh]"), function (el) {
