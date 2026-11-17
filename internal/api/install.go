@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/compose"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/store"
@@ -74,6 +75,17 @@ func (s *Server) wireInstalls() {
 			return compose.InstallCLI(ctx)
 		},
 	})
+	if s.backups != nil {
+		dataDir := s.backups.DataDir
+		s.installs.Register("restic", install.Spec{
+			Label: "restic",
+			Apt:   true,
+			Run: func(ctx context.Context, rep install.Reporter) error {
+				rep.Step("Installing restic")
+				return backup.InstallRestic(ctx, dataDir)
+			},
+		})
+	}
 	if s.remote != nil {
 		rem := s.remote
 		s.installs.Register("cloudflared", install.Spec{

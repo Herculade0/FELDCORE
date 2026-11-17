@@ -24,9 +24,11 @@ type App struct {
 
 // DenyError is a refusal from an AuthHook. Status 0 means 403.
 // Citizen ID returns this when the stored access level is not met.
+// Location, when set, is the sign-in page a browser should open.
 type DenyError struct {
-	Status int
-	Msg    string
+	Status   int
+	Msg      string
+	Location string
 }
 
 func (e *DenyError) Error() string {

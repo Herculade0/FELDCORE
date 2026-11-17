@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { LogOut, Moon, Sun } from "lucide-react";
+import Bell from "./components/notify/Bell";
 import { NAV, type NavKey } from "./nav";
 import { VERSION } from "./version";
 import { ThemeProvider, useTheme } from "./lib/theme";
@@ -12,10 +13,14 @@ import AuditPage from "./components/AuditPage";
 import Dashboard from "./components/Dashboard";
 import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
+import StoragePage from "./components/storage/StoragePage";
 import DockerPage from "./components/docker/DockerPage";
 import StacksPage from "./components/stacks/StacksPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
+import BackupsPage from "./components/backups/BackupsPage";
+import HealthPage from "./components/health/HealthPage";
+import Launcher from "./components/Launcher";
 import Wizard from "./components/setup/Wizard";
 import { TerminalProvider } from "./components/Terminal";
 
@@ -31,12 +36,12 @@ export default function App() {
 
 /** Nothing behind this renders until the visitor is signed in. */
 function Gate() {
-  const { phase, wizardPending, refresh } = useAuth();
+  const { phase, wizardPending, skipWizard, refresh } = useAuth();
   switch (phase) {
     case "ready":
       return wizardPending ? <Wizard onDone={() => void refresh()} /> : <Shell />;
     case "setup":
-      return <SetupScreen />;
+      return skipWizard ? <SetupScreen /> : <Wizard onDone={() => void refresh()} />;
     case "login":
       return <LoginScreen />;
     case "unreachable":
@@ -47,9 +52,11 @@ function Gate() {
 }
 
 function Shell() {
-  const [active, setActive] = useState<NavKey>("dashboard");
+  const { username, admin } = useAuth();
+  const items = admin ? NAV : NAV.filter((item) => item.key === "launcher");
+  const [active, setActive] = useState<NavKey>(admin ? "dashboard" : "launcher");
   const [stackFocus, setStackFocus] = useState<string | null>(null);
-  const { username } = useAuth();
+  const page = items.some((item) => item.key === active) ? active : (items[0]?.key ?? "launcher");
 
   return (
     <TerminalProvider>
@@ -61,8 +68,8 @@ function Shell() {
           <Wordmark />
         </div>
         <nav className="mt-6 flex-1 space-y-1.5" aria-label="Main">
-          {NAV.map(({ key, label, icon: Icon, ready }) => {
-            const on = active === key;
+          {items.map(({ key, label, icon: Icon, ready }) => {
+            const on = page === key;
             return (
               <button
                 key={key}
@@ -90,6 +97,7 @@ function Shell() {
           })}
         </nav>
         <div className="flex items-center gap-1 border-t border-line px-1 pt-3">
+          {admin && <Bell />}
           <div className="min-w-0 flex-1 px-1">
             <div className="truncate text-xs font-bold text-ink">{username}</div>
             <div className="text-[10px] font-semibold tracking-wider text-ink-3">v{VERSION}</div>
@@ -106,18 +114,23 @@ function Shell() {
           <Wordmark />
         </div>
         <div className="flex">
+          {admin && <Bell />}
           <ThemeToggle />
           <SignOutButton />
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-10 md:pt-8">
-        <ErrorBoundary resetKey={active} area={NAV.find((n) => n.key === active)?.label}>
-          {active === "dashboard" ? (
+        <ErrorBoundary resetKey={page} area={items.find((n) => n.key === page)?.label}>
+          {page === "dashboard" ? (
             <Dashboard onNavigate={setActive} />
-          ) : active === "shares" ? (
+          ) : page === "launcher" ? (
+            <Launcher />
+          ) : page === "storage" ? (
+            <StoragePage />
+          ) : page === "shares" ? (
             <SharesPage />
-          ) : active === "docker" ? (
+          ) : page === "docker" ? (
             <DockerPage
               onOpenApps={() => setActive("apps")}
               onOpenStack={(name) => {
@@ -125,15 +138,19 @@ function Shell() {
                 setActive("stacks");
               }}
             />
-          ) : active === "stacks" ? (
+          ) : page === "stacks" ? (
             <StacksPage focus={stackFocus} onFocusHandled={() => setStackFocus(null)} />
-          ) : active === "apps" ? (
+          ) : page === "apps" ? (
             <AppsPage />
-          ) : active === "vms" ? (
+          ) : page === "vms" ? (
             <VMsPage />
-          ) : active === "audit" ? (
+          ) : page === "backups" ? (
+            <BackupsPage />
+          ) : page === "health" ? (
+            <HealthPage />
+          ) : page === "audit" ? (
             <AuditPage />
-          ) : active === "settings" ? (
+          ) : page === "settings" ? (
             <SettingsPage onOpenAudit={() => setActive("audit")} />
           ) : null}
         </ErrorBoundary>
@@ -144,8 +161,8 @@ function Shell() {
         className="glass fixed inset-x-3 bottom-3 z-20 flex justify-around rounded-3xl p-1.5 md:hidden"
         aria-label="Main"
       >
-        {NAV.map(({ key, label, icon: Icon }) => {
-          const on = active === key;
+        {items.map(({ key, label, icon: Icon }) => {
+          const on = page === key;
           return (
             <button
               key={key}

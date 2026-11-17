@@ -1,5 +1,6 @@
-// Package backup copies FELDCORE's configuration to Proton Drive with rclone's
-// protondrive backend. That backend is unofficial.
+// Package backup stores versioned restic repositories and, from the older
+// Settings card, uploads one archive to Proton Drive with rclone.
+// The Proton backend is unofficial.
 package backup
 
 import (

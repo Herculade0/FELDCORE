@@ -80,6 +80,9 @@ export default function DriveBackup() {
     <Card>
       <div id="settings-drive">
         <CardTitle icon={HardDrive} title="Proton Drive backups" hint="Off until you turn them on" />
+        <p className="mt-3 text-sm text-ink-2">
+          Versioned backups, including a Proton Drive destination, are on the Backups page. This card still uploads one tar.gz archive.
+        </p>
         <div className="mt-3">
           <Alert tone="warn">
             Experimental. rclone's Proton Drive backend is unofficial and is not supported by Proton. A 2FA code

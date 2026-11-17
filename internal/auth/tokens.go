@@ -14,16 +14,19 @@ import (
 )
 
 // Scopes a token can carry. Admin includes the others. files:write includes
-// files:read. Shell access is not a scope: an agent token cannot open one,
-// whatever it was granted.
+// files:read. backups:write includes backups:read. Shell access is not a
+// scope: an agent token cannot open one, whatever it was granted.
 const (
-	ScopeRead       = "read"
-	ScopeContainers = "containers"
-	ScopeVMs        = "vms"
-	ScopeFilesRead  = "files:read"
-	ScopeFilesWrite = "files:write"
-	ScopeStacks     = "stacks"
-	ScopeAdmin      = "admin"
+	ScopeRead         = "read"
+	ScopeContainers   = "containers"
+	ScopeVMs          = "vms"
+	ScopeFilesRead    = "files:read"
+	ScopeFilesWrite   = "files:write"
+	ScopeStacks       = "stacks"
+	ScopeStorage      = "storage"
+	ScopeBackupsRead  = "backups:read"
+	ScopeBackupsWrite = "backups:write"
+	ScopeAdmin        = "admin"
 )
 
 const (
@@ -44,19 +47,22 @@ var maxAudit = MaxAuditEvents
 // ErrTokenNotFound means the id does not match a stored token.
 var ErrTokenNotFound = errors.New("token not found")
 
-var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeAdmin}
+var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin}
 
 // Allows reports whether a token's scopes include need. Admin includes every
-// real scope, and files:write includes files:read. An unknown need is never
-// allowed, so a shell cannot be smuggled in as a scope name.
+// real scope. files:write includes files:read, and backups:write includes
+// backups:read. An unknown need is never allowed, so a shell cannot be
+// smuggled in as a scope name.
 func Allows(have []string, need string) bool {
 	switch need {
-	case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeAdmin:
+	case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin:
 	default:
 		return false
 	}
 	for _, s := range have {
-		if s == ScopeAdmin || s == need || (need == ScopeFilesRead && s == ScopeFilesWrite) {
+		if s == ScopeAdmin || s == need ||
+			(need == ScopeFilesRead && s == ScopeFilesWrite) ||
+			(need == ScopeBackupsRead && s == ScopeBackupsWrite) {
 			return true
 		}
 	}
@@ -263,15 +269,28 @@ func (a *Service) Audit() []store.AuditEvent {
 
 func trimAudit(in []store.AuditEvent, now time.Time) []store.AuditEvent {
 	cutoff := now.Add(-AuditRetention)
-	i := 0
-	for i < len(in) && in[i].Time.Before(cutoff) {
-		i++
+	live := in[:0]
+	for _, ev := range in {
+		if !ev.Time.Before(cutoff) {
+			live = append(live, ev)
+		}
 	}
-	in = in[i:]
-	if len(in) > maxAudit {
-		in = append([]store.AuditEvent(nil), in[len(in)-maxAudit:]...)
+	// Copy so the caller's backing array is not aliased after the slice
+	// expression above when live is a prefix of in.
+	live = append([]store.AuditEvent(nil), live...)
+	for len(live) > maxAudit {
+		// Drop anonymous sign-in noise before any security event, so a
+		// flood of unknown usernames cannot flush the log.
+		drop := 0
+		for i, ev := range live {
+			if ev.Action == "sign-in noise" {
+				drop = i
+				break
+			}
+		}
+		live = append(live[:drop], live[drop+1:]...)
 	}
-	return in
+	return live
 }
 
 func normalizeScopes(in []string) ([]string, error) {
@@ -281,10 +300,10 @@ func normalizeScopes(in []string) ([]string, error) {
 	have := map[string]bool{}
 	for _, s := range in {
 		switch s {
-		case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeAdmin:
+		case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin:
 			have[s] = true
 		default:
-			return nil, &InputError{"Scopes are read, containers, vms, files:read, files:write, stacks and admin."}
+			return nil, &InputError{"Scopes are read, containers, vms, files:read, files:write, stacks, storage, backups:read, backups:write and admin."}
 		}
 	}
 	out := make([]string, 0, len(have))
