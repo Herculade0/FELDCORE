@@ -259,6 +259,9 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		Created:    rc.Created,
 		Managed:    rc.Labels[ManagedLabel] == "true",
 		Compose:    rc.Labels[composeLabel] != "",
+		Stack:      rc.Labels[StackLabel],
+		Project:    rc.Labels[composeLabel],
+		Service:    rc.Labels[composeServiceLabel],
 		GPU:        rc.Labels[GPULabel] == "true",
 		Role:       rc.Labels[RoleLabel],
 		VPN:        rc.Labels[vpn.LabelTunnel],
@@ -288,7 +291,12 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 	case mode == "none" || strings.HasPrefix(mode, "container:"):
 		c.Network = mode
 	default:
-		c.Isolated = isAppNetwork(mode, c.Name)
+		c.Isolated = isAppNetwork(mode, c.Name) || isStackNetwork(mode)
+		for _, name := range names {
+			if isStackNetwork(name) || isAppNetwork(name, c.Name) {
+				c.Isolated = true
+			}
+		}
 		c.Network = strings.Join(names, ", ")
 		if c.Network == "" {
 			c.Network = mode

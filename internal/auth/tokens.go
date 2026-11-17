@@ -22,6 +22,7 @@ const (
 	ScopeVMs          = "vms"
 	ScopeFilesRead    = "files:read"
 	ScopeFilesWrite   = "files:write"
+	ScopeStacks       = "stacks"
 	ScopeStorage      = "storage"
 	ScopeBackupsRead  = "backups:read"
 	ScopeBackupsWrite = "backups:write"
@@ -46,7 +47,7 @@ var maxAudit = MaxAuditEvents
 // ErrTokenNotFound means the id does not match a stored token.
 var ErrTokenNotFound = errors.New("token not found")
 
-var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin}
+var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin}
 
 // Allows reports whether a token's scopes include need. Admin includes every
 // real scope. files:write includes files:read, and backups:write includes
@@ -54,7 +55,7 @@ var scopeOrder = []string{ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, 
 // smuggled in as a scope name.
 func Allows(have []string, need string) bool {
 	switch need {
-	case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin:
+	case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin:
 	default:
 		return false
 	}
@@ -299,10 +300,10 @@ func normalizeScopes(in []string) ([]string, error) {
 	have := map[string]bool{}
 	for _, s := range in {
 		switch s {
-		case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin:
+		case ScopeRead, ScopeContainers, ScopeVMs, ScopeFilesRead, ScopeFilesWrite, ScopeStacks, ScopeStorage, ScopeBackupsRead, ScopeBackupsWrite, ScopeAdmin:
 			have[s] = true
 		default:
-			return nil, &InputError{"Scopes are read, containers, vms, files:read, files:write, storage, backups:read, backups:write and admin."}
+			return nil, &InputError{"Scopes are read, containers, vms, files:read, files:write, stacks, storage, backups:read, backups:write and admin."}
 		}
 	}
 	out := make([]string, 0, len(have))

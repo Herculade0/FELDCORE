@@ -52,7 +52,7 @@ Follow-ups
 - [ ] Live log/stat streaming over WebSocket (today: polled)
 - [ ] Container detail view (full config, inspect)
 - [ ] Image management (remove unused, prune)
-- [ ] docker-compose stack import
+- [x] docker-compose stack import — see [COMPOSE.md](COMPOSE.md)
 - [ ] NVIDIA GPU sharing: offer to install the NVIDIA Container Toolkit, only
       when an NVIDIA card is present
 - [ ] Intel-specific extras (e.g. QuickSync tooling), only when an Intel GPU

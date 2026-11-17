@@ -169,8 +169,21 @@ func (s *Server) auditFile(r *http.Request, action, target, result string) {
 		return
 	}
 	name, id := actorOf(r)
-	if err := s.auth.Record(id, store.AuditEvent{
-		TokenName: name,
+	s.auditNamed(name, id, action, target, result)
+}
+
+// auditNamed records an action for a caller who may already have left the
+// request. Stack jobs finish after the HTTP response, so they keep the name
+// and token id from the request that started them.
+func (s *Server) auditNamed(tokenName, tokenID, action, target, result string) {
+	if s.auth == nil {
+		return
+	}
+	if tokenName == "" {
+		tokenName = "admin"
+	}
+	if err := s.auth.Record(tokenID, store.AuditEvent{
+		TokenName: tokenName,
 		Action:    action,
 		Target:    clip(target, 200),
 		Result:    result,
@@ -233,6 +246,12 @@ func scopeFor(method, path string) string {
 	}
 	if scope, ok := backupScope(method, p); ok {
 		return scope
+	}
+	if strings.HasPrefix(p, "/stacks") {
+		if method == http.MethodGet || method == http.MethodHead {
+			return auth.ScopeRead
+		}
+		return auth.ScopeStacks
 	}
 	if strings.HasPrefix(p, "/storage") {
 		if method == http.MethodGet || method == http.MethodHead {
@@ -379,6 +398,14 @@ func targetFrom(path string) string {
 	case strings.HasPrefix(p, "/vms/"):
 		id, _, _ := strings.Cut(strings.TrimPrefix(p, "/vms/"), "/")
 		return id
+	case strings.HasPrefix(p, "/stacks/"):
+		name, _, _ := strings.Cut(strings.TrimPrefix(p, "/stacks/"), "/")
+		switch name {
+		case "jobs", "preview", "import", "from-container", "":
+			return ""
+		default:
+			return name
+		}
 	case strings.HasPrefix(p, "/storage/pools/"):
 		name, _, _ := strings.Cut(strings.TrimPrefix(p, "/storage/pools/"), "/")
 		return name

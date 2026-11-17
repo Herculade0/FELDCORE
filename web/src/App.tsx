@@ -15,6 +15,7 @@ import SettingsPage from "./components/SettingsPage";
 import SharesPage from "./components/shares/SharesPage";
 import StoragePage from "./components/storage/StoragePage";
 import DockerPage from "./components/docker/DockerPage";
+import StacksPage from "./components/stacks/StacksPage";
 import AppsPage from "./components/apps/AppsPage";
 import VMsPage from "./components/vms/VMsPage";
 import BackupsPage from "./components/backups/BackupsPage";
@@ -54,6 +55,7 @@ function Shell() {
   const { username, admin } = useAuth();
   const items = admin ? NAV : NAV.filter((item) => item.key === "launcher");
   const [active, setActive] = useState<NavKey>(admin ? "dashboard" : "launcher");
+  const [stackFocus, setStackFocus] = useState<string | null>(null);
   const page = items.some((item) => item.key === active) ? active : (items[0]?.key ?? "launcher");
 
   return (
@@ -129,7 +131,15 @@ function Shell() {
           ) : page === "shares" ? (
             <SharesPage />
           ) : page === "docker" ? (
-            <DockerPage onOpenApps={() => setActive("apps")} />
+            <DockerPage
+              onOpenApps={() => setActive("apps")}
+              onOpenStack={(name) => {
+                setStackFocus(name);
+                setActive("stacks");
+              }}
+            />
+          ) : page === "stacks" ? (
+            <StacksPage focus={stackFocus} onFocusHandled={() => setStackFocus(null)} />
           ) : page === "apps" ? (
             <AppsPage />
           ) : page === "vms" ? (

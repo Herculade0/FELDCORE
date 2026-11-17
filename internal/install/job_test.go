@@ -303,6 +303,48 @@ func TestRunSplitsLines(t *testing.T) {
 	}
 }
 
+func TestStartSpecQuietSkipsGenericAudit(t *testing.T) {
+	var mu sync.Mutex
+	var audits []string
+	r := New(Deps{Audit: func(action, target, result string) {
+		mu.Lock()
+		audits = append(audits, action+"|"+target+"|"+result)
+		mu.Unlock()
+	}})
+	job, err := r.StartSpec("stack:demo:deploy", Spec{
+		Label: "Deploy demo",
+		Quiet: true,
+		Run: func(ctx context.Context, rep Reporter) error {
+			rep.Step("Starting the stack")
+			rep.Line("demo is up.")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := waitState(t, r, job.ID, Succeeded)
+	if done.Step != "Finished" || !contains(done.Log, "demo is up.") {
+		t.Fatalf("job %+v", done)
+	}
+	again, err := r.StartSpec("stack:demo:stop", Spec{
+		Quiet: true,
+		Run:   func(context.Context, Reporter) error { return errors.New("did not stop") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitState(t, r, again.ID, Failed)
+	if failed.Error == "" {
+		t.Fatal("missing error")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(audits) != 0 {
+		t.Fatalf("quiet job wrote generic install audit: %v", audits)
+	}
+}
+
 func contains(lines []string, want string) bool {
 	for _, line := range lines {
 		if line == want {

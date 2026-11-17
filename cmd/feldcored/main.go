@@ -262,6 +262,8 @@ func main() {
 		Backups:    backups,
 		Mail:       mail,
 		Publish:    pubSvc,
+		DataDir:    cfg.DataDir,
+		SharesRoot: cfg.SharesRoot,
 		Storage:    diskSvc,
 		Health:     healthSvc,
 		Alerts:     alerts,
