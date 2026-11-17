@@ -4,7 +4,7 @@ import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, Modal, SelectField, TextField, Toggle } from "./form";
 
-type Scope = "read" | "containers" | "vms" | "admin";
+type Scope = "read" | "containers" | "vms" | "files:read" | "files:write" | "stacks" | "storage" | "backups:read" | "backups:write" | "admin";
 
 interface Token {
   id: string;
@@ -25,7 +25,7 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
   {
     key: "read",
     label: "Read",
-    hint: "System, shares, the App Store, containers and VMs. The MCP server needs this.",
+    hint: "System, shares, the App Store, containers, VMs, Compose stacks, health, and the notification inbox. The MCP server needs this.",
   },
   {
     key: "containers",
@@ -36,6 +36,36 @@ const SCOPES: { key: Scope; label: string; hint: string }[] = [
     key: "vms",
     label: "VMs",
     hint: "Change virtual machines over the API, once that layer exists.",
+  },
+  {
+    key: "files:read",
+    label: "Files, read",
+    hint: "List, preview and download files in a share.",
+  },
+  {
+    key: "files:write",
+    label: "Files, write",
+    hint: "Upload, rename, move, copy and delete files in a share. Includes reading them.",
+  },
+  {
+    key: "stacks",
+    label: "Stacks",
+    hint: "Save, deploy, update, stop and remove Compose stacks. Grant read as well so the agent can list them and follow a job.",
+  },
+  {
+    key: "storage",
+    label: "Storage",
+    hint: "Create and change pools, mount them, and run scrub, balance and trim. Looking at disks is included in Read.",
+  },
+  {
+    key: "backups:read",
+    label: "Backups, read",
+    hint: "See destinations, jobs, copies and the files inside a copy.",
+  },
+  {
+    key: "backups:write",
+    label: "Backups, write",
+    hint: "Run backups, checks and restores, and change destinations. Includes reading them.",
   },
   {
     key: "admin",
@@ -80,6 +110,12 @@ export default function AgentAccessCard({ onOpenAudit }: { onOpenAudit?: () => v
     read: true,
     containers: false,
     vms: false,
+    "files:read": false,
+    "files:write": false,
+    stacks: false,
+    storage: false,
+    "backups:read": false,
+    "backups:write": false,
     admin: false,
   });
   const [busy, setBusy] = useState(false);

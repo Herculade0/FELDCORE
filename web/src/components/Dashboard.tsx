@@ -20,16 +20,35 @@ import { TerminalButton, useTerminal } from "./Terminal";
 import { PageHelp } from "./help/PageHelp";
 import { Gauge } from "./Gauge";
 import { Sparkline } from "./Sparkline";
+import { HealthStrip, type HealthReport } from "./health/HealthPage";
 
 export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => void }) {
   const { stats, history, status } = useStatsStream();
   const [info, setInfo] = useState<Info | null>(null);
+  const [report, setReport] = useState<HealthReport | null>(null);
   const { openHost } = useTerminal();
 
   useEffect(() => {
     api<Info>("/system/info")
       .then(setInfo)
       .catch(() => setInfo(null));
+  }, []);
+
+  useEffect(() => {
+    let stop = false;
+    const load = () => {
+      api<HealthReport>("/health/status")
+        .then((r) => {
+          if (!stop) setReport(r);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
   }, []);
 
   const series = useMemo(
@@ -48,7 +67,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
   const rx = stats ? total(stats, "rxPerSec") : 0;
   const tx = stats ? total(stats, "txPerSec") : 0;
   const netMax = Math.max(...series.rx, ...series.tx, 1024) * 1.2;
-  const state = health(stats);
+  const state = health(stats, report);
 
   return (
     <div className="space-y-6">
@@ -61,7 +80,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
             </h1>
             <PageHelp topic="dashboard" />
           </div>
-          <p className={`mt-2 text-sm font-semibold ${state.ok ? "text-ink-2" : "text-warn"}`}>
+          <p className={`mt-2 text-sm font-semibold ${state.tone}`}>
             {state.text}
           </p>
         </div>
@@ -227,6 +246,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
         </Card>
       </section>
 
+      <HealthStrip report={report} onOpen={() => onNavigate("health")} />
+
       <section>
         <h2 className="mb-3 px-1 text-[11px] font-bold uppercase tracking-[0.2em] text-ink-3">
           Modules
@@ -261,16 +282,21 @@ function cap(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-/** One-line plain-language summary of machine health. */
-function health(s: Stats | null): { ok: boolean; text: string } {
-  if (!s) return { ok: true, text: "Establishing link…" };
+/** One-line plain-language summary. The health sampler wins once it has reported. */
+function health(s: Stats | null, report: HealthReport | null): { tone: string; text: string } {
+  if (report && report.summary && report.overall !== "unknown") {
+    const tone =
+      report.overall === "crit" ? "text-bad" : report.overall === "warn" ? "text-warn" : "text-ok";
+    return { tone, text: report.summary };
+  }
+  if (!s) return { tone: "text-ink-2", text: "Establishing link…" };
   const issues: string[] = [];
   if (s.cpuPercent >= 90) issues.push("processor under heavy load");
   if (s.memPercent >= 90) issues.push("memory nearly full");
   const full = (s.disks ?? []).find((d) => d.usedPercent >= 90);
   if (full) issues.push(`${full.mountpoint} almost out of space`);
-  if (!issues.length) return { ok: true, text: "All systems nominal." };
-  return { ok: false, text: `Attention: ${issues.join(", ")}.` };
+  if (!issues.length) return { tone: "text-ok", text: "All systems nominal." };
+  return { tone: "text-warn", text: `Attention: ${issues.join(", ")}.` };
 }
 
 function Clock() {

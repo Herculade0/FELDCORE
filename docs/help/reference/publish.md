@@ -28,9 +28,11 @@ Home names such as `plex.home.arpa` use the local certificate and skip the tunne
 
 ## Citizen ID on the form
 
-The menu is `public`, `signed-in`, `groups`, or `admins`. The value is stored with the app. The hint on the form is the behaviour: Citizen ID enforces it when that package is connected. Until then, protection still runs and the request is allowed through that check. Group names are stored and not enforced yet.
+The menu is `public`, `signed-in`, `groups`, or `admins`. The value is stored with the app and enforced. Protection still runs first. Group names are comma-separated. The same choice, with friendlier labels, is on Settings → Citizen ID.
 
-[[help:citizen-id|Citizen ID]] is not in the app yet. Do not treat the menu as a login wall.
+[[help:citizen-id|Citizen ID]]
+
+[[route:settings.citizen|Open Citizen ID]]
 
 ## Protection
 

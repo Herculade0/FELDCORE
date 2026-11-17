@@ -38,6 +38,7 @@ const RESULT: Record<string, { label: string; cls: string }> = {
   ok: { label: "OK", cls: "bg-ok/12 text-ok" },
   denied: { label: "Denied", cls: "bg-warn/15 text-warn" },
   error: { label: "Error", cls: "bg-bad/12 text-bad" },
+  cancelled: { label: "Cancelled", cls: "bg-track text-ink-2" },
 };
 
 export default function AuditPage() {
@@ -71,7 +72,7 @@ export default function AuditPage() {
             <PageHelp topic="audit" />
           </div>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
-            Every API and MCP call made with an agent token, and every published request the protection layer blocked.
+            File changes and URL downloads are recorded here, including ones made from this browser. Package installs, setup actions, published requests the protection layer blocked, agent token calls, and Citizen ID sign-ins are recorded too.
             {log
               ? ` The newest ${log.maxEvents.toLocaleString()} are kept, for ${log.retentionDays} days.`
               : ""}
@@ -86,12 +87,12 @@ export default function AuditPage() {
       {error && <Alert>{error}</Alert>}
 
       <Card>
-        <CardTitle icon={ScrollText} title="Agent calls" hint={events.length ? `${events.length} shown` : undefined} />
+        <CardTitle icon={ScrollText} title="Activity" hint={events.length ? `${events.length} shown` : undefined} />
         {loading && events.length === 0 ? (
           <p className="mt-5 text-sm font-medium text-ink-3">Loading…</p>
         ) : events.length === 0 ? (
           <p className="mt-5 text-sm font-medium leading-relaxed text-ink-3">
-            No agent has called FELDCORE yet. Calls made with a token show up here. Signing in from the browser does not.
+            Nothing has been recorded yet. File changes, package installs, blocked published requests, agent calls, and Citizen ID sign-ins show up here.
           </p>
         ) : (
           <ul className="mt-4 divide-y divide-line">

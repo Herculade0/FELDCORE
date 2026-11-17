@@ -68,12 +68,13 @@ var (
 )
 
 var pages = map[string]bool{
-	"dashboard": true, "shares": true, "docker": true, "apps": true,
-	"vms": true, "audit": true, "settings": true, "help": true,
+	"dashboard": true, "launcher": true, "storage": true, "shares": true,
+	"docker": true, "stacks": true, "apps": true, "vms": true, "backups": true,
+	"health": true, "audit": true, "settings": true, "help": true,
 }
 
 var tabs = map[string]bool{
-	"general": true, "network": true, "remote": true, "publishing": true,
+	"general": true, "network": true, "remote": true, "publishing": true, "citizen": true,
 }
 
 func load() (Catalog, error) {

@@ -82,6 +82,7 @@ func (m *Manager) Options(ctx context.Context) Options {
 		GPUs:         gpus,
 		GPUAvailable: gpuAvailable(gpus),
 		VPNs:         []VPNChoice{},
+		Peers:        []Peer{},
 	}
 	var nets []struct {
 		Name string `json:"Name"`
@@ -89,14 +90,45 @@ func (m *Manager) Options(ctx context.Context) Options {
 	if err := m.c.getJSON(ctx, "/networks", nil, &nets); err == nil {
 		var custom []string
 		for _, n := range nets {
-			if isCustomNetwork(n.Name) {
+			if isCustomNetwork(n.Name) && !strings.HasPrefix(n.Name, AppNetworkPrefix) {
 				custom = append(custom, n.Name)
 			}
 		}
 		sort.Strings(custom)
 		opts.Networks = append(opts.Networks, custom...)
 	}
+	opts.Peers = m.peers(ctx)
 	return opts
+}
+
+// peers lists containers that can join another app's network. System
+// containers, VPN gateways and containers that cannot take a second network
+// are left out.
+func (m *Manager) peers(ctx context.Context) []Peer {
+	var raw []apiContainer
+	if err := m.c.getJSON(ctx, "/containers/json", url.Values{"all": {"1"}}, &raw); err != nil {
+		return []Peer{}
+	}
+	var out []Peer
+	for _, c := range raw {
+		if c.Labels[RoleLabel] != "" || c.Labels[vpn.LabelGateway] == "true" || c.Labels[vpn.LabelTunnel] != "" {
+			continue
+		}
+		mode := c.HostConfig.NetworkMode
+		if mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") {
+			continue
+		}
+		name := cleanName(c.Names)
+		if name == "" || strings.HasSuffix(name, oldSuffix) {
+			continue
+		}
+		out = append(out, Peer{Name: name, ID: shortID(c.ID)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	if out == nil {
+		out = []Peer{}
+	}
+	return out
 }
 
 // Status reports whether Docker is installed, running and reachable.
@@ -227,6 +259,9 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		Created:    rc.Created,
 		Managed:    rc.Labels[ManagedLabel] == "true",
 		Compose:    rc.Labels[composeLabel] != "",
+		Stack:      rc.Labels[StackLabel],
+		Project:    rc.Labels[composeLabel],
+		Service:    rc.Labels[composeServiceLabel],
 		GPU:        rc.Labels[GPULabel] == "true",
 		Role:       rc.Labels[RoleLabel],
 		VPN:        rc.Labels[vpn.LabelTunnel],
@@ -256,6 +291,12 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 	case mode == "none" || strings.HasPrefix(mode, "container:"):
 		c.Network = mode
 	default:
+		c.Isolated = isAppNetwork(mode, c.Name) || isStackNetwork(mode)
+		for _, name := range names {
+			if isStackNetwork(name) || isAppNetwork(name, c.Name) {
+				c.Isolated = true
+			}
+		}
 		c.Network = strings.Join(names, ", ")
 		if c.Network == "" {
 			c.Network = mode

@@ -47,7 +47,7 @@ After that, the same address shows the sign-in page. The session cookie is what 
 
 ## What you can set next
 
-The first-start wizard may open after the account exists and walk through the host, network, where shares live, which packages to install, and the firewall. That flow is still being finished, so the step-by-step is marked coming soon: [[help:first-run-wizard|First-run wizard]].
+The first-start wizard may open after the account exists and walk through this server, the network, where shares live, remote access, notifications, and a first backup. [[help:first-run-wizard|First-run wizard]].
 
 Anything the wizard sets can be changed later.
 

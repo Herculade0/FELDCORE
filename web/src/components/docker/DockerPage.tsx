@@ -7,10 +7,12 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  Layers,
   Pencil,
   Play,
   Plus,
   RotateCw,
+  Shield,
   Square,
   Store,
   Trash2,
@@ -28,10 +30,17 @@ import { TerminalButton, useTerminal } from "../Terminal";
 import { stateStyle, type Container, type DockerStatus } from "./types";
 import AddressDialog from "./AddressDialog";
 import SnapshotsDialog from "./SnapshotsDialog";
+import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 import PublishedApps from "../publish/PublishedApps";
 import { PageHelp } from "../help/PageHelp";
 
-export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) {
+export default function DockerPage({
+  onOpenApps,
+  onOpenStack,
+}: {
+  onOpenApps?: () => void;
+  onOpenStack?: (name: string) => void;
+}) {
   const [status, setStatus] = useState<DockerStatus | null>(null);
   const [containers, setContainers] = useState<Container[]>([]);
   const [host, setHost] = useState("localhost");
@@ -39,7 +48,19 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
   const [notice, setNotice] = useState<string | null>(null);
   // The container open in the dialog, "new" to create one, or null when closed.
   const [editing, setEditing] = useState<Container | "new" | null>(null);
-  const setCreating = (on: boolean) => setEditing(on ? "new" : null);
+  const [isolateOnOpen, setIsolateOnOpen] = useState(false);
+  const openNew = () => {
+    setIsolateOnOpen(false);
+    setEditing("new");
+  };
+  const openEdit = (c: Container, isolate = false) => {
+    setIsolateOnOpen(isolate);
+    setEditing(c);
+  };
+  const closeEdit = () => {
+    setIsolateOnOpen(false);
+    setEditing(null);
+  };
   const [logsFor, setLogsFor] = useState<Container | null>(null);
   const [removing, setRemoving] = useState<Container | null>(null);
   const [addressFor, setAddressFor] = useState<Container | null>(null);
@@ -97,7 +118,7 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
                 App Store
               </Button>
             )}
-            <Button variant="primary" onClick={() => setCreating(true)}>
+            <Button variant="primary" onClick={openNew}>
               <Plus size={16} strokeWidth={2.75} />
               Run container
             </Button>
@@ -135,23 +156,34 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
           <PublishedApps />
 
           {containers.length ? (
-            <div className="space-y-3">
-              {containers.map((c) => (
-                <ContainerRow
-                  key={c.id}
-                  c={c}
-                  host={host}
-                  onAction={changed}
-                  onError={setError}
-                  onLogs={() => setLogsFor(c)}
-                  onConsole={() => openContainer({ id: c.id, name: c.name, icon: c.icon })}
-                  onEdit={() => setEditing(c)}
-                  onAddress={() => setAddressFor(c)}
-                  onSnapshots={() => setSnapsFor(c)}
-                  onRemove={() => setRemoving(c)}
-                />
-              ))}
-            </div>
+            <ContainerGroups
+              containers={containers}
+              host={host}
+              onAction={changed}
+              onError={setError}
+              onLogs={setLogsFor}
+              onConsole={(c) => openContainer({ id: c.id, name: c.name, icon: c.icon })}
+              onEdit={(c) => openEdit(c)}
+              onIsolate={(c) => openEdit(c, true)}
+              onAddress={setAddressFor}
+              onSnapshots={setSnapsFor}
+              onRemove={setRemoving}
+              onMakeStack={
+                onOpenStack
+                  ? async (c) => {
+                      try {
+                        const st = await api<{ name: string }>("/stacks/from-container", {
+                          method: "POST",
+                          body: { id: c.id, removeOriginal: true },
+                        });
+                        onOpenStack(st.name);
+                      } catch (e) {
+                        setError(errorMessage(e));
+                      }
+                    }
+                  : undefined
+              }
+            />
           ) : (
             <Card className="flex flex-col items-center px-6 py-12 text-center">
               <IconBadge icon={Boxes} size={64} />
@@ -160,7 +192,7 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
                 Run your first container from any Docker image. FELDCORE pulls the image and starts
                 it for you.
               </p>
-              <Button variant="primary" className="mt-6" onClick={() => setCreating(true)}>
+              <Button variant="primary" className="mt-6" onClick={openNew}>
                 <Plus size={16} strokeWidth={2.75} />
                 Run a container
               </Button>
@@ -174,9 +206,10 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
       {editing && (
         <ContainerDialog
           container={editing === "new" ? undefined : editing}
-          onClose={() => setEditing(null)}
+          preferIsolate={isolateOnOpen && editing !== "new"}
+          onClose={closeEdit}
           onSaved={(name, edited) => {
-            setEditing(null);
+            closeEdit();
             changed(edited ? `${name} was updated.` : `${name} was created.`);
           }}
         />
@@ -198,6 +231,98 @@ export default function DockerPage({ onOpenApps }: { onOpenApps?: () => void }) 
   );
 }
 
+function ContainerGroups({
+  containers,
+  host,
+  onAction,
+  onError,
+  onLogs,
+  onConsole,
+  onEdit,
+  onIsolate,
+  onAddress,
+  onSnapshots,
+  onRemove,
+  onMakeStack,
+}: {
+  containers: Container[];
+  host: string;
+  onAction: (msg: string) => void;
+  onError: (msg: string) => void;
+  onLogs: (c: Container) => void;
+  onConsole: (c: Container) => void;
+  onEdit: (c: Container) => void;
+  onIsolate: (c: Container) => void;
+  onAddress: (c: Container) => void;
+  onSnapshots: (c: Container) => void;
+  onRemove: (c: Container) => void;
+  onMakeStack?: (c: Container) => void;
+}) {
+  const groups = groupContainers(containers);
+  const row = (c: Container) => (
+    <ContainerRow
+      key={c.id}
+      c={c}
+      host={host}
+      onAction={onAction}
+      onError={onError}
+      onLogs={() => onLogs(c)}
+      onConsole={() => onConsole(c)}
+      onEdit={() => onEdit(c)}
+      onIsolate={() => onIsolate(c)}
+      onAddress={() => onAddress(c)}
+      onSnapshots={() => onSnapshots(c)}
+      onRemove={() => onRemove(c)}
+      onMakeStack={onMakeStack && !c.compose && !c.role && !c.vpnGateway ? () => onMakeStack(c) : undefined}
+    />
+  );
+  if (!groups) {
+    return <div className="space-y-3">{containers.map(row)}</div>;
+  }
+  return (
+    <div className="space-y-6">
+      {groups.map((g) => (
+        <section key={g.key} className="space-y-3">
+          <div className="flex items-baseline gap-2 px-1">
+            <h2 className="text-sm font-extrabold text-ink">{g.title}</h2>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-ink-3">{g.hint}</span>
+          </div>
+          {g.items.map(row)}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function groupContainers(containers: Container[]): { key: string; title: string; hint: string; items: Container[] }[] | null {
+  if (!containers.some((c) => c.stack || c.project)) return null;
+  const order: string[] = [];
+  const map = new Map<string, { key: string; title: string; hint: string; items: Container[] }>();
+  for (const c of containers) {
+    const key = c.stack ? `stack:${c.stack}` : c.project ? `project:${c.project}` : "loose";
+    let group = map.get(key);
+    if (!group) {
+      group = c.stack
+        ? { key, title: c.stack, hint: "Stack", items: [] }
+        : c.project
+          ? { key, title: c.project, hint: "Compose project", items: [] }
+          : { key, title: "Other containers", hint: "Not in a stack", items: [] };
+      map.set(key, group);
+      order.push(key);
+    }
+    group.items.push(c);
+  }
+  order.sort((a, b) => (a === "loose" ? 1 : 0) - (b === "loose" ? 1 : 0));
+  return order.map((key) => map.get(key)!);
+}
+
+function canIsolate(c: Container): boolean {
+  if (c.isolated || c.vpn || c.vpnGateway || c.role || c.compose) return false;
+  const network = c.network || "";
+  if (network === "host" || network === "none" || network.startsWith("container:")) return false;
+  return true;
+}
+
 function ContainerRow({
   c,
   host,
@@ -206,9 +331,11 @@ function ContainerRow({
   onLogs,
   onConsole,
   onEdit,
+  onIsolate,
   onAddress,
   onSnapshots,
   onRemove,
+  onMakeStack,
 }: {
   c: Container;
   host: string;
@@ -217,9 +344,11 @@ function ContainerRow({
   onLogs: () => void;
   onConsole: () => void;
   onEdit: () => void;
+  onIsolate: () => void;
   onAddress: () => void;
   onSnapshots: () => void;
   onRemove: () => void;
+  onMakeStack?: () => void;
 }) {
   const [busy, setBusy] = useState("");
   const st = stateStyle(c.state);
@@ -260,6 +389,16 @@ function ContainerRow({
             {c.gpu && (
               <span className="rounded-full bg-ok/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ok">
                 GPU
+              </span>
+            )}
+            {c.service && (
+              <span className="rounded-full bg-track px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ink-3">
+                {c.service}
+              </span>
+            )}
+            {c.isolated && (
+              <span className="rounded-full bg-ok/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ok">
+                Private
               </span>
             )}
             {c.vpn && (
@@ -328,6 +467,16 @@ function ContainerRow({
             </IconButton>
           </>
         )}
+        {canIsolate(c) && (
+          <IconButton label="Isolate" onClick={onIsolate} disabled={!!busy}>
+            <Shield size={16} />
+          </IconButton>
+        )}
+        {onMakeStack && (
+          <IconButton label="Make a stack" onClick={onMakeStack} disabled={!!busy}>
+            <Layers size={16} />
+          </IconButton>
+        )}
         <IconButton label={c.vpnGateway ? "Managed from Settings → VPN" : "Edit"} onClick={onEdit} disabled={!!busy || c.vpnGateway}>
           <Pencil size={16} />
         </IconButton>
@@ -376,21 +525,7 @@ function DockerUnavailable({
   status: DockerStatus;
   onInstalled: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const install = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api("/docker/install", { method: "POST" });
-      onInstalled();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const inst = useInstall("docker", onInstalled);
 
   return (
     <Card className="flex flex-col items-center px-6 py-12 text-center">
@@ -403,9 +538,14 @@ function DockerUnavailable({
           "Install Docker to run containers from this page. FELDCORE installs your distribution's Docker package and starts it."}
       </p>
       {status.canInstall ? (
-        <Button variant="primary" className="mt-6" onClick={install} loading={busy}>
-          {!busy && <Download size={15} strokeWidth={2.75} />}
-          {busy ? "Installing Docker…" : "Install Docker"}
+        <Button
+          variant="primary"
+          className="mt-6"
+          onClick={() => void inst.start().catch(() => {})}
+          loading={inst.active || inst.starting}
+        >
+          {!(inst.active || inst.starting) && <Download size={15} strokeWidth={2.75} />}
+          {inst.active ? "Installing Docker…" : "Install Docker"}
         </Button>
       ) : (
         !status.installed && (
@@ -414,14 +554,14 @@ function DockerUnavailable({
           </p>
         )
       )}
-      {busy && (
-        <p className="mt-3 text-xs font-medium text-ink-3">
-          This downloads a few hundred MB and can take a couple of minutes.
-        </p>
-      )}
-      {error && (
+      {inst.error && (
         <div className="mt-4 w-full max-w-md">
-          <Alert>{error}</Alert>
+          <Alert>{inst.error}</Alert>
+        </div>
+      )}
+      {showInstall(inst.job, !status.installed) && inst.job && (
+        <div className="mt-4 w-full max-w-xl text-left">
+          <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
         </div>
       )}
     </Card>

@@ -31,7 +31,7 @@ A container on `none`, or one that shares a VPN gateway's network, has no addres
 
 ## Templates and networks they name
 
-A Community Applications template that asks for its own Docker network is not given that network. The form starts on bridge and adds a note: "The template uses Docker network …. This setup uses bridge instead, which you can change below." Change it only if that network already exists. This build does not create a network from a template. Compose stacks, which are the usual way a bundle brings its own network, are [[help:compose-stacks|coming soon]].
+A Community Applications template that asks for its own Docker network is not given that network. The form starts on bridge and adds a note: "The template uses Docker network …. This setup uses bridge instead, which you can change below." Change it only if that network already exists. This build does not create a network from a template. A Compose file brings its own network on the Stacks page. [[help:compose-stacks|Compose stacks]].
 
 ## Before you apply
 

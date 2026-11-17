@@ -29,9 +29,18 @@ func TestCatalog(t *testing.T) {
 	}
 
 	soon := []string{
-		"backup-data", "get-alerts", "citizen-id", "backups", "notifications-health",
-		"compose-stacks", "first-run-wizard", "disk-management", "updates-rollback",
+		"updates-rollback",
 		"internal-affairs",
+	}
+	ready := []string{
+		"backup-data", "get-alerts", "citizen-id", "backups", "notifications-health",
+		"compose-stacks", "first-run-wizard", "disk-management",
+	}
+	for _, id := range ready {
+		topic, ok := byID[id]
+		if !ok || topic.ComingSoon {
+			t.Fatalf("%s should be a finished article", id)
+		}
 	}
 	for _, id := range soon {
 		topic, ok := byID[id]
@@ -56,8 +65,14 @@ func TestCatalog(t *testing.T) {
 	if cat.Routes["internal-affairs"].Help != "internal-affairs" {
 		t.Fatal("internal-affairs route should open its article")
 	}
+	if !cat.Routes["settings.citizen"].Available || cat.Routes["settings.citizen"].Tab != "citizen" {
+		t.Fatal("Citizen ID should open the settings tab")
+	}
+	if !cat.Routes["storage"].Available || !cat.Routes["backups"].Available || !cat.Routes["stacks"].Available || !cat.Routes["health"].Available {
+		t.Fatal("storage, backups, stacks, and health routes should be available")
+	}
 
-	for _, page := range []string{"dashboard", "shares", "docker", "apps", "vms", "audit", "settings"} {
+	for _, page := range []string{"dashboard", "storage", "shares", "docker", "stacks", "apps", "vms", "backups", "health", "audit", "settings"} {
 		found := false
 		for _, topic := range cat.Topics {
 			if topic.Page == page && !topic.ComingSoon {

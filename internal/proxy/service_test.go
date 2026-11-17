@@ -21,6 +21,7 @@ type fakeEngine struct {
 	ports   []docker.PublishedPort
 	state   string
 	mode    string
+	joined  []string
 }
 
 func (f *fakeEngine) Ready(context.Context) bool { return f.ready }
@@ -36,8 +37,11 @@ func (f *fakeEngine) SystemState(context.Context, string) (string, error) {
 	}
 	return f.state, nil
 }
-func (f *fakeEngine) EnsureNetwork(context.Context, string) error          { return nil }
-func (f *fakeEngine) ConnectNetwork(context.Context, string, string) error { return nil }
+func (f *fakeEngine) EnsureNetwork(context.Context, string) error { return nil }
+func (f *fakeEngine) ConnectNetwork(_ context.Context, network, container string) error {
+	f.joined = append(f.joined, network+" "+container)
+	return nil
+}
 func (f *fakeEngine) NetworkMode(context.Context, string) (string, error) {
 	if f.mode == "" {
 		return "bridge", nil
@@ -149,6 +153,59 @@ func TestPortConflictBlocksStart(t *testing.T) {
 	}
 }
 
+func TestCitizenGate(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(s *store.State) error {
+		s.Web.Routes = []store.WebRoute{
+			{Container: "files", Hostname: "files.home.arpa", Port: 80, TLS: "off", Enabled: true},
+			{Container: "open", Hostname: "open.home.arpa", Port: 80, TLS: "internal", Enabled: true},
+		}
+		s.AppGrants = []store.AppGrant{{Container: "files", Level: "users"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{Store: st, DataDir: dir, ListenPort: 8787}
+	sites, err := svc.sites(context.Background(), st.Snapshot().Web)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := Build("", sites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"reverse_proxy /citizen/* host.docker.internal:8787",
+		"forward_auth host.docker.internal:8787",
+		"uri /citizen/check",
+		"copy_headers Cookie",
+		"header_up X-Forwarded-Host {http.request.host}",
+		"reverse_proxy files:80",
+		"tls internal",
+		"reverse_proxy open:80",
+		"header_up -Authorization",
+		"feldcore_citizen",
+	} {
+		if !strings.Contains(file, want) {
+			t.Fatalf("missing %q in\n%s", want, file)
+		}
+	}
+	if strings.Count(file, "forward_auth") != 1 {
+		t.Fatalf("public site was gated:\n%s", file)
+	}
+	open := file[strings.Index(file, "open.home.arpa"):]
+	if strings.Contains(open, "forward_auth") || strings.Contains(open, "route {") {
+		t.Fatalf("open site changed shape:\n%s", open)
+	}
+	if !strings.Contains(open, "header_up -Authorization") {
+		t.Fatalf("open site still forwards Authorization:\n%s", open)
+	}
+}
+
 func TestGatewayRoutePointsAtDaemon(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(dir)
@@ -182,5 +239,37 @@ func TestGatewayRoutePointsAtDaemon(t *testing.T) {
 	}
 	if !strings.Contains(text, "tls internal") {
 		t.Fatalf("caddyfile %s", text)
+	}
+}
+
+func TestAttachJoinsTheProxyNetwork(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := store.Open(dir)
+	box, _ := secrets.Open(dir)
+	eng := &fakeEngine{ready: true}
+	svc := &Service{Store: st, Secrets: box, Engine: eng, DataDir: dir, Listen: func() []int { return nil }}
+	if err := svc.SetRoute(RouteInput{Container: "plex", Hostname: "plex.home.arpa", Port: 32400, TLS: "internal", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.joined) != 1 || eng.joined[0] != docker.ProxyNetwork+" plex" {
+		t.Fatalf("joined %+v", eng.joined)
+	}
+
+	eng.mode = "container:feldcore-vpn-proton-nl"
+	eng.joined = nil
+	if err := svc.Attach(context.Background(), "plex"); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.joined) != 0 {
+		t.Fatalf("vpn workload was attached: %+v", eng.joined)
+	}
+	if err := svc.Attach(context.Background(), "other"); err != nil {
+		t.Fatal(err)
+	}
+	if len(eng.joined) != 0 {
+		t.Fatal("unrouted container was attached")
 	}
 }

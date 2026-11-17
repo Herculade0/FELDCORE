@@ -15,6 +15,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/disk"
 
+	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
@@ -23,11 +24,29 @@ func realRoot() bool { return os.Geteuid() == 0 }
 type realCmd struct{}
 
 func (realCmd) Run(ctx context.Context, name string, args ...string) (string, error) {
+	// apt can sit for several minutes on a first install. A short cap used to
+	// kill a libvirt install that was still making progress.
+	timeout := 3 * time.Minute
+	if name == "apt-get" || name == "apt" {
+		timeout = 20 * time.Minute
+	}
+	// An install job puts a log hook on ctx. Stream in that case so the page
+	// can show apt and dpkg while they run. Other callers keep one blob.
+	if install.WantsLines(ctx) {
+		text, err := install.Run(ctx, timeout, name, args...)
+		if err != nil {
+			if text == "" {
+				text = err.Error()
+			}
+			return text, fmt.Errorf("%s", text)
+		}
+		return text, nil
+	}
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return "", fmt.Errorf("%s is not installed", name)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "DEBIAN_FRONTEND=noninteractive")
@@ -216,6 +235,13 @@ func (s *Service) applyHost(ctx context.Context, req Request) error {
 	}
 	if _, err := s.cmd.Run(ctx, "timedatectl", "set-timezone", strings.TrimSpace(req.Timezone)); err != nil {
 		return &OpError{"Could not set the time zone: " + err.Error()}
+	}
+	if loc := strings.TrimSpace(req.Locale); loc != "" {
+		if _, err := s.cmd.Run(ctx, "localectl", "set-locale", "LANG="+loc); err != nil {
+			if err := os.WriteFile("/etc/default/locale", []byte("LANG="+loc+"\n"), 0o644); err != nil {
+				return &OpError{"Could not set the locale: " + err.Error()}
+			}
+		}
 	}
 	switch req.NTP {
 	case "chrony":
@@ -413,46 +439,60 @@ func (s *Service) reloadNet(ctx context.Context, iface string) error {
 }
 
 func (s *Service) summary(w store.Wizard, v View) []string {
+	admin := orDash(w.AdminUser)
+	if v.AdminUser != "" {
+		admin = v.AdminUser
+	}
+	totp := "off"
+	if w.TOTP || v.TOTPEnabled {
+		totp = "on"
+	}
 	lines := []string{
-		"Host name: " + orDash(w.Hostname),
-		"Time zone: " + orDash(w.Timezone) + ", NTP via " + ntpOr(w.NTP),
-		"Network: " + orDash(w.NetMode),
-		"Shares folder: " + orDash(v.SharesRoot),
+		"Host name: " + orDash(first(w.Hostname, v.Hostname)),
+		"Time zone: " + orDash(first(w.Timezone, v.Timezone)) + ", locale " + orDash(first(w.Locale, v.Locale)),
+		"Network: " + orDash(first(w.NetMode, v.NetMode)),
+		"Administrator: " + admin + ", authenticator " + totp,
+		"Data folder: " + orDash(first(w.StorageMount, v.SharesRoot)),
+		"Remote access: " + orDash(w.RemoteMode),
+		"Notifications: " + orDash(w.NotifyKind),
+		"Backups: " + orDash(w.BackupKind),
+		"Default shares appdata, system, domains and isos are created if they are missing. SMB and NFS stay off.",
 	}
-	var pkgs []string
-	if w.Samba {
-		pkgs = append(pkgs, "Samba")
-	}
-	if w.NFS {
-		pkgs = append(pkgs, "NFS")
-	}
-	if w.Docker {
-		pkgs = append(pkgs, "Docker")
-	}
-	if w.Libvirt {
-		pkgs = append(pkgs, "libvirt")
-	}
-	if len(pkgs) == 0 {
-		pkgs = []string{"none"}
-	}
-	lines = append(lines, "Software: "+strings.Join(pkgs, ", "))
-	if len(w.ShareNames) == 0 {
-		lines = append(lines, "Default shares: none")
-	} else {
-		lines = append(lines, "Default shares (not exported): "+strings.Join(w.ShareNames, ", "))
-	}
-	if w.Firewall {
-		lines = append(lines, "Firewall: ufw, allowing FELDCORE and SSH ("+joinPorts(v.SSHPorts)+")")
-	} else {
-		lines = append(lines, "Firewall: left unchanged")
-	}
-	if w.Unattended {
-		lines = append(lines, "Security updates: installed automatically")
-	}
-	if w.UpdateCheck {
-		lines = append(lines, "FELDCORE will check for its own updates and will not install them")
+	if len(w.Skipped) > 0 {
+		lines = append(lines, "Skipped: "+strings.Join(w.Skipped, ", "))
 	}
 	return lines
+}
+
+func currentLocale() string {
+	if b, err := os.ReadFile("/etc/default/locale"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "LANG=") {
+				return strings.Trim(strings.TrimPrefix(line, "LANG="), `"`)
+			}
+		}
+	}
+	if v := os.Getenv("LANG"); v != "" && v != "C" {
+		return v
+	}
+	return "en_US.UTF-8"
+}
+
+func locales() []string {
+	cur := currentLocale()
+	base := []string{"en_US.UTF-8", "en_GB.UTF-8", "en_AU.UTF-8", "de_DE.UTF-8", "fr_FR.UTF-8", "es_ES.UTF-8", "pt_BR.UTF-8", "nl_NL.UTF-8", "it_IT.UTF-8", "sv_SE.UTF-8", "pl_PL.UTF-8", "C.UTF-8"}
+	found := false
+	for _, l := range base {
+		if l == cur {
+			found = true
+			break
+		}
+	}
+	if !found && cur != "" {
+		return append([]string{cur}, base...)
+	}
+	return base
 }
 
 func orDash(s string) string {

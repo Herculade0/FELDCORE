@@ -2,7 +2,7 @@
 id: audit
 kind: reference
 title: Audit log
-summary: Token calls and blocked publish requests, kept for 90 days.
+summary: Token calls, blocked publish requests, and the changes you make on Storage, Stacks, and Backups.
 icon: scroll
 order: 340
 popular: true
@@ -22,7 +22,7 @@ Protection blocks: a published request the protection layer refused. The token n
 
 [[route:audit|Open the audit log]]
 
-Signing in from the browser is not listed. Changes you make by clicking around the UI are not listed either. An audit of FELDCORE's own edits to Samba, Docker, and the rest is not built.
+A normal sign-in is not listed, and opening a page is not listed. A recovery-code sign-in is. A change is. Creating a pool, deploying a stack, saving a backup destination, revealing its repository password, changing files in a share, saving health thresholds, and saving notification settings are written here when you do them from the page. The row uses your username. A token call uses the token name. An audit of every Samba or Docker edit FELDCORE makes on its own is not built.
 
 Results are `ok`, `denied`, or `error`. A denied row is a token that failed the scope check, including a shell, or a publish block. An error row is a token call that returned some other 4xx or 5xx.
 

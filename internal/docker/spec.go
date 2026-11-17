@@ -22,10 +22,11 @@ const (
 	iconLabel      = "feldcore.icon"
 	// unraidIconLabel is the label Unraid's own UI reads to draw a container's
 	// icon. FELDCORE writes it too, so an icon set here shows up the same way.
-	unraidIconLabel = "net.unraid.docker.icon"
-	extraLabel      = "feldcore.extra" // extra parameters, so an edit can show them again
-	labelPrefix     = "feldcore."
-	composeLabel    = "com.docker.compose.project"
+	unraidIconLabel     = "net.unraid.docker.icon"
+	extraLabel          = "feldcore.extra" // extra parameters, so an edit can show them again
+	labelPrefix         = "feldcore."
+	composeLabel        = "com.docker.compose.project"
+	composeServiceLabel = "com.docker.compose.service"
 )
 
 var (
@@ -73,6 +74,11 @@ func normaliseSpec(s *Spec) error {
 	case "no", "always", "unless-stopped", "on-failure":
 	default:
 		return invalid("Unknown restart policy %q.", s.RestartPolicy)
+	}
+	switch s.Isolate {
+	case "", IsolatePrivate, IsolateShared:
+	default:
+		return invalid("Choose a private network or the shared one.")
 	}
 
 	seen := map[string]bool{}
@@ -299,6 +305,12 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 	if s.ExtraParams != "" {
 		labels[extraLabel] = strings.TrimSpace(s.ExtraParams)
 	}
+	if s.Isolate == IsolatePrivate && s.VPN == "" && !s.Gateway {
+		labels[netLabel] = IsolatePrivate
+	}
+	if links := tidyLinks(s.Links); len(links) > 0 && s.VPN == "" && !s.Gateway {
+		labels[linksLabel] = strings.Join(links, ",")
+	}
 	if s.Gateway {
 		labels[vpn.LabelGateway] = "true"
 	}
@@ -347,6 +359,10 @@ func applySpec(cfg, host map[string]any, s Spec, grant *gpuGrant) {
 		host["Privileged"] = false
 	}
 	applyExtra(cfg, host, s.ExtraParams, prevExtra)
+	// Capabilities, PID and IPC are taken from the extra parameters. When the
+	// form no longer asks for them they are dropped, including ones that were
+	// set on the container before FELDCORE recorded them.
+	syncNamespace(host, s.ExtraParams)
 }
 
 // specFromInspect derives the editable Spec of an existing container.
@@ -383,6 +399,21 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 			s.Network = n
 		}
 	}
+	s.Isolate = IsolateShared
+	s.Links = splitLinks(labels[linksLabel])
+	if s.VPN == "" && (labels[netLabel] == IsolatePrivate || isAppNetwork(s.Network, s.Name)) {
+		s.Isolate = IsolatePrivate
+		if isAppNetwork(s.Network, s.Name) {
+			// The form shows the ordinary network type. The private bridge
+			// name is derived from the container name when this is saved.
+			s.Network = "bridge"
+		}
+	}
+	if s.VPN != "" {
+		s.Isolate = IsolateShared
+		s.Links = nil
+	}
+	echoHostCaps(&s, host)
 
 	for _, b := range strSliceOf(host["Binds"]) {
 		parts := strings.SplitN(b, ":", 3)
@@ -488,6 +519,57 @@ func specFromInspect(in *inspectContainer, imageCfg map[string]any, meta map[str
 		}
 	}
 	return s
+}
+
+// echoHostCaps copies host PID, IPC and added capabilities into the extra
+// parameters when they are not already written there, so the form and the
+// security check can see settings that were applied outside the form.
+func echoHostCaps(s *Spec, host map[string]any) {
+	have := parseExtra(s.ExtraParams)
+	var add []string
+	if mode := strOf(host["PidMode"]); strings.EqualFold(mode, "host") && !strings.EqualFold(have.pidMode, "host") {
+		add = append(add, "--pid=host")
+	}
+	if mode := strOf(host["IpcMode"]); strings.EqualFold(mode, "host") && !strings.EqualFold(have.ipcMode, "host") {
+		add = append(add, "--ipc=host")
+	}
+	present := map[string]bool{}
+	for _, c := range have.capAdd {
+		for _, part := range strings.Split(c, ",") {
+			present[normCap(part)] = true
+		}
+	}
+	caps := normCaps(stringList(host["CapAdd"]))
+	sort.Strings(caps)
+	for _, c := range caps {
+		if present[c] {
+			continue
+		}
+		add = append(add, "--cap-add="+c)
+	}
+	if len(add) == 0 {
+		return
+	}
+	if strings.TrimSpace(s.ExtraParams) == "" {
+		s.ExtraParams = strings.Join(add, " ")
+		return
+	}
+	s.ExtraParams = strings.TrimSpace(s.ExtraParams) + " " + strings.Join(add, " ")
+}
+
+// syncNamespace makes PID, IPC and added capabilities match the extra
+// parameters. A value the string does not mention is removed.
+func syncNamespace(host map[string]any, extra string) {
+	e := parseExtra(extra)
+	if e.pidMode == "" {
+		delete(host, "PidMode")
+	}
+	if e.ipcMode == "" {
+		delete(host, "IpcMode")
+	}
+	if len(e.capAdd) == 0 {
+		delete(host, "CapAdd")
+	}
 }
 
 // recreateBody builds the create request for replacing an existing container:

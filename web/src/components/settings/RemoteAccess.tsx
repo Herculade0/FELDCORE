@@ -3,6 +3,7 @@ import { Cloud, ShieldAlert } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { Card, CardTitle } from "../ui";
 import { Alert, Button, TextField, Toggle } from "../form";
+import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 
 interface Route {
   container: string;
@@ -69,6 +70,8 @@ export default function RemoteAccess() {
       })
       .catch((e) => setError(errorMessage(e)));
 
+  const cloudflared = useInstall("cloudflared", () => void load());
+
   useEffect(() => {
     void load();
   }, []);
@@ -94,18 +97,6 @@ export default function RemoteAccess() {
       setTunnelToken("");
       setApiToken("");
       setSaved(true);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const install = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      setView(await api<RemoteView>("/remote/install", { method: "POST" }));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -207,8 +198,12 @@ export default function RemoteAccess() {
             {mode === "off" ? "Turn remote access off" : "Save and connect"}
           </Button>
           {mode !== "off" && (
-            <Button onClick={() => void install()} disabled={busy}>
-              Install cloudflared on the host
+            <Button
+              onClick={() => void cloudflared.start().catch(() => {})}
+              disabled={busy}
+              loading={cloudflared.active || cloudflared.starting}
+            >
+              {cloudflared.active ? "Installing cloudflared…" : "Install cloudflared on the host"}
             </Button>
           )}
           {saved && <p className="text-xs font-semibold text-ok">Saved.</p>}
@@ -216,6 +211,20 @@ export default function RemoteAccess() {
         <p className="mt-3 text-xs font-medium leading-relaxed text-ink-3">
           FELDCORE prefers a cloudflared container, so the connector is updated with Docker and is not mixed into the host. If Docker is not running, it can run the cloudflared program instead. The token file is mode 0600. It is not written into the container command, and it is not logged.
         </p>
+        {cloudflared.error && (
+          <div className="mt-3">
+            <Alert>{cloudflared.error}</Alert>
+          </div>
+        )}
+        {showInstall(cloudflared.job) && cloudflared.job && (
+          <div className="mt-4">
+            <InstallPanel
+              job={cloudflared.job}
+              busy={cloudflared.starting}
+              onRetry={() => void cloudflared.start().catch(() => {})}
+            />
+          </div>
+        )}
       </Card>
 
       <Card>

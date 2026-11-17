@@ -23,9 +23,9 @@ The dashboard is the home page after you sign in. Figures update over a WebSocke
 
 **Network** is the sum of download and upload across the interfaces the collector sees, in bytes per second.
 
-**Storage** is each mounted filesystem: size, used percent, and the mount point. This is a view of mounts. It is not a disk manager. Partitioning, pools, and SMART are not on this page. [[help:disk-management|Disk management]] is coming soon.
+**Storage** is each mounted filesystem: size, used percent, and the mount point. Creating a pool, formatting a disk, and SMART live on the Storage page. [[help:disk-management|Storage]].
 
-The line under the hostname is a one-line health note. It calls out a processor over 90%, memory over 90%, or a filesystem over 90% full. Otherwise it says all systems nominal.
+The line under the hostname uses the latest health summary once Health has reported. Before that, it calls out a processor over 90%, memory over 90%, or a filesystem over 90% full. The Health card on this page opens [[help:notifications-health|Health]].
 
 ## Host terminal
 

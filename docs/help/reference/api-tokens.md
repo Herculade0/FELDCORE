@@ -2,7 +2,7 @@
 id: api-tokens
 kind: reference
 title: API tokens and scopes
-summary: Bearer tokens, the four scopes, and which routes each one may call.
+summary: Bearer tokens, the scopes on the Agent access card, and which routes each one may call.
 icon: key
 order: 330
 popular: true
@@ -23,10 +23,16 @@ A token is a random secret shown once, stored as a SHA-256 hash. You send it as 
 
 | Scope | HTTP |
 | --- | --- |
-| `read` | GET on system info, stats, history, the stats stream, shares, the folder suggester, the App Store, Docker status, options, containers, images, container spec, logs, address, and snapshots, VMs, remote, proxy, and snapshot usage. |
+| `read` | GET on system info, stats, history, the stats stream, shares, the folder suggester, the App Store, Docker, VMs, stacks, health, the notification inbox, remote, proxy, and snapshot usage. |
 | `containers` | Create, replace, start, stop, restart, and delete a container. Create, restore, and delete that container's snapshots. |
 | `vms` | Create, edit, start, stop, pause, resume, autostart, and delete a VM, and its libvirt snapshots. |
-| `admin` | Everything else, including settings, shares, tokens, publish, VPN, backups, and mail. Includes the three scopes above. |
+| `files:read` | List, preview, and download files in a share. |
+| `files:write` | Upload, rename, move, copy, and delete files in a share. Includes `files:read`. |
+| `stacks` | Save, deploy, update, stop, and remove Compose stacks. |
+| `storage` | Create and change pools, mount them, and run scrub, balance, and trim. |
+| `backups:read` | See destinations, jobs, copies, and the files inside a copy. |
+| `backups:write` | Run backups, checks, and restores, and change destinations. Includes `backups:read`. The older Proton Drive tar.gz card stays on `admin`. |
+| `admin` | Everything else, including settings, shares, tokens, publish, VPN, and mail. Includes the scopes above. |
 
 `admin` does not include a shell. `/terminal`, a container's `/terminal`, and a VM's `/console` are classified as `shell`, which no token can be granted. The handlers also require the administrator's session cookie.
 
