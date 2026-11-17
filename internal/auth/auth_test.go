@@ -28,10 +28,10 @@ func TestChangePasswordAndSessionTimeout(t *testing.T) {
 	if err := a.Setup("admin", testPass); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChangePassword("nope", "a new password"); !errors.Is(err, ErrInvalidCredentials) {
+	if err := a.ChangePassword("nope", "a new password", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("wrong current password: %v", err)
 	}
-	if err := a.ChangePassword(testPass, "a new password"); err != nil {
+	if err := a.ChangePassword(testPass, "a new password", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := a.Login("ip", "admin", testPass); !errors.Is(err, ErrInvalidCredentials) {
@@ -162,9 +162,9 @@ func TestLoginRateLimit(t *testing.T) {
 	if _, _, err := a.Login("attacker", "admin", testPass); !errors.Is(err, ErrRateLimited) {
 		t.Errorf("after 8 failures: got %v, want ErrRateLimited", err)
 	}
-	// Other clients are unaffected.
-	if _, _, err := a.Login("someone-else", "admin", testPass); err != nil {
-		t.Errorf("a different client should still be able to sign in: %v", err)
+	// The username bucket is shared, so another address is locked out too.
+	if _, _, err := a.Login("someone-else", "admin", testPass); !errors.Is(err, ErrRateLimited) {
+		t.Errorf("a different address for the same account: got %v, want ErrRateLimited", err)
 	}
 	// The lockout lifts after the window.
 	now = now.Add(6 * time.Minute)

@@ -129,7 +129,7 @@ func (g *Gateway) BrandForHost(host string) store.SignInBrand {
 }
 
 func (g *Gateway) brandForRequest(r *http.Request, next string) store.SignInBrand {
-	host := forwardedHost(r)
+	host := g.forwardedHost(r)
 	if u, err := url.Parse(next); err == nil && u.Host != "" {
 		host = u.Host
 	}

@@ -376,7 +376,10 @@ func (s *Service) sites(ctx context.Context, cfg store.WebConfig) ([]Site, error
 		if tls == "" {
 			tls = "internal"
 		}
-		sites = append(sites, Site{Hostname: host, Upstream: fmt.Sprintf("host.docker.internal:%d", s.listen()), TLS: tls})
+		sites = append(sites, Site{
+			Hostname: host, Upstream: fmt.Sprintf("host.docker.internal:%d", s.listen()), TLS: tls,
+			Passthrough: true,
+		})
 	}
 	for _, r := range cfg.Routes {
 		if !r.Enabled {
@@ -467,14 +470,16 @@ func (s *Service) caddyfile() string {
 }
 
 // gate is the Citizen ID forward_auth upstream when this container is not public.
+// An open web route with no grant and no publish app stays open. A publish
+// access or an app grant that is not public is gated, and an empty level on
+// a record that exists is admin.
 func (s *Service) gate(container string) string {
 	if s.Store == nil {
 		return ""
 	}
-	for _, g := range s.Store.Snapshot().AppGrants {
-		if g.Container == container && citizenid.Gated(g.Level) {
-			return fmt.Sprintf("host.docker.internal:%d", s.listen())
-		}
+	level, _, set := citizenid.Effective(s.Store.Snapshot(), container)
+	if set && citizenid.Gated(level) {
+		return fmt.Sprintf("host.docker.internal:%d", s.listen())
 	}
 	return ""
 }

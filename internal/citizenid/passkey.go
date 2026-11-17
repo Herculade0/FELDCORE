@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -75,14 +74,14 @@ func (g *Gateway) FinishPasskeyLogin(w http.ResponseWriter, r *http.Request) (Id
 	cred, err = wa.FinishDiscoverableLogin(g.discover, c.Data, r)
 	if err != nil {
 		g.lim.fail("ip:"+g.clientIP(r), g.now())
-		g.record("", "sign-in failed", "passkey", "denied")
+		g.recordOnce("passkey:"+g.clientIP(r), "", "sign-in failed", "passkey", "denied")
 		if g.log != nil {
 			g.log.Warn("passkey login failed", "err", err)
 		}
 		return Identity{}, ErrPasskey
 	}
 	if cred.Authenticator.CloneWarning {
-		g.record("", "sign-in failed", "passkey", "denied")
+		g.recordOnce("passkey:"+g.clientIP(r), "", "sign-in failed", "passkey", "denied")
 		return Identity{}, ErrPasskey
 	}
 	id, err := g.identityForCredential(cred)
@@ -92,7 +91,7 @@ func (g *Gateway) FinishPasskeyLogin(w http.ResponseWriter, r *http.Request) (Id
 	if err := g.saveCredential(id.ID, *cred); err != nil {
 		return Identity{}, err
 	}
-	clearCookie(w, passkeyCookie, r)
+	g.clearCookie(w, passkeyCookie, r)
 	if err := g.startSession(w, r, id, "passkey"); err != nil {
 		return Identity{}, err
 	}
@@ -156,7 +155,7 @@ func (g *Gateway) FinishPasskeyRegister(w http.ResponseWriter, r *http.Request, 
 	if err := g.addPasskey(id, *cred); err != nil {
 		return err
 	}
-	clearCookie(w, passkeyCookie, r)
+	g.clearCookie(w, passkeyCookie, r)
 	return nil
 }
 
@@ -197,17 +196,17 @@ func (g *Gateway) discover(rawID, userHandle []byte) (webauthn.User, error) {
 }
 
 func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
-	host := strings.ToLower(stripPort(forwardedHost(r)))
-	if host == "" || net.ParseIP(host) != nil {
-		return nil, &InputError{"Passkeys need a hostname such as localhost or the server's web address."}
+	host := strings.ToLower(g.forwardedHost(r))
+	if !g.passkeyHost(host) {
+		return nil, &InputError{"Passkeys are not available on this address."}
 	}
 	rpID := host
 	if parent := g.parentDomain(); parent != "" && (host == parent || strings.HasSuffix(host, "."+parent)) {
 		rpID = parent
 	}
-	origin := "http://" + requestHost(r)
-	if requestSecure(r) {
-		origin = "https://" + requestHost(r)
+	origin := "http://" + g.requestHost(r)
+	if g.requestSecure(r) {
+		origin = "https://" + g.requestHost(r)
 	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPDisplayName:               "FELDCORE",
@@ -224,13 +223,6 @@ func (g *Gateway) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
 		return nil, &InputError{"Passkeys are not available on this address."}
 	}
 	return wa, nil
-}
-
-func requestHost(r *http.Request) string {
-	if h := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); h != "" {
-		return h
-	}
-	return r.Host
 }
 
 func (g *Gateway) waUser(id Identity) (waUser, error) {
@@ -429,7 +421,7 @@ func (g *Gateway) stash(w http.ResponseWriter, r *http.Request, c ceremony) erro
 	}
 	g.ceremonies[hashKey(token)] = c
 	g.mu.Unlock()
-	httpSet(w, r, passkeyCookie, token, "/", 120)
+	g.httpSet(w, r, passkeyCookie, token, "/", 120)
 	return nil
 }
 

@@ -15,6 +15,7 @@ func stripUpstream(req *http.Request) {
 		"feldcore_citizen", "__Host-feldcore_citizen",
 		"feldcore_desk", "__Host-feldcore_desk",
 		"feldcore_session", "__Host-feldcore_session",
+		"feldcore_passkey", "__Host-feldcore_passkey",
 	))
 	req.Header.Del("Authorization")
 }

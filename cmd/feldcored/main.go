@@ -155,7 +155,7 @@ func main() {
 	}
 	pubSvc := &publish.Service{
 		Store: st, Secrets: box, Proxy: proxySvc, Remote: remoteSvc,
-		Resolve: dockerMgr, Trust: dockerMgr.TrustedPeer,
+		Resolve: dockerMgr, Trust: dockerMgr.ProxyPeer, Tunnel: dockerMgr.TunnelPeer,
 		DataDir: cfg.DataDir, GatewayPort: pubPort, Log: log, Audit: authSvc,
 	}
 	pubSvc.OpenGeo()
@@ -229,7 +229,10 @@ func main() {
 	// The wizard's storage step and the Storage page share this controller.
 	wiz.UseVolume(diskSvc)
 
-	cid := citizenid.Open(citizenid.Deps{Store: st, Secrets: box, Audit: authSvc, Log: log, Trust: dockerMgr.TrustedPeer})
+	cid := citizenid.Open(citizenid.Deps{
+		Store: st, Secrets: box, Audit: authSvc, Log: log,
+		Trust: dockerMgr.ProxyPeer, Tunnel: dockerMgr.TunnelPeer,
+	})
 	authSvc.SetSecondFactor(cid.AdminFactor)
 	pubSvc.SetAuth(publish.CitizenAuth(cid))
 	srv := api.New(api.Deps{
@@ -293,10 +296,18 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	pubHTTP := &http.Server{
-		Addr:              publishListenAddr(),
-		Handler:           pubSvc.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
+	pubAddrs, err := publish.ListenAddrs(pubPort, os.Getenv("FELDCORE_PUBLISH_ADDR"), publish.DockerBridges())
+	if err != nil {
+		log.Error("publish listener address refused", "err", err)
+		pubAddrs = []string{net.JoinHostPort("127.0.0.1", strconv.Itoa(pubPort))}
+	}
+	var pubs []*http.Server
+	for _, addr := range pubAddrs {
+		pubs = append(pubs, &http.Server{
+			Addr:              addr,
+			Handler:           pubSvc.Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
+		})
 	}
 	go func() {
 		log.Info("feldcored listening", "addr", cfg.ListenAddr, "data", cfg.DataDir)
@@ -305,12 +316,14 @@ func main() {
 			stop()
 		}
 	}()
-	go func() {
-		log.Info("publish proxy listening", "addr", pubHTTP.Addr)
-		if err := pubHTTP.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("publish proxy error", "err", err)
-		}
-	}()
+	for _, pubHTTP := range pubs {
+		go func(srv *http.Server) {
+			log.Info("publish proxy listening", "addr", srv.Addr)
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("publish proxy error", "err", err)
+			}
+		}(pubHTTP)
+	}
 
 	<-ctx.Done()
 	log.Info("shutting down")
@@ -319,17 +332,11 @@ func main() {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
 	}
-	if err := pubHTTP.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Error("publish proxy shutdown failed", "err", err)
+	for _, pubHTTP := range pubs {
+		if err := pubHTTP.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("publish proxy shutdown failed", "err", err)
+		}
 	}
-}
-
-// publishListenAddr is the listener Caddy and cloudflared dial. It is not
-// only loopback: the containers reach the host through the Docker bridge.
-// FELDCORE_PUBLISH_PORT overrides the port. Nothing is published until a
-// container's Publish switch is turned on.
-func publishListenAddr() string {
-	return fmt.Sprintf(":%d", publishListenPort())
 }
 
 func publishListenPort() int {
