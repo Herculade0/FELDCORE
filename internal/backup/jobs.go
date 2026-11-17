@@ -49,6 +49,7 @@ type bjob struct {
 	mode     string
 	iaHead   string
 	redact   []string
+	admin    bool
 }
 
 func (s *Service) jobsLocked() map[string]*bjob {

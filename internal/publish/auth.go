@@ -61,7 +61,7 @@ func AccessLabel(access string) string {
 	switch access {
 	case AccessPublic, AccessSignedIn, AccessGroups, AccessAdmins:
 	default:
-		access = AccessPublic
+		access = AccessAdmins
 	}
 	return "Citizen ID: " + access
 }

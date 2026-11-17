@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Herculade0/feldcore/internal/auth"
 )
 
 const sessionCookie = "feldcore_session"
@@ -32,33 +34,62 @@ func (s *Server) currentUser(r *http.Request) (string, bool) {
 	return "", false
 }
 
-func cookieSecure(r *http.Request) bool {
-	if r.TLS != nil {
+func (s *Server) requestSecure(r *http.Request) bool {
+	if r != nil && r.TLS != nil {
 		return true
 	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	if s != nil && s.citizen != nil {
+		return s.citizen.RequestSecure(r)
+	}
+	return headerHTTPS(r) && peerLoopback(r)
 }
 
-func sessionCookieName(r *http.Request) string {
-	if cookieSecure(r) {
+func headerHTTPS(r *http.Request) bool {
+	return r != nil && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func peerLoopback(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func (s *Server) sessionCookieName(r *http.Request) string {
+	if s.requestSecure(r) {
 		return "__Host-" + sessionCookie
 	}
 	return sessionCookie
 }
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
+func (s *Server) sessionToken(r *http.Request) string {
+	for _, name := range []string{"__Host-" + sessionCookie, sessionCookie} {
+		c, err := r.Cookie(name)
+		if err == nil && c.Value != "" {
+			return c.Value
+		}
+	}
+	return ""
+}
+
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName(r),
+		Name:     s.sessionCookieName(r),
 		Value:    token,
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,                    // not readable by page scripts
 		SameSite: http.SameSiteStrictMode, // never sent on cross-site requests
-		Secure:   cookieSecure(r),
+		Secure:   s.requestSecure(r),
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	for _, name := range []string{sessionCookie, "__Host-" + sessionCookie} {
 		http.SetCookie(w, &http.Cookie{
 			Name:     name,
@@ -67,7 +98,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 			MaxAge:   -1,
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
-			Secure:   cookieSecure(r) || strings.HasPrefix(name, "__Host-"),
+			Secure:   s.requestSecure(r) || strings.HasPrefix(name, "__Host-"),
 		})
 	}
 }
@@ -134,7 +165,7 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	setSessionCookie(w, r, token, expires)
+	s.setSessionCookie(w, r, token, expires)
 	writeJSON(w, http.StatusOK, map[string]string{"username": in.Username})
 }
 
@@ -143,21 +174,47 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	token, expires, err := s.auth.LoginCode(clientKey(r), in.Username, in.Password, in.Code)
+	from := clientKey(r)
+	if s.citizen != nil {
+		from = s.citizen.ClientIP(r)
+		id, err := s.citizen.Authenticate(r, in.Username, in.Password, in.Code)
+		if err != nil {
+			if s.log != nil {
+				s.log.Warn("failed sign-in", "from", from)
+			}
+			s.fail(w, r, err)
+			return
+		}
+		if !id.Admin {
+			s.fail(w, r, auth.ErrInvalidCredentials)
+			return
+		}
+		if s.onManagement(r) {
+			token, expires, err := s.auth.IssueSession(id.Username)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			s.setSessionCookie(w, r, token, expires)
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"username": id.Username})
+		return
+	}
+	token, expires, err := s.auth.LoginCode(from, in.Username, in.Password, in.Code)
 	if err != nil {
 		if s.log != nil {
-			s.log.Warn("failed sign-in", "from", clientKey(r))
+			s.log.Warn("failed sign-in", "from", from)
 		}
 		s.fail(w, r, err)
 		return
 	}
-	setSessionCookie(w, r, token, expires)
+	s.setSessionCookie(w, r, token, expires)
 	writeJSON(w, http.StatusOK, map[string]string{"username": in.Username})
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		if err := s.auth.Logout(c.Value); err != nil {
+	if token := s.sessionToken(r); token != "" {
+		if err := s.auth.Logout(token); err != nil {
 			s.fail(w, r, err)
 			return
 		}
@@ -165,6 +222,13 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if s.citizen != nil {
 		_ = s.citizen.Logout(w, r)
 	}
-	clearSessionCookie(w, r)
+	s.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
+}
+
+func (s *Server) onManagement(r *http.Request) bool {
+	if s.citizen == nil {
+		return true
+	}
+	return s.citizen.ManagementHost(r)
 }

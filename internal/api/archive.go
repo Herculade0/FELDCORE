@@ -51,7 +51,7 @@ func (s *Server) handleBackupCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, tokenID := actorOf(r)
-	dest, err := s.backups.SaveDestination(in, actor, tokenID)
+	dest, err := s.backups.SaveDestination(in, actor, tokenID, s.callerAdmin(r))
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -68,7 +68,7 @@ func (s *Server) handleBackupUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, tokenID := actorOf(r)
-	dest, err := s.backups.UpdateDestination(chi.URLParam(r, "id"), in, actor, tokenID)
+	dest, err := s.backups.UpdateDestination(chi.URLParam(r, "id"), in, actor, tokenID, s.callerAdmin(r))
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -106,7 +106,7 @@ func (s *Server) handleBackupRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, tokenID := actorOf(r)
-	job, err := s.backups.StartBackup(chi.URLParam(r, "id"), actor, tokenID)
+	job, err := s.backups.StartBackup(chi.URLParam(r, "id"), actor, tokenID, s.callerAdmin(r))
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -179,7 +179,7 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, tokenID := actorOf(r)
-	job, err := s.backups.StartRestore(in, actor, tokenID)
+	job, err := s.backups.StartRestore(in, actor, tokenID, s.callerAdmin(r))
 	if err != nil {
 		s.fail(w, r, err)
 		return

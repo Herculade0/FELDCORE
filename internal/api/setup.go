@@ -35,6 +35,11 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Client = clientKey(r)
+	if s.citizen != nil {
+		if ip := s.citizen.ClientIP(r); ip != "" {
+			in.Client = ip
+		}
+	}
 	if p, ok := principalFrom(r.Context()); ok {
 		switch {
 		case p.Username != "":
@@ -45,7 +50,7 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 	}
 	view, grant, err := s.wiz.Apply(r.Context(), in)
 	if grant != nil {
-		setSessionCookie(w, r, grant.Token, grant.Expires)
+		s.setSessionCookie(w, r, grant.Token, grant.Expires)
 	}
 	if err != nil {
 		// The account already exists. Return the page, with the error on it,

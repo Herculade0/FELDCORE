@@ -52,8 +52,17 @@ func (g *Gateway) authenticateLocal(username, password, code string) (Identity, 
 	if argonHash == "" {
 		argonHash = g.dummyPassword()
 	}
-	bcryptOK := len(bcryptHash) > 0 && bcrypt.CompareHashAndPassword(bcryptHash, []byte(password)) == nil
-	argonOK := argonHash != "" && verifyPassword(argonHash, password)
+	// bcrypt returns immediately past 72 bytes. Compare a short pad instead so
+	// the length itself is not a timing tell, and never accept the long input.
+	tooLong := len(password) > 72
+	compare := password
+	if tooLong {
+		compare = "feldcore-timing-pad"
+	}
+	bcryptMatch := len(bcryptHash) > 0 && bcrypt.CompareHashAndPassword(bcryptHash, []byte(compare)) == nil
+	argonMatch := argonHash != "" && verifyPassword(argonHash, compare)
+	bcryptOK := !tooLong && bcryptMatch
+	argonOK := !tooLong && argonMatch
 	if password == "" || kind == "" || (kind == "admin" && !bcryptOK) || (kind == "user" && !argonOK) {
 		return Identity{}, ErrInvalidCredentials
 	}

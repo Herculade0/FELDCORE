@@ -108,7 +108,10 @@ func (s *Service) iaStatus(c catalogFile) IAStatus {
 	return st
 }
 
-func (s *Service) SaveDestination(in DestinationInput, actor, tokenID string) (Destination, error) {
+func (s *Service) SaveDestination(in DestinationInput, actor, tokenID string, admin bool) (Destination, error) {
+	if in.Sets != nil && in.Sets.Secrets && !admin {
+		return Destination{}, input("Including encrypted secrets is an administrator choice.")
+	}
 	var prev *Destination
 	if id := strings.TrimSpace(inID(in)); id != "" {
 		d, ok := s.findDest(id)
@@ -143,7 +146,10 @@ func (s *Service) SaveDestination(in DestinationInput, actor, tokenID string) (D
 }
 
 // UpdateDestination saves an existing destination. id comes from the URL.
-func (s *Service) UpdateDestination(id string, in DestinationInput, actor, tokenID string) (Destination, error) {
+func (s *Service) UpdateDestination(id string, in DestinationInput, actor, tokenID string, admin bool) (Destination, error) {
+	if in.Sets != nil && in.Sets.Secrets && !admin {
+		return Destination{}, input("Including encrypted secrets is an administrator choice.")
+	}
 	if !idRe.MatchString(id) {
 		return Destination{}, input("That backup destination is gone.")
 	}
@@ -247,8 +253,12 @@ func (s *Service) RevealPassword(id, actor, tokenID string) (string, error) {
 	return pw, nil
 }
 
-func (s *Service) StartBackup(id, actor, tokenID string) (Job, error) {
+func (s *Service) StartBackup(id, actor, tokenID string, admin bool) (Job, error) {
+	if dest, ok := s.findDest(id); ok && dest.Sets.Secrets && !admin {
+		return Job{}, input("This backup includes encrypted secrets. An administrator has to run it.")
+	}
 	return s.launchKind(id, "backup", actor, tokenID, func(j *bjob) func(context.Context) error {
+		j.admin = admin
 		return func(ctx context.Context) error { return s.runBackup(ctx, j) }
 	})
 }
@@ -260,7 +270,7 @@ func (s *Service) StartCheck(id string, readData bool, actor, tokenID string) (J
 	})
 }
 
-func (s *Service) StartRestore(in RestoreInput, actor, tokenID string) (Job, error) {
+func (s *Service) StartRestore(in RestoreInput, actor, tokenID string, admin bool) (Job, error) {
 	if !idRe.MatchString(in.DestinationID) || !snapRe.MatchString(in.SnapshotID) {
 		return Job{}, input("Choose a destination and a copy to restore.")
 	}
@@ -281,6 +291,9 @@ func (s *Service) StartRestore(in RestoreInput, actor, tokenID string) (Job, err
 			return Job{}, err
 		}
 		paths = append(paths, c)
+	}
+	if !admin && s.protectedRestore(paths) {
+		return Job{}, input("Restoring FELDCORE state or secrets needs an administrator.")
 	}
 	return s.launchKind(in.DestinationID, "restore", actor, tokenID, func(j *bjob) func(context.Context) error {
 		j.snap = strings.ToLower(in.SnapshotID)
@@ -365,7 +378,7 @@ func (s *Service) scheduled(ctx context.Context, now time.Time) {
 		if err != nil || !due {
 			continue
 		}
-		if _, err := s.StartBackup(d.ID, "scheduler", ""); err != nil && s.Log != nil {
+		if _, err := s.StartBackup(d.ID, "scheduler", "", true); err != nil && s.Log != nil {
 			s.Log.Warn("scheduled backup did not start", "dest", d.Name, "err", err)
 		}
 	}

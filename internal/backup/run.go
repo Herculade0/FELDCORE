@@ -30,7 +30,7 @@ func (s *Service) runBackup(ctx context.Context, j *bjob) (err error) {
 		return err
 	}
 	s.step(j, "Choosing files")
-	plan, err := s.buildPlan(ctx, dest, j.ID)
+	plan, err := s.buildPlan(ctx, dest, j.ID, j.admin)
 	if err != nil {
 		return err
 	}

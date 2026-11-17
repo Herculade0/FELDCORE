@@ -20,7 +20,40 @@ type filePlan struct {
 	Cleanup  func(context.Context) error
 }
 
-func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string) (filePlan, error) {
+func (s *Service) protectedRestore(paths []string) bool {
+	if len(paths) == 0 {
+		return true
+	}
+	data := filepath.Clean(s.DataDir)
+	for _, p := range paths {
+		if pathTouchesProtected(p, data) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathTouchesProtected(p, data string) bool {
+	clean := filepath.Clean("/" + strings.TrimPrefix(strings.ReplaceAll(p, "\\", "/"), "/"))
+	low := strings.ToLower(clean)
+	if strings.Contains(low, "state.json") {
+		return true
+	}
+	for _, part := range strings.Split(low, "/") {
+		if part == "secrets" {
+			return true
+		}
+	}
+	if data != "" && data != "." && data != "/" {
+		d := filepath.Clean(data)
+		if clean == d || strings.HasPrefix(d, clean+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string, admin bool) (filePlan, error) {
 	staging := filepath.Join(s.DataDir, "backup-staging", jobID)
 	if err := os.MkdirAll(staging, 0o700); err != nil {
 		return filePlan{}, op("Could not prepare a working folder for the backup.")
@@ -39,9 +72,11 @@ func (s *Service) buildPlan(ctx context.Context, dest Destination, jobID string)
 		} else {
 			plan.Notes = append(plan.Notes, "No FELDCORE state file was found.")
 		}
-		sec := filepath.Join(s.DataDir, "secrets")
-		if dirExists(sec) {
-			add(sec)
+		if dest.Sets.Secrets && admin {
+			sec := filepath.Join(s.DataDir, "secrets")
+			if dirExists(sec) {
+				add(sec)
+			}
 		}
 		cat := s.catalogPath()
 		if pathExists(cat) {
