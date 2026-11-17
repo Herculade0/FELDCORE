@@ -49,7 +49,12 @@ jobs:
           fi
 
       - name: Build the image
-        run: ./os/build.sh
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          export FELDCORE_OS_VERSION="${version}"
+          export FELDCORE_LDFLAGS="-s -w -X github.com/Herculade0/feldcore/internal/version.Current=${version}"
+          export VITE_FELDCORE_VERSION="${version}"
+          ./os/build.sh
 
       - name: Refuse a private key in the output
         run: |
