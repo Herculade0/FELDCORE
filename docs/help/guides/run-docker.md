@@ -20,7 +20,7 @@ A container is how almost every app runs here. FELDCORE talks to the Docker engi
 
 ## If Docker is not running
 
-The Docker page says so, and offers to install Debian's `docker.io` package and start it. That needs root, and it needs `apt`. If you already installed Docker's own packages, FELDCORE uses those and you can ignore the button.
+On FELDCORE OS, Docker is already in the image and starts at boot. Its data is on the state partition. The page does not offer to install it there. On another Debian or Ubuntu host, the page offers to install that distribution's `docker.io` package and start it. That needs root and apt. An engine you installed another way is used once the socket answers.
 
 [[route:docker|Open Docker]]
 

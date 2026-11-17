@@ -548,7 +548,7 @@ function DockerUnavailable({
           {inst.active ? "Installing Docker…" : "Install Docker"}
         </Button>
       ) : (
-        !status.installed && (
+        !status.installed && !status.message?.includes("FELDCORE OS") && (
           <p className="mt-6 text-xs font-semibold text-ink-3">
             FELDCORE needs to run as root to install Docker.
           </p>

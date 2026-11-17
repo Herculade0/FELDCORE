@@ -143,8 +143,8 @@ The running system is a Debian root on an ext4 slot, built with debootstrap (mko
 ### OS-4 — Appliance layout
 - [x] Data, appdata, and VM disks live on the storage disks, not on the OS slots
 - [x] Share definitions and container templates stay on the state partition
-- [x] Extensions install as systemd-sysext images on the state partition. The manager is in the UI. NVIDIA, the container toolkit, and libvirt are not built into this image
-- [x] The running system has no apt. Apps are containers; Docker itself is an extension, not a package in the base image
+- [x] Extensions install as systemd-sysext images on the state partition. The manager is in the UI. libvirt and the NVIDIA container toolkit are sysexts. The kernel driver is not downloaded
+- [x] The running system has no apt. Apps are containers. Docker Engine, containerd, and Compose are packages in the base image, with their data on the state partition
 
 ### Decisions
 

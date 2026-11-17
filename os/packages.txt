@@ -1,15 +1,47 @@
+# Base system. Comments and blank lines are ignored.
+# libvirt, QEMU, OVMF, swtpm, and the NVIDIA container toolkit are sysexts.
+# ZFS is not included: it needs contrib and a compiler, and the image has neither.
 systemd
 systemd-sysv
 systemd-boot
 systemd-boot-efi
+systemd-timesyncd
 linux-image-amd64
 dbus
 ca-certificates
 iproute2
+iptables
 kmod
 e2fsprogs
 dosfstools
 gdisk
+parted
 zstd
 firmware-linux-free
+firmware-amd-graphics
+firmware-intel-graphics
+firmware-misc-nonfree
 tzdata
+bash
+curl
+git
+procps
+util-linux
+pciutils
+docker.io
+docker-cli
+containerd
+docker-compose
+samba
+nfs-kernel-server
+restic
+rclone
+cifs-utils
+wireguard-tools
+smartmontools
+mdadm
+btrfs-progs
+xfsprogs
+hdparm
+ufw
+rtl-sdr

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
@@ -156,8 +158,9 @@ func (s *Service) SaveService(ctx context.Context, name string, enable bool) err
 		return &OpError{"FELDCORE must run as root to change services."}
 	}
 	ctx = context.WithoutCancel(ctx)
+	present := s.servicePresent(ctx, def)
 	if !enable {
-		if !s.installed(ctx, def.pkgs[0]) {
+		if !present {
 			return nil
 		}
 		if _, err := s.cmd.Run(ctx, "systemctl", "disable", "--now", def.unit); err != nil {
@@ -165,10 +168,18 @@ func (s *Service) SaveService(ctx context.Context, name string, enable bool) err
 		}
 		return nil
 	}
+	if !present && appliance.Is() {
+		if def.name == "libvirt" {
+			return &OpError{"The libvirt extension is not installed. Install it from Settings."}
+		}
+		return &OpError{def.label + " is part of FELDCORE OS and is not installed from this page."}
+	}
 	var missing []string
-	for _, pkg := range def.pkgs {
-		if !s.installed(ctx, pkg) {
-			missing = append(missing, pkg)
+	if !present {
+		for _, pkg := range def.pkgs {
+			if !s.installed(ctx, pkg) {
+				missing = append(missing, pkg)
+			}
 		}
 	}
 	if len(missing) > 0 {
@@ -197,8 +208,13 @@ func (s *Service) SaveFirewall(ctx context.Context, on bool) error {
 		}
 		return s.setFlags(func(p *store.Prefs) { p.Firewall = false })
 	}
-	if _, err := s.cmd.Run(ctx, "apt-get", "install", "-y", "ufw"); err != nil {
-		return &OpError{"Could not install ufw: " + err.Error()}
+	if !haveBin("ufw") {
+		if appliance.Is() {
+			return &OpError{"ufw is part of FELDCORE OS and was not found in this image."}
+		}
+		if _, err := s.cmd.Run(ctx, "apt-get", "install", "-y", "ufw"); err != nil {
+			return &OpError{"Could not install ufw: " + err.Error()}
+		}
 	}
 	for _, c := range s.firewallCommands(ctx) {
 		if _, err := s.cmd.Run(ctx, c[0], c[1:]...); err != nil {
@@ -260,7 +276,7 @@ func (s *Service) serviceStatus(ctx context.Context) []ServiceStatus {
 	out := make([]ServiceStatus, 0, len(managedServices))
 	for _, def := range managedServices {
 		available := !def.needsVirt || s.virt()
-		installed := s.installed(ctx, def.pkgs[0])
+		installed := s.servicePresent(ctx, def)
 		en, _ := s.cmd.Run(ctx, "systemctl", "is-enabled", def.unit)
 		run, runErr := s.cmd.Run(ctx, "systemctl", "is-active", def.unit)
 		out = append(out, ServiceStatus{
@@ -360,6 +376,58 @@ func parseNTP(raw string) ([]string, error) {
 		}
 	}
 	return fields, nil
+}
+
+func (s *Service) servicePresent(ctx context.Context, def svcDef) bool {
+	ok := len(def.pkgs) > 0
+	for _, pkg := range def.pkgs {
+		if !s.installed(ctx, pkg) {
+			ok = false
+			break
+		}
+	}
+	if ok {
+		return true
+	}
+	if !appliance.Is() {
+		return false
+	}
+	return binsPresent(def.name)
+}
+
+func binsPresent(name string) bool {
+	switch name {
+	case "docker":
+		return haveBin("dockerd")
+	case "samba":
+		return haveBin("smbd") && haveBin("smbpasswd")
+	case "nfs":
+		return haveBin("exportfs")
+	case "libvirt":
+		if !haveBin("virsh") || !haveBin("qemu-img") || !haveBin("swtpm") {
+			return false
+		}
+		if !haveBin("qemu-system-x86_64") && !haveBin("qemu-kvm") {
+			return false
+		}
+		for _, p := range []string{
+			"/usr/share/OVMF/OVMF_CODE_4M.fd",
+			"/usr/share/OVMF/OVMF_CODE.fd",
+			"/usr/share/ovmf/OVMF_CODE_4M.fd",
+		} {
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func haveBin(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }
 
 func lookupService(name string) (svcDef, bool) {

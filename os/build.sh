@@ -10,9 +10,9 @@ work=${FELDCORE_OS_WORK:-/var/tmp/feldcore-os}
 out=${FELDCORE_OS_OUT:-${repo}/dist/os}
 version=${FELDCORE_OS_VERSION:-0.1.0}
 builder=${FELDCORE_IMAGE_BUILDER:-debootstrap}
-root_mib=${FELDCORE_ROOT_MIB:-3072}
+root_mib=${FELDCORE_ROOT_MIB:-6144}
 esp_mib=256
-state_mib=1024
+state_mib=${FELDCORE_STATE_MIB:-8192}
 slot_slack=128
 mirror=${FELDCORE_DEBIAN_MIRROR:-http://deb.debian.org/debian}
 
@@ -79,6 +79,10 @@ install_packages() {
 	fi
 	log "installing packages"
 	sudo cp /etc/resolv.conf "${rootfs}/etc/resolv.conf"
+	printf 'deb %s trixie main non-free-firmware\ndeb http://deb.debian.org/debian-security trixie-security main non-free-firmware\ndeb %s trixie-updates main non-free-firmware\n' \
+		"${mirror}" "${mirror}" | sudo tee "${rootfs}/etc/apt/sources.list" >/dev/null
+	printf '#!/bin/sh\nexit 101\n' | sudo tee "${rootfs}/usr/sbin/policy-rc.d" >/dev/null
+	sudo chmod 755 "${rootfs}/usr/sbin/policy-rc.d"
 	printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' |
 		sudo tee "${rootfs}/etc/apt/apt.conf.d/00no-recommends" >/dev/null
 	sudo mkdir -p "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/dev/pts" "${rootfs}/run"
@@ -94,6 +98,7 @@ install_packages() {
 	pkgs=$(grep -v '^[[:space:]]*#' "${repo}/os/packages.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
 	sudo chroot "${rootfs}" apt-get update
 	sudo chroot "${rootfs}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${pkgs}
+	configure_containerd
 	sudo chroot "${rootfs}" apt-get clean
 	unmount_rootfs
 	mounts=()
@@ -137,8 +142,20 @@ apply_image() {
 	sudo chmod 755 \
 		"${rootfs}/usr/lib/feldcore/no-apt" \
 		"${rootfs}/usr/lib/feldcore/prepare-state" \
+		"${rootfs}/usr/lib/feldcore/apply-mounts" \
+		"${rootfs}/usr/lib/feldcore/smoke-boot" \
 		"${rootfs}/usr/lib/feldcore/bless-boot" \
 		"${rootfs}/usr/sbin/feldcore-install"
+	sudo rm -f "${rootfs}/usr/sbin/policy-rc.d"
+	install_cloudflared
+	sudo chroot "${rootfs}" groupadd -f kvm
+	sudo chroot "${rootfs}" groupadd -f libvirt
+	sudo chroot "${rootfs}" groupadd -f docker
+	if ! sudo chroot "${rootfs}" getent passwd libvirt-qemu >/dev/null; then
+		sudo chroot "${rootfs}" useradd -r -g libvirt -G kvm -d /var/lib/libvirt -s /usr/sbin/nologin libvirt-qemu
+	fi
+	sudo rm -rf "${rootfs}/var/lib/libvirt"
+	sudo ln -sfn /var/lib/feldcore/libvirt "${rootfs}/var/lib/libvirt"
 	local kver
 	kver=$(sudo ls "${rootfs}/lib/modules" | head -1 || true)
 	sudo tee "${rootfs}/etc/os-release" >/dev/null <<EOF
@@ -164,7 +181,11 @@ EOF
 		"${rootfs}/etc/systemd/system/getty.target.wants" \
 		"${rootfs}/etc/systemd/system/network-online.target.wants"
 	local unit
-	for unit in feldcore.service feldcore-state.service feldcore-bless.service feldcore-install.service systemd-networkd.service; do
+	for unit in \
+		feldcore.service feldcore-state.service feldcore-bless.service feldcore-install.service \
+		feldcore-mounts.service feldcore-smoke.service \
+		systemd-networkd.service systemd-timesyncd.service \
+		docker.service docker.socket containerd.service; do
 		sudo ln -sfn "/usr/lib/systemd/system/${unit}" \
 			"${rootfs}/etc/systemd/system/multi-user.target.wants/${unit}"
 	done
@@ -356,6 +377,7 @@ assemble_installer() {
 	mkdir -p "${mnt}" "${work}/payload-src"
 	printf '%s\n' "${version}" >"${work}/payload-src/version"
 	printf '%s\n' "${root_mib}" >"${work}/payload-src/root-mib"
+	printf '%s\n' "${state_mib}" >"${work}/payload-src/state-mib"
 	cp "${work}/feldcore-root.img.zst" "${work}/vmlinuz" "${work}/initrd.img" "${work}/systemd-bootx64.efi" "${work}/payload-src/"
 	sudo mount "${loop}p3" "${mnt}"
 	track_mount "${mnt}"
@@ -395,7 +417,43 @@ EOF
 	log "output is ${out}"
 }
 
-require debootstrap mkfs.ext4 mkfs.vfat sgdisk zstd rsync losetup go npm mcopy
+configure_containerd() {
+	# Debian ships a short config that leaves root at the compiled-in
+	# /var/lib/containerd. The full default is rewritten so images and
+	# snapshots land on the state partition.
+	sudo mkdir -p "${rootfs}/etc/containerd"
+	sudo chroot "${rootfs}" containerd config default | sudo tee "${rootfs}/etc/containerd/config.toml" >/dev/null
+	sudo sed -i \
+		-e 's#root = "/var/lib/containerd"#root = "/var/lib/feldcore/containerd"#' \
+		-e 's/SystemdCgroup = false/SystemdCgroup = true/' \
+		"${rootfs}/etc/containerd/config.toml"
+	grep -q '/var/lib/feldcore/containerd' "${rootfs}/etc/containerd/config.toml" || die "containerd root was not moved onto the state partition"
+}
+
+install_cloudflared() {
+	local sum ver tmp
+	read -r sum ver < <(awk 'NF && $1 !~ /^#/ {print $1, $2; exit}' "${repo}/os/cloudflared.sha256")
+	[[ -n ${sum} && -n ${ver} ]] || die "os/cloudflared.sha256 is empty"
+	tmp=$(mktemp)
+	curl -fsSL -o "${tmp}" "https://github.com/cloudflare/cloudflared/releases/download/${ver}/cloudflared-linux-amd64"
+	echo "${sum}  ${tmp}" | sha256sum -c -
+	sudo install -m 755 "${tmp}" "${rootfs}/usr/bin/cloudflared"
+	rm -f "${tmp}"
+}
+
+build_sysexts() {
+	local ids=${FELDCORE_BUILD_SYSEXTS-libvirt nvidia-container-toolkit}
+	local id
+	[[ -n ${ids} ]] || return 0
+	command -v mksquashfs >/dev/null 2>&1 || die "missing command: mksquashfs"
+	mkdir -p "${out}/sysexts"
+	for id in ${ids}; do
+		log "building sysext ${id}"
+		bash "${repo}/os/sysext/build-sysext.sh" "${id}" "${rootfs}" "${out}/sysexts/${id}.raw"
+	done
+}
+
+require debootstrap mkfs.ext4 mkfs.vfat sgdisk zstd rsync losetup go npm mcopy curl sha256sum
 sudo mkdir -p "${work}"
 sudo chown "$(id -u):$(id -g)" "${work}"
 mkdir -p "${out}"
@@ -408,9 +466,12 @@ install_packages
 build_binary
 signing_key
 apply_image
+log "smoke test"
+bash "${repo}/os/smoke.sh" --root "${rootfs}"
 kernel_files
 make_root_image
 assemble_appliance
 assemble_installer
+build_sysexts
 publish
 log "done"

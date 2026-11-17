@@ -17,7 +17,7 @@ A virtual machine is a libvirt/KVM guest. FELDCORE writes the domain XML and app
 
 ## Install libvirt
 
-If the VMs page says libvirt is missing, **Install libvirt** installs QEMU, OVMF, and a software TPM, then starts libvirtd. The switch stays off when the CPU has no virtualisation flag (`vmx` or `svm`).
+If the VMs page says libvirt is missing, **Install libvirt** installs QEMU, OVMF, and a software TPM, then starts libvirtd. On FELDCORE OS that is the libvirt extension. The switch stays off when the CPU has no virtualisation flag (`vmx` or `svm`).
 
 You can also turn the libvirt service on from Settings.
 

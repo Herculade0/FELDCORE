@@ -1,0 +1,15 @@
+[Unit]
+Description=FELDCORE image smoke test
+ConditionKernelCommandLine=feldcore.smoke
+After=feldcore.service docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/feldcore/smoke-boot
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Check,
+  Cpu,
   FolderTree,
   Info as InfoIcon,
   Monitor,
@@ -62,6 +63,8 @@ interface Settings {
   updates: { unattended: boolean; updateCheck: boolean };
   apps: { feedURL: string; feedDefault: string };
   defaults: { removeImage: boolean };
+  appliance?: boolean;
+  nvidia?: boolean;
 }
 
 export default function SettingsPage({
@@ -229,7 +232,8 @@ export default function SettingsPage({
       {settings && tab === "general" && (
         <>
           <SystemCard settings={settings} onSaved={reload} />
-          <ServicesCard services={settings.services} onSaved={reload} />
+          <ServicesCard services={settings.services} appliance={!!settings.appliance} onSaved={reload} />
+          {settings.nvidia && <NvidiaCard />}
           <SecurityCard settings={settings} onSaved={reload} />
           <AgentAccessCard onOpenAudit={onOpenAudit} />
           <UpdatesCard settings={settings} onSaved={reload} />
@@ -338,13 +342,15 @@ function NetworkCard({ settings, onSaved }: { settings: Settings; onSaved: () =>
   );
 }
 
-function ServicesCard({ services, onSaved }: { services: Svc[]; onSaved: () => void }) {
+function ServicesCard({ services, appliance, onSaved }: { services: Svc[]; appliance: boolean; onSaved: () => void }) {
   return (
     <Card>
       <div id="settings-services">
-        <CardTitle icon={FolderTree} title="Services" hint="Install if missing" />
+        <CardTitle icon={FolderTree} title="Services" hint={appliance ? "Included in the image" : "Install if missing"} />
         <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
-          Turning a service on installs it when it is not already installed, then starts it. Turning it off stops it. Packages are not removed.
+          {appliance
+            ? "Docker, Samba, and NFS are part of FELDCORE OS. Turning one on starts it. libvirt is an extension: turning it on installs that extension, then starts it."
+            : "Turning a service on installs it when it is not already installed, then starts it. Turning it off stops it. Packages are not removed."}
         </p>
         <div className="mt-4 space-y-3">
           {services.map((svc) => (
@@ -412,6 +418,35 @@ function ServiceRow({ svc, onSaved }: { svc: Svc; onSaved: () => void }) {
         </div>
       )}
     </div>
+  );
+}
+
+function NvidiaCard() {
+  const inst = useInstall("nvidia-toolkit");
+  return (
+    <Card>
+      <div id="settings-nvidia">
+        <CardTitle icon={Cpu} title="NVIDIA" hint="Container toolkit" />
+        <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
+          Installs the NVIDIA Container Toolkit and registers it with Docker. On FELDCORE OS this is a signed extension. It does not install the kernel driver.
+        </p>
+        <div className="mt-4">
+          <Button variant="primary" loading={inst.active || inst.starting} onClick={() => void inst.start().catch(() => {})}>
+            {inst.active ? "Installing…" : "Install NVIDIA Container Toolkit"}
+          </Button>
+        </div>
+        {inst.error && (
+          <div className="mt-3">
+            <Alert>{inst.error}</Alert>
+          </div>
+        )}
+        {inst.job && (inst.active || inst.job.state === "failed" || inst.job.state === "succeeded") && (
+          <div className="mt-3">
+            <InstallPanel job={inst.job} busy={inst.starting} onRetry={() => void inst.start().catch(() => {})} />
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -489,7 +524,7 @@ function UpdatesCard({ settings, onSaved }: { settings: Settings; onSaved: () =>
         <div className="mt-4 space-y-3">
           <Row
             label="Security updates"
-            hint="Debian's unattended-upgrades, limited to security updates."
+            hint="On Debian, unattended-upgrades limited to security updates. FELDCORE OS updates by replacing the image."
             checked={unattended}
             onChange={setUnattended}
           />

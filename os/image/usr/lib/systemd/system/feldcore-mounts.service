@@ -1,0 +1,13 @@
+[Unit]
+Description=Mount FELDCORE storage pools
+After=feldcore-state.service
+Requires=feldcore-state.service
+Before=feldcore.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/feldcore/apply-mounts
+
+[Install]
+WantedBy=multi-user.target

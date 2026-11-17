@@ -43,7 +43,7 @@ Start with the sentence on the page. FELDCORE usually names the container, the p
 
 **FELDCORE isn't running as root.** Shares, installs, and service changes will not apply. The systemd unit runs as root. A copy you started by hand has to be root too.
 
-**Could not install Docker / Automatic install needs apt.** The button installs `docker.io` with apt. On a distro without apt, install Docker yourself and reload the page.
+**Could not install Docker / Automatic install needs apt.** On a Debian or Ubuntu host the button installs `docker.io` with apt. On FELDCORE OS that button is hidden, because Docker is already in the image. If the socket is still missing there, the image itself is incomplete.
 
 **Port 80 or 443 is already used.** Caddy will not start. The Web addresses card names the other container or program. Stop it or move its host port, then save again.
 

@@ -5,7 +5,6 @@ set -euo pipefail
 
 PAYLOAD=${FELDCORE_PAYLOAD:-/payload}
 ESP_MIB=256
-STATE_MIB=1024
 
 usage() {
 	echo "Usage: feldcore-install --yes DISK" >&2
@@ -83,11 +82,12 @@ install_disk() {
 		mkdir -p "${PAYLOAD}"
 		mount LABEL=feldcore-payload "${PAYLOAD}" || die "the installer payload is not available"
 	fi
-	for part in feldcore-root.img.zst vmlinuz initrd.img systemd-bootx64.efi version root-mib; do
+	for part in feldcore-root.img.zst vmlinuz initrd.img systemd-bootx64.efi version root-mib state-mib; do
 		[[ -f ${PAYLOAD}/${part} ]] || die "payload is missing ${part}"
 	done
-	local root_mib part_mib
+	local root_mib part_mib state_mib
 	root_mib=$(tr -d ' \n' <"${PAYLOAD}/root-mib")
+	state_mib=$(tr -d ' \n' <"${PAYLOAD}/state-mib")
 	part_mib=$((root_mib + 128))
 
 	echo "feldcore-install: writing the appliance layout to ${disk}"
@@ -96,7 +96,7 @@ install_disk() {
 		-n "1:1M:+${ESP_MIB}M" -t 1:EF00 -c 1:FC-ESP \
 		-n "2:0:+${part_mib}M" -t 2:8300 -c 2:feldcore-a \
 		-n "3:0:+${part_mib}M" -t 3:8300 -c 3:feldcore-b \
-		-n "4:0:+${STATE_MIB}M" -t 4:8300 -c 4:feldcore-state \
+		-n "4:0:+${state_mib}M" -t 4:8300 -c 4:feldcore-state \
 		"${disk}"
 	partx -u "${disk}" || blockdev --rereadpt "${disk}" || true
 	udevadm settle || true
