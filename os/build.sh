@@ -24,12 +24,188 @@ loops=()
 log() { printf 'feldcore-os: %s\n' "$*"; }
 die() { printf 'feldcore-os: %s\n' "$*" >&2; exit 1; }
 
+# The package install bind-mounts the host /proc, /sys, and /dev into the
+# rootfs. On a systemd host those binds are shared, so a mount that shows up
+# under /sys afterwards (cgroup, debugfs, tracefs, ...) also shows up under
+# the rootfs. A plain umount then fails with "target is busy". The v0.1.0
+# image build ignored that and ran rm -rf on ${rootfs}/sys, which was still
+# the host sysfs. Detach every mount under the rootfs first. Do not remove
+# the directory while one remains.
+
+# True when $1 is $2 or a directory beneath it. The prefix is literal, so a
+# sibling such as ${2}-old does not match.
+path_under() {
+	local mp=$1 prefix=${2%/}
+	[[ -n ${prefix} && ( ${mp} == "${prefix}" || ${mp} == "${prefix}/"* ) ]]
+}
+
+# mountinfo stores whitespace in paths as octal escapes (\040 is a space).
+unescape_mountinfo() {
+	local s=$1
+	local i=0
+	local len=${#s}
+	local out="" c oct
+	while [[ ${i} -lt ${len} ]]; do
+		c=${s:i:1}
+		if [[ ${c} == \\ ]]; then
+			oct=${s:i+1:3}
+			if [[ ${oct} =~ ^[0-7]{3}$ ]]; then
+				printf -v c '%b' "\\${oct}"
+				out+=${c}
+				i=$((i + 4))
+				continue
+			fi
+		fi
+		out+=${c}
+		i=$((i + 1))
+	done
+	printf '%s' "${out}"
+}
+
+# Field 5 of a /proc/self/mountinfo line is the mount point.
+mountinfo_mountpoint() {
+	local line=$1
+	(
+		set -f
+		# Whitespace in the path is escaped, so splitting on IFS is the field split.
+		# shellcheck disable=SC2086
+		set -- ${line}
+		[[ $# -ge 5 ]] || exit 1
+		unescape_mountinfo "$5"
+	)
+}
+
+# Mount points equal to $1 or beneath it, deepest first.
+rootfs_mountpoints() {
+	local prefix=${1%/}
+	[[ -n ${prefix} ]] || return 0
+	local line mp depth
+	local -a rows=()
+	while IFS= read -r line || [[ -n ${line} ]]; do
+		mp=$(mountinfo_mountpoint "${line}" || true)
+		[[ -n ${mp} ]] || continue
+		if path_under "${mp}" "${prefix}"; then
+			depth=${mp//[^\/]/}
+			rows+=("${#depth} ${mp}")
+		fi
+	done < /proc/self/mountinfo
+	[[ ${#rows[@]} -gt 0 ]] || return 0
+	printf '%s\n' "${rows[@]}" | LC_ALL=C sort -k1,1nr | while IFS= read -r line; do
+		printf '%s\n' "${line#* }"
+	done
+}
+
+# Unmount one mount point. A shared bind sits in the host peer group:
+# umount -R before leaving that group also unmounts the host's copy.
+# If the mount cannot be made private, leave it attached.
+detach_mount() {
+	local mp=$1
+	[[ -n ${mp} ]] || return 0
+	if ! mountpoint -q "${mp}" 2>/dev/null; then
+		return 0
+	fi
+	if ! sudo mount --make-rprivate "${mp}" 2>/dev/null; then
+		printf 'feldcore-os: could not make %s private; leaving it mounted\n' "${mp}" >&2
+		return 0
+	fi
+	# -R drops children first. -Rl is the lazy fallback when a process
+	# still has a file open under the mount.
+	sudo umount -R "${mp}" 2>/dev/null || sudo umount -Rl "${mp}" 2>/dev/null || true
+	return 0
+}
+
+detach_rootfs_mounts() {
+	local mp attempt
+	local -a found=()
+	# Children before parents, so /dev/pts is gone before /dev and a
+	# propagated child of /sys is gone before /sys.
+	for mp in \
+		"${rootfs}/dev/pts" \
+		"${rootfs}/dev/shm" \
+		"${rootfs}/dev/mqueue" \
+		"${rootfs}/dev/hugepages" \
+		"${rootfs}/dev" \
+		"${rootfs}/proc" \
+		"${rootfs}/sys" \
+		"${rootfs}/run"
+	do
+		detach_mount "${mp}"
+	done
+	attempt=0
+	while [[ ${attempt} -lt 5 ]]; do
+		attempt=$((attempt + 1))
+		mapfile -t found < <(rootfs_mountpoints "${rootfs}")
+		[[ ${#found[@]} -eq 0 ]] && return 0
+		for mp in "${found[@]}"; do
+			detach_mount "${mp}"
+		done
+	done
+	return 0
+}
+
+# Refuse to delete the rootfs while /proc/self/mountinfo still lists a mount
+# under it. A literal grep misses a path whose spaces are stored as \040;
+# the field parser catches that. A longer directory that only shares the
+# prefix does not count.
+assert_rootfs_unmounted() {
+	local line mp hits
+	local -a bad=()
+	hits=$(grep -F -- "${rootfs}" /proc/self/mountinfo || true)
+	if [[ -n ${hits} ]]; then
+		while IFS= read -r line; do
+			[[ -n ${line} ]] || continue
+			mp=$(mountinfo_mountpoint "${line}" || true)
+			if path_under "${mp}" "${rootfs}"; then
+				bad+=("${mp}")
+			fi
+		done <<<"${hits}"
+	fi
+	if [[ ${#bad[@]} -eq 0 ]]; then
+		while IFS= read -r mp || [[ -n ${mp} ]]; do
+			[[ -n ${mp} ]] || continue
+			bad+=("${mp}")
+		done < <(rootfs_mountpoints "${rootfs}")
+	fi
+	if [[ ${#bad[@]} -eq 0 ]]; then
+		return 0
+	fi
+	printf 'feldcore-os: refusing to delete %s while these host mounts are still attached:\n' "${rootfs}" >&2
+	printf '%s\n' "${bad[@]}" >&2
+	die "not removing a live mount"
+}
+
+unmount_rootfs() {
+	detach_rootfs_mounts
+	assert_rootfs_unmounted
+}
+
+# rm -rf of the rootfs or a directory inside it. Nothing under the rootfs
+# may still be a mount point. This is the guard in front of the delete that
+# used to land on the host sysfs.
+remove_rootfs_paths() {
+	local p
+	[[ $# -gt 0 ]] || die "remove_rootfs_paths: nothing to remove"
+	for p in "$@"; do
+		if ! path_under "${p}" "${rootfs}"; then
+			die "refusing to delete ${p}: it is not under ${rootfs}"
+		fi
+	done
+	detach_rootfs_mounts
+	assert_rootfs_unmounted
+	sudo rm -rf "$@"
+}
+
 cleanup() {
 	local m l
 	for m in "${mounts[@]:-}"; do
-		sudo umount "$m" 2>/dev/null || true
+		detach_mount "${m}"
 	done
+	# install_packages drops the tracked list once it believes the API
+	# mounts are gone. Walk mountinfo anyway so a leftover /sys bind cannot
+	# outlive the script.
+	detach_rootfs_mounts
 	for l in "${loops[@]:-}"; do
+		[[ -n ${l} ]] || continue
 		sudo losetup -d "$l" 2>/dev/null || true
 	done
 }
@@ -37,15 +213,6 @@ trap cleanup EXIT
 
 track_mount() { mounts+=("$1"); }
 track_loop() { loops+=("$1"); }
-
-unmount_rootfs() {
-	local p
-	for p in dev/pts dev proc sys run; do
-		if mountpoint -q "${rootfs}/${p}" 2>/dev/null; then
-			sudo umount "${rootfs}/${p}" || true
-		fi
-	done
-}
 
 require() {
 	local c
@@ -68,7 +235,7 @@ mkosi_root() {
 	log "mkosi directory build"
 	sudo mkdir -p "${work}/mkosi-out"
 	sudo mkosi -C "${repo}/os/mkosi" --output-dir "${work}/mkosi-out" --force build
-	sudo rm -rf "${rootfs}"
+	remove_rootfs_paths "${rootfs}"
 	sudo mv "${work}/mkosi-out/rootfs" "${rootfs}"
 }
 
@@ -133,9 +300,6 @@ signing_key() {
 
 apply_image() {
 	unmount_rootfs
-	if mountpoint -q "${rootfs}/proc" || mountpoint -q "${rootfs}/dev"; then
-		die "the rootfs still has a host mount"
-	fi
 	log "applying the FELDCORE image"
 	sudo mkdir -p "${rootfs}/usr/bin" "${rootfs}/usr/share/feldcore" "${rootfs}/efi" "${rootfs}/var/lib/feldcore"
 	sudo cp -a "${repo}/os/image/." "${rootfs}/"
@@ -234,7 +398,7 @@ EOF
 		"${rootfs}/etc/systemd/system/sockets.target.wants/ssh.socket" \
 		"${rootfs}/etc/systemd/system/multi-user.target.wants/wpa_supplicant.service" \
 		"${rootfs}/etc/systemd/system/multi-user.target.wants/feldcore-wifi.service"
-	sudo rm -rf "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/run" "${rootfs}/tmp"
+	remove_rootfs_paths "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/run" "${rootfs}/tmp"
 	sudo mkdir -p "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/run" "${rootfs}/tmp" "${rootfs}/root" "${rootfs}/home"
 	sudo chmod 1777 "${rootfs}/tmp"
 }
