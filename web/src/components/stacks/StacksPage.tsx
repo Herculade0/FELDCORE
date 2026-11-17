@@ -17,6 +17,8 @@ import { Card } from "../ui";
 import { Alert, Button, IconButton, Modal, TextField, Toggle } from "../form";
 import { InstallPanel, showInstall, useInstall, type InstallJob } from "../install/InstallPanel";
 import PublishForm from "../publish/PublishForm";
+import { PageHelp } from "../help/PageHelp";
+import { useHelpAnchor } from "../../lib/appnav";
 
 interface Finding {
   service: string;
@@ -124,6 +126,7 @@ export default function StacksPage({
   focus?: string | null;
   onFocusHandled?: () => void;
 }) {
+  useHelpAnchor("stacks");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -442,7 +445,10 @@ export default function StacksPage({
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Stacks</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Stacks</h1>
+            <PageHelp topic="compose-stacks" />
+          </div>
           <p className="mt-2 max-w-2xl text-sm font-semibold text-ink-2">
             Deploy a Docker Compose file. Each stack is saved on disk and, by default, put on its own network.
           </p>

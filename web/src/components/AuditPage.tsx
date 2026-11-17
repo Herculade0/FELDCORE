@@ -3,6 +3,7 @@ import { RefreshCw, ScrollText } from "lucide-react";
 import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button } from "./form";
+import { PageHelp } from "./help/PageHelp";
 
 interface Event {
   id: string;
@@ -66,7 +67,10 @@ export default function AuditPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Audit</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Audit</h1>
+            <PageHelp topic="audit" />
+          </div>
           <p className="mt-2 max-w-xl text-sm font-semibold text-ink-2">
             File changes and URL downloads are recorded here, including ones made from this browser. Package installs, setup actions, published requests the protection layer blocked, agent token calls, and Citizen ID sign-ins are recorded too.
             {log

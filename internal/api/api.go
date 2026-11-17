@@ -406,6 +406,7 @@ func (s *Server) Router() http.Handler {
 				r.Post("/installs", s.handleInstallStart)
 
 				r.Get("/audit", s.handleAudit)
+				r.Get("/help", s.handleHelp)
 				r.Get("/citizen", s.handleCitizenDirectory)
 				r.Post("/citizen/users", s.handleCitizenUserCreate)
 				r.Put("/citizen/users/{id}", s.handleCitizenUserUpdate)

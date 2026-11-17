@@ -5,6 +5,8 @@ import { bytes } from "../../lib/format";
 import { Card, CardTitle } from "../ui";
 import { Alert, Button, Modal, SelectField, TextField, Toggle } from "../form";
 import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
+import { PageHelp } from "../help/PageHelp";
+import { useHelpAnchor } from "../../lib/appnav";
 
 interface Sets {
   config: boolean;
@@ -214,6 +216,7 @@ const STATE: Record<Job["state"], { label: string; cls: string }> = {
 };
 
 export default function BackupsPage() {
+  useHelpAnchor("backups");
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -396,7 +399,10 @@ export default function BackupsPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Backups</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Backups</h1>
+            <PageHelp topic="backups" />
+          </div>
           <p className="mt-1 max-w-2xl text-sm text-ink-2">{data?.why || "Versioned, encrypted copies of this server."}</p>
         </div>
         <Button onClick={() => { setFormError(null); setDraft(blank()); }}>New destination</Button>
@@ -447,6 +453,7 @@ export default function BackupsPage() {
       </Card>
 
       <Card>
+        <div id="backup-destinations">
         <CardTitle icon={Archive} title="Destinations" hint={`${dests.length} saved`} />
         {dests.length === 0 ? (
           <p className="mt-4 text-sm text-ink-2">No destinations yet. A local folder is enough to take the first copy.</p>
@@ -488,6 +495,7 @@ export default function BackupsPage() {
             ))}
           </ul>
         )}
+        </div>
       </Card>
 
       <Card>
