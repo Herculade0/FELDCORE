@@ -148,6 +148,7 @@ apply_image() {
 		"${rootfs}/usr/lib/feldcore/apply-mounts" \
 		"${rootfs}/usr/lib/feldcore/smoke-boot" \
 		"${rootfs}/usr/lib/feldcore/bless-boot" \
+		"${rootfs}/usr/lib/feldcore/wifi-up" \
 		"${rootfs}/usr/sbin/feldcore-install"
 	sudo rm -f "${rootfs}/usr/sbin/policy-rc.d"
 	install_cloudflared
@@ -178,6 +179,8 @@ VERSION_ID=${version}
 VERSION=${version}
 SYSEXT_LEVEL=1
 KERNEL=${kver}
+WIFI=wpa_supplicant
+SSH=openssh
 EOF
 	sudo ln -sfn /var/lib/feldcore/sysexts "${rootfs}/var/lib/extensions"
 	sudo mkdir -p \
@@ -213,6 +216,24 @@ nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
 	sudo ln -sfn /usr/share/zoneinfo/UTC "${rootfs}/etc/localtime"
+	# Packages may have written a machine-id. An empty file makes systemd
+	# generate a unique one on first boot, so clones do not share an id.
+	sudo truncate -s 0 "${rootfs}/etc/machine-id"
+	sudo chmod 644 "${rootfs}/etc/machine-id"
+	sudo mkdir -p "${rootfs}/var/lib/dbus"
+	if [[ -e ${rootfs}/var/lib/dbus/machine-id && ! -L ${rootfs}/var/lib/dbus/machine-id ]]; then
+		sudo rm -f "${rootfs}/var/lib/dbus/machine-id"
+	fi
+	sudo ln -sfn /etc/machine-id "${rootfs}/var/lib/dbus/machine-id"
+	# openssh-server and wpasupplicant enable units during install.
+	# sshd stays off unless an answer file enables it. WiFi starts only
+	# after that file writes a config and enables feldcore-wifi.service.
+	sudo rm -f \
+		"${rootfs}/etc/systemd/system/multi-user.target.wants/ssh.service" \
+		"${rootfs}/etc/systemd/system/multi-user.target.wants/sshd.service" \
+		"${rootfs}/etc/systemd/system/sockets.target.wants/ssh.socket" \
+		"${rootfs}/etc/systemd/system/multi-user.target.wants/wpa_supplicant.service" \
+		"${rootfs}/etc/systemd/system/multi-user.target.wants/feldcore-wifi.service"
 	sudo rm -rf "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/run" "${rootfs}/tmp"
 	sudo mkdir -p "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/run" "${rootfs}/tmp" "${rootfs}/root" "${rootfs}/home"
 	sudo chmod 1777 "${rootfs}/tmp"

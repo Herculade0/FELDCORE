@@ -39,19 +39,19 @@ The Updates page rollback does not reboot by itself. It writes the stable entry 
 
 ## What is in the image
 
-The root is Debian 13 (trixie). The package list is `os/packages.txt` (and the same names in `os/mkosi/mkosi.conf`). It includes systemd, the amd64 kernel, systemd-boot, Docker Engine, containerd, the Compose v2 plugin (`docker-compose`), git, Samba, NFS, restic, rclone, cifs-utils, wireguard-tools, smartmontools, mdadm, btrfs-progs, xfsprogs, hdparm, parted, ufw, rtl-sdr, systemd-timesyncd, pciutils, curl, and GPU firmware from non-free-firmware. Recommended packages are not installed. ZFS is not included. libvirt, QEMU, OVMF, swtpm, virtiofsd, and the NVIDIA Container Toolkit are sysexts, not base packages. A pinned `cloudflared` binary is installed at `/usr/bin/cloudflared`. `feldcored` runs that program as the tunnel connector and does not start a `feldcore-cloudflared` container on the appliance. A pinned Caddy 2.11.9 static binary is installed at `/usr/bin/caddy`, built from that release with the Cloudflare DNS module. `feldcored` supervises it and does not start a `feldcore-caddy` container. Its config and certificates are under `/var/lib/feldcore/caddy`. `feldcored` is `/usr/bin/feldcored` and is started by `feldcore.service` with `FELDCORE_DATA_DIR=/var/lib/feldcore`. The package unit in `deploy/feldcore.service` is unchanged and still uses `/usr/local/bin/feldcored`.
+The root is Debian 13 (trixie). The package list is `os/packages.txt` (and the same names in `os/mkosi/mkosi.conf`). It includes systemd, the amd64 kernel, systemd-boot, Docker Engine, containerd, the Compose v2 plugin (`docker-compose`), git, Samba, NFS, restic, rclone, cifs-utils, wireguard-tools, smartmontools, mdadm, btrfs-progs, xfsprogs, hdparm, parted, ufw, rtl-sdr, systemd-timesyncd, wpasupplicant (the `wpa_supplicant` daemon), openssh-server, pciutils, curl, and GPU firmware from non-free-firmware. Recommended packages are not installed. ZFS is not included. libvirt, QEMU, OVMF, swtpm, virtiofsd, and the NVIDIA Container Toolkit are sysexts, not base packages. A pinned `cloudflared` binary is installed at `/usr/bin/cloudflared`. `feldcored` runs that program as the tunnel connector and does not start a `feldcore-cloudflared` container on the appliance. A pinned Caddy 2.11.9 static binary is installed at `/usr/bin/caddy`, built from that release with the Cloudflare DNS module. `feldcored` supervises it and does not start a `feldcore-caddy` container. Its config and certificates are under `/var/lib/feldcore/caddy`. `feldcored` is `/usr/bin/feldcored` and is started by `feldcore.service` with `FELDCORE_DATA_DIR=/var/lib/feldcore`. The package unit in `deploy/feldcore.service` is unchanged and still uses `/usr/local/bin/feldcored`.
 
 Docker, containerd, and the image smoke unit are enabled. The smoke unit runs only when the kernel command line contains `feldcore.smoke`. `os/smoke.sh --root` checks the root filesystem after the image is applied, and `os/build.sh` runs it before the disk is packed.
 
 `/etc/os-release` and `/etc/feldcore-os-release` say `ID=feldcore` and `SYSEXT_LEVEL=1`. The daemon treats the machine as an appliance only when that id is set. A copy of the daemon installed on a normal Debian system can check a signed release, and it refuses to write a slot.
 
-`/usr/bin/apt`, `apt-get`, `apt-cache`, and `apt-mark` are replaced with a script that prints that FELDCORE OS has no apt and exits 1. `sources.list` is empty. dpkg is left in place because systemd scripts may call it. There is no compiler and no DKMS. The root password is locked. sshd is not installed. The serial console is enabled so a boot log is visible. The appliance image does not autologin.
+`/usr/bin/apt`, `apt-get`, `apt-cache`, and `apt-mark` are replaced with a script that prints that FELDCORE OS has no apt and exits 1. `sources.list` is empty. dpkg is left in place because systemd scripts may call it. There is no compiler and no DKMS. The root password is locked (`passwd -l root`). openssh-server is installed and `ssh.service` is not enabled. `/etc/ssh/sshd_config.d/00-feldcore.conf` sets `PermitRootLogin prohibit-password` and `PasswordAuthentication no`, so SSH is public-key only and root cannot log in with a password. `PermitRootLogin yes` is not used. An install answer file is what enables sshd. The serial console is enabled so a boot log is visible. The appliance image does not autologin.
 
-DNS is a static `/etc/resolv.conf` (1.1.1.1 and 8.8.8.8). Wired interfaces named `e*` use DHCP through systemd-networkd.
+DNS is a static `/etc/resolv.conf` (1.1.1.1 and 8.8.8.8). Wired interfaces named `e*` use DHCP through systemd-networkd. Wireless interfaces (`Type=wlan`) use DHCP through `25-wifi.network` once `wpa_supplicant` is running. `feldcore-wifi.service` is not enabled. It starts only when `/etc/wpa_supplicant/feldcore.conf` exists and an answer file enables the unit. `iwd` and NetworkManager are not installed.
 
 Free firmware is in the image. Proprietary NVIDIA firmware and the NVIDIA driver are not. Those belong in a sysext, and this build does not download them.
 
-A cloned image keeps the machine-id that was generated at build time. systemd has already read it by the time a unit could replace it. Machines cloned from one image share that id until the image is rebuilt.
+`/etc/machine-id` is shipped empty. systemd writes a unique id on first boot when that file exists and is empty, so clones of one image do not share an id. `/var/lib/dbus/machine-id` is a symlink to `/etc/machine-id`. `os/build.sh` truncates the file after the packages are installed, because debootstrap may have written an id. The slot, ESP, and state labels and sizes are unchanged.
 
 ## Building
 
@@ -197,7 +197,6 @@ Publishing requires the `FELDCORE_UPDATE_SIGNING_KEY` secret, which is the unenc
 - The booted image in the verification below is the debootstrap root. The mkosi config is checked with `mkosi summary` and is not what that boot used, unless `FELDCORE_IMAGE_BUILDER=mkosi` was set.
 - The NVIDIA kernel driver is not downloaded. The container toolkit and libvirt are userspace sysexts in the default manifest. A driver tree is still a local `FELDCORE_NVIDIA_SYSEXT=1` build.
 - The installer command is in the image. A full install onto a second QEMU disk is not part of the boot check below unless the verification section says it was run.
-- Machine-ids are not unique per clone.
 - The daemon on a non-appliance install shows the Updates page and will not write a slot.
 
 ## Verification
@@ -214,4 +213,4 @@ These parts were not run end to end on that boot:
 - A libvirt guest was not started. The sysext was built and is in the manifest; it was not merged in the QEMU guest.
 - The NVIDIA toolkit sysext was built from NVIDIA's apt repository. The proprietary driver was not downloaded, and no GPU was present in the guest.
 - Secure Boot stayed off.
-- Every clone of this image shares the machine-id generated at build time.
+- The image ships an empty `/etc/machine-id`. That boot was not used to check that systemd filled the file in.

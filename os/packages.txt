@@ -45,3 +45,7 @@ xfsprogs
 hdparm
 ufw
 rtl-sdr
+# wpasupplicant is the Debian package for the wpa_supplicant daemon.
+# openssh-server is installed disabled; the answer file turns sshd on.
+wpasupplicant
+openssh-server

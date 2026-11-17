@@ -1,0 +1,7 @@
+# sshd and wpa_supplicant stay off. An install answer file enables ssh
+# and feldcore-wifi.service when the operator asked for them.
+disable ssh.service
+disable ssh.socket
+disable sshd.service
+disable wpa_supplicant.service
+disable feldcore-wifi.service

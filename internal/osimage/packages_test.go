@@ -30,6 +30,8 @@ var requiredBase = []string{
 	"ufw",
 	"rtl-sdr",
 	"systemd-timesyncd",
+	"wpasupplicant",
+	"openssh-server",
 	"iptables",
 	"curl",
 	"bash",
