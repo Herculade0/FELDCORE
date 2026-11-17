@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/cfapi"
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/names"
@@ -40,7 +42,9 @@ func (e *OpError) Error() string { return e.Msg }
 func input(msg string) error { return &InputError{Msg: msg} }
 func op(msg string) error    { return &OpError{Msg: msg} }
 
-// Engine starts the cloudflared container and attaches apps to its network.
+// Engine starts the cloudflared container on a host that is not FELDCORE OS
+// and does not have the baked connector. It also attaches apps to the proxy
+// network so the publish listener can reach them.
 type Engine interface {
 	Ready(ctx context.Context) bool
 	ApplySystem(ctx context.Context, spec docker.SystemSpec) error
@@ -51,7 +55,8 @@ type Engine interface {
 	NetworkMode(ctx context.Context, name string) (string, error)
 }
 
-// Binary runs a cloudflared program when Docker is not available.
+// Binary runs a cloudflared program. FELDCORE OS always uses it. Other hosts
+// use it when the baked program is installed, and when Docker is not running.
 type Binary interface {
 	Available() bool
 	Running() bool
@@ -75,6 +80,9 @@ type Service struct {
 	// loopback; the container dials host.docker.internal.
 	GatewayPort int
 	Log         *slog.Logger
+	// PreferHost forces the baked cloudflared program instead of a container.
+	// Nil selects it on FELDCORE OS, and on any host where that program is installed.
+	PreferHost func() bool
 	// NewCF overrides the Cloudflare client. Tests point it at a fake server.
 	NewCF func(token string) *cfapi.Client
 }
@@ -112,6 +120,7 @@ type View struct {
 	ExposeAdmin    bool                `json:"exposeAdmin"`
 	AdminHostname  string              `json:"adminHostname,omitempty"`
 	AdminWarning   string              `json:"adminWarning,omitempty"`
+	RunsOnHost     bool                `json:"runsOnHost"`
 	Routes         []store.PublicRoute `json:"routes"`
 	Status         Health              `json:"status"`
 }
@@ -143,7 +152,8 @@ func (s *Service) View(ctx context.Context) View {
 		Mode: mode, TunnelID: cfg.TunnelID, TunnelName: cfg.TunnelName, AccountID: cfg.AccountID,
 		APITokenSet: s.Secrets.Has(secretAPI), TunnelTokenSet: s.Secrets.Has(secretTunnel),
 		ExposeAdmin: cfg.ExposeAdmin, AdminHostname: cfg.AdminHostname,
-		Routes: routes, Status: s.health(ctx),
+		RunsOnHost: s.preferHost(),
+		Routes:     routes, Status: s.health(ctx),
 	}
 	if cfg.ExposeAdmin {
 		v.AdminWarning = AdminWarning
@@ -322,8 +332,15 @@ func (s *Service) Sync(ctx context.Context) error {
 	return s.publish(ctx, api)
 }
 
-// Install downloads cloudflared when Docker is not running the connector.
+// Install downloads cloudflared when this host runs the connector as a
+// container and Docker is not up. FELDCORE OS already has the program.
 func (s *Service) Install(ctx context.Context) error {
+	if s.preferHost() {
+		if s.Binary == nil || !s.Binary.Available() {
+			return op("FELDCORE OS includes cloudflared " + BakedCloudflaredVersion + " at " + bakedCloudflared + ", and that program is missing.")
+		}
+		return s.Sync(ctx)
+	}
 	if s.Engine != nil && s.Engine.Ready(ctx) {
 		return input("Docker is running, so FELDCORE uses a cloudflared container. There is nothing to install on the host.")
 	}
@@ -385,18 +402,25 @@ func (s *Service) ensureTunnel(ctx context.Context) error {
 }
 
 // appOrigin is the publish listener every tunnel hostname dials. A
-// containerised connector uses host.docker.internal. A cloudflared binary
-// on this machine uses loopback. The port defaults to the publish listener.
+// containerised connector uses host.docker.internal. The baked program, and
+// any other cloudflared on this machine, uses loopback. The port defaults
+// to the publish listener.
 func (s *Service) appOrigin(ctx context.Context) string {
 	port := s.GatewayPort
 	if port <= 0 {
 		port = 8791
 	}
-	dial := "127.0.0.1"
-	if s.Engine != nil && s.Engine.Ready(ctx) {
-		dial = "host.docker.internal"
+	return fmt.Sprintf("http://%s:%d", s.dialHost(ctx), port)
+}
+
+// dialHost is the address the connector uses to reach a port on this machine.
+// The container cannot use loopback: that is the container itself. The host
+// program can, and it must not wait for Docker to answer first.
+func (s *Service) dialHost(ctx context.Context) string {
+	if !s.preferHost() && s.Engine != nil && s.Engine.Ready(ctx) {
+		return "host.docker.internal"
 	}
-	return fmt.Sprintf("http://%s:%d", dial, port)
+	return "127.0.0.1"
 }
 
 func (s *Service) publish(ctx context.Context, apiToken string) error {
@@ -416,7 +440,7 @@ func (s *Service) publish(ctx context.Context, apiToken string) error {
 	if cfg.ExposeAdmin {
 		rules = append(rules, cfapi.Rule{
 			Hostname: cfg.AdminHostname,
-			Service:  fmt.Sprintf("http://host.docker.internal:%d", s.listen()),
+			Service:  fmt.Sprintf("http://%s:%d", s.dialHost(ctx), s.listen()),
 		})
 		want = append(want, pub{host: cfg.AdminHostname, record: cfg.AdminRecordID, admin: true})
 	}
@@ -494,36 +518,77 @@ func (s *Service) publish(ctx context.Context, apiToken string) error {
 }
 
 func (s *Service) start(ctx context.Context, token string) error {
+	// FELDCORE OS, and any host with the baked program, never starts the
+	// container. Docker does not have to be up first.
+	if s.preferHost() {
+		err := s.startBinary(ctx, token)
+		s.retireContainer(ctx)
+		return err
+	}
 	if s.Engine != nil && s.Engine.Ready(ctx) {
 		if s.Binary != nil {
 			_ = s.Binary.Stop()
 		}
 		spec := connectorSpec(s.tokenPath(), fileStamp(s.tokenPath()))
 		if err := s.Engine.ApplySystem(ctx, spec); err != nil {
-			return op("Could not start the tunnel connector. " + secrets.Redact(err.Error(), token))
+			return s.connectorError(err, token)
 		}
 		return nil
 	}
+	return s.startBinary(ctx, token)
+}
+
+func (s *Service) startBinary(ctx context.Context, token string) error {
 	if s.Binary == nil || !s.Binary.Available() {
+		if s.preferHost() {
+			return op("The tunnel connector could not start. FELDCORE OS runs cloudflared " + BakedCloudflaredVersion + " from " + bakedCloudflared + ", and that program is missing.")
+		}
 		return op("Docker is not running and cloudflared is not installed. Start Docker, or install the connector from this page.")
 	}
+	if h, ok := s.Binary.(*HostCloudflared); ok && h.TokenFile == "" {
+		h.TokenFile = s.tokenPath()
+	}
+	already := s.Binary.Running()
 	if err := s.Binary.Start(ctx, token); err != nil {
-		return op(secrets.Redact(err.Error(), token))
+		return s.connectorError(err, token)
+	}
+	if s.Log != nil && !already {
+		if s.preferHost() {
+			s.Log.Info("starting tunnel connector", "path", bakedCloudflared, "pinned", BakedCloudflaredVersion)
+		} else {
+			s.Log.Info("starting tunnel connector", "via", "host")
+		}
 	}
 	return nil
 }
 
 func (s *Service) stop(ctx context.Context) error {
-	if s.Engine != nil && s.Engine.Ready(ctx) {
-		if err := s.Engine.StopSystem(ctx, docker.TunnelContainer); err != nil && s.Log != nil {
+	s.retireContainer(ctx)
+	if s.Binary != nil {
+		if err := s.Binary.Stop(); err != nil && s.Log != nil {
 			s.Log.Warn("could not stop the tunnel connector", "err", err)
 		}
 	}
-	if s.Binary != nil {
-		_ = s.Binary.Stop()
-	}
 	_ = os.Remove(s.tokenPath())
 	return nil
+}
+
+// retireContainer removes a leftover feldcore-cloudflared. On FELDCORE OS the
+// container is never the connector; an old one would keep restarting into the
+// shell error. A Docker daemon that is not up yet is skipped, and the host
+// program has already been started.
+func (s *Service) retireContainer(ctx context.Context) {
+	if s.Engine == nil {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if !s.Engine.Ready(cctx) {
+		return
+	}
+	if err := s.Engine.StopSystem(cctx, docker.TunnelContainer); err != nil && s.Log != nil {
+		s.Log.Warn("could not remove the tunnel container", "err", err)
+	}
 }
 
 func (s *Service) health(ctx context.Context) Health {
@@ -531,27 +596,15 @@ func (s *Service) health(ctx context.Context) Health {
 	if cfg.Mode == "" || cfg.Mode == "off" {
 		return Health{State: "off", Summary: "Remote access is off. Nothing on this server is published.", Connector: "none"}
 	}
-	state, connector := "missing", "none"
-	if s.Engine != nil {
-		if st, err := s.Engine.SystemState(ctx, docker.TunnelContainer); err == nil {
-			state = st
-			if st != "missing" {
-				connector = "container"
-			}
-		}
-	}
-	if state != "running" && s.Binary != nil && s.Binary.Running() {
-		state, connector = "running", "binary"
-	}
+	state, connector, detail := s.connectorState(ctx)
+	detail = sanitizeConnectorDetail(detail, s.preferHost())
 	connections := 0
-	detail := ""
-	if s.Binary != nil && connector == "binary" {
-		detail = s.Binary.Detail()
-	}
 	if api, ok, _ := s.Secrets.Get(secretAPI); ok && cfg.TunnelID != "" && cfg.AccountID != "" {
 		tun, err := s.cf(api).GetTunnel(ctx, cfg.AccountID, cfg.TunnelID)
 		if err != nil {
-			detail = err.Error()
+			if detail == "" {
+				detail = err.Error()
+			}
 		} else {
 			connections = len(tun.Connections)
 		}
@@ -565,11 +618,61 @@ func (s *Service) health(ctx context.Context) Health {
 		return Health{State: "starting", Summary: "The connector is running. Waiting for Cloudflare to see it.", Connector: connector, Detail: detail}
 	default:
 		summary := "The connector is not running."
-		if detail == "" && connector == "none" {
+		if connector == "none" {
 			summary = "The connector is not installed yet."
 		}
 		return Health{State: "down", Summary: summary, Connector: connector, Detail: detail}
 	}
+}
+
+// connectorState is the process FELDCORE started. On the OS path the container
+// is ignored, including one left behind that never reached running.
+func (s *Service) connectorState(ctx context.Context) (state, connector, detail string) {
+	if s.preferHost() {
+		return s.hostState()
+	}
+	state, connector = "missing", "none"
+	if s.Engine != nil {
+		if st, err := s.Engine.SystemState(ctx, docker.TunnelContainer); err == nil {
+			state = st
+			if st != "missing" {
+				connector = "container"
+			}
+		}
+	}
+	if state != "running" && s.Binary != nil && s.Binary.Running() {
+		state, connector = "running", "binary"
+	}
+	if connector == "binary" && s.Binary != nil {
+		detail = s.Binary.Detail()
+	}
+	if state != "running" && connector != "container" && s.Binary != nil && s.Binary.Detail() != "" {
+		detail = s.Binary.Detail()
+		connector = "binary"
+		state = "down"
+	}
+	return state, connector, detail
+}
+
+func (s *Service) hostState() (state, connector, detail string) {
+	if s.Binary == nil || !s.Binary.Available() {
+		return "down", "none", "cloudflared is not installed at " + bakedCloudflared + "."
+	}
+	detail = s.Binary.Detail()
+	if s.Binary.Running() {
+		return "running", "binary", detail
+	}
+	return "down", "binary", detail
+}
+
+func (s *Service) preferHost() bool {
+	if s.PreferHost != nil {
+		return s.PreferHost()
+	}
+	if appliance.Is() {
+		return true
+	}
+	return executable(bakedCloudflared)
 }
 
 func (s *Service) cf(token string) *cfapi.Client {
@@ -621,19 +724,53 @@ func (s *Service) writeToken(token string) error {
 }
 
 func connectorSpec(tokenFile, stamp string) docker.SystemSpec {
+	// cloudflare/cloudflared is distroless: the binary is at this path and
+	// there is no shell. Docker execs this argv. The image user cannot read a
+	// mode-0600 file owned by root, so the fallback container runs as root
+	// and reads the mounted token. The token is not an environment variable
+	// and not part of the command line. "direct" is in the hash so a container
+	// created with the old shell command is replaced.
+	entry := []string{"/usr/local/bin/cloudflared"}
+	cmd := []string{"--no-autoupdate", "tunnel", "run", "--token-file", "/run/feldcore/token"}
 	return docker.SystemSpec{
 		Name:       docker.TunnelContainer,
 		Image:      docker.CloudflaredImage,
-		Entrypoint: []string{"sh", "-c"},
-		// The token is read from a mode-0600 file inside the container. It is
-		// not part of the command line, the environment Docker stores, or this spec's log line.
-		Command:    []string{`export TUNNEL_TOKEN="$(cat /run/feldcore/token)"; exec cloudflared --no-autoupdate tunnel run`},
+		Entrypoint: entry,
+		Command:    cmd,
+		User:       "0:0",
 		Binds:      []string{tokenFile + ":/run/feldcore/token:ro"},
 		Network:    docker.ProxyNetwork,
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 		Role:       "tunnel",
-		Hash:       names.Fingerprint("tunnel", stamp, tokenFile),
+		Hash:       names.Fingerprint("tunnel", "direct", strings.Join(entry, " "), strings.Join(cmd, " "), stamp, tokenFile),
 	}
+}
+
+func crypticExec(msg string) bool {
+	return strings.Contains(msg, "executable file not found") || strings.Contains(msg, "exec:")
+}
+
+func sanitizeConnectorDetail(msg string, host bool) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" || !crypticExec(msg) {
+		return msg
+	}
+	if host {
+		return "cloudflared could not be started at " + bakedCloudflared + "."
+	}
+	return "The cloudflared container failed to start."
+}
+
+func (s *Service) connectorError(err error, token string) error {
+	msg := sanitizeConnectorDetail(secrets.Redact(strings.TrimSpace(err.Error()), token), s.preferHost())
+	switch {
+	case msg == "":
+		msg = "The tunnel connector could not start."
+	case strings.HasPrefix(msg, "The tunnel connector"), strings.HasPrefix(msg, "Docker is not running"), strings.HasPrefix(msg, "FELDCORE OS"):
+	default:
+		msg = "The tunnel connector could not start. " + msg
+	}
+	return op(msg)
 }
 
 func fileStamp(path string) string {

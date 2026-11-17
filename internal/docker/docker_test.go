@@ -540,3 +540,17 @@ func TestConfiguredPortsForStoppedContainer(t *testing.T) {
 		t.Errorf("no ports marshalled to %s, want []", b)
 	}
 }
+
+func TestSystemBodyUser(t *testing.T) {
+	body := systemBody(SystemSpec{
+		Name: "feldcore-cloudflared", Image: "cloudflare/cloudflared:latest", User: "0:0",
+		Entrypoint: []string{"/usr/local/bin/cloudflared"},
+	})
+	if body["User"] != "0:0" {
+		t.Fatalf("user %#v", body["User"])
+	}
+	bare := systemBody(SystemSpec{Name: "feldcore-caddy", Image: "caddy:2"})
+	if _, ok := bare["User"]; ok {
+		t.Fatal("user set by default")
+	}
+}

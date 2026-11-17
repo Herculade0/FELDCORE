@@ -45,8 +45,10 @@ type SystemSpec struct {
 	Ports      []SystemPort
 	Network    string
 	ExtraHosts []string
-	Role       string
-	Hash       string
+	// User is the container user, as Docker's User field ("uid:gid").
+	User string
+	Role string
+	Hash string
 }
 
 // PublishedPort is a host port a container is publishing.
@@ -283,6 +285,9 @@ func systemBody(spec SystemSpec) map[string]any {
 	cfg := map[string]any{
 		"Image":  spec.Image,
 		"Labels": labels,
+	}
+	if spec.User != "" {
+		cfg["User"] = spec.User
 	}
 	if len(spec.Entrypoint) > 0 {
 		cfg["Entrypoint"] = spec.Entrypoint
