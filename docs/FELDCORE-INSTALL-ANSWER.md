@@ -4,6 +4,16 @@
 
 The file is plain JSON. It is not encrypted. A passphrase would stop a headless boot. The administrator password, the setup code, the WiFi PSK, the Unix password, and remote tokens are stored in the clear on the ESP until the first successful apply deletes the file. FAT does not scrub deleted clusters, so the stick can still hold those bytes. Prefer an SSH public key to a Unix password. Do not leave the stick attached after boot.
 
+## What the install page writes
+
+`docs/install/index.html` builds this file in the browser. It writes `version`, `hostname`, `timezone`, `network`, `wifi`, `ssh`, `admin`, and `dataPool`.
+
+The time zone field defaults to `Australia/Brisbane`. WiFi country is a list of country names stored as ISO 3166-1 alpha-2 codes. The code is included only when a WiFi network name is set, so choosing a country does not by itself add a `wifi` section.
+
+The page has one web-administrator path. When the username and password are both filled in, it writes `admin` with `skipTotp: true`. When both are left blank, it writes neither `admin` nor `setupCode`, and the device prints a random setup code on the console. The page does not offer a chosen setup code, and it does not write `user`. SSH on the page is the root public key only.
+
+`user` and `setupCode` below are still read by `feldcored` when a hand-written file includes them.
+
 ## Where it is read
 
 `feldcored` looks for the file after the setup writers are wired and before it listens for HTTP.
@@ -62,7 +72,7 @@ A field whose program is not installed is skipped and logged. It is not treated 
 }
 ```
 
-`admin` and `setupCode` are mutually exclusive. Omit both to keep the random console code.
+`admin` and `setupCode` are mutually exclusive. Omit both to keep the random console code. The install page does that when the web administrator is left blank, and it never writes `setupCode` or `user`.
 
 | JSON | Writer | What first boot does |
 | --- | --- | --- |
@@ -129,7 +139,7 @@ Administrator, DHCP, and SSH key login. No setup code.
 }
 ```
 
-Known setup code, no administrator. The operator claims the web UI in a browser.
+Known setup code, no administrator. The operator claims the web UI in a browser. The install page does not produce this file. `feldcored` still accepts it.
 
 ```json
 {
