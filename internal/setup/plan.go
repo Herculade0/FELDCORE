@@ -9,29 +9,35 @@ import (
 	"strings"
 )
 
-// Steps are the wizard pages, in order, after the one-time claim.
-var Steps = []string{"host", "network", "storage", "packages", "shares", "security", "updates", "summary"}
-
 var (
-	hostRe  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
-	tzRe    = regexp.MustCompile(`^[A-Za-z0-9+_/-]{1,64}$`)
-	ifaceRe = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,32}$`)
+	hostRe   = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	tzRe     = regexp.MustCompile(`^[A-Za-z0-9+_/-]{1,64}$`)
+	ifaceRe  = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,32}$`)
+	localeRe = regexp.MustCompile(`^(C|[a-z]{2,3}(_[A-Z]{2})?)(\.UTF-8)?$`)
 )
 
 // HostPlan is what the host step will run. Nothing here touches SSH.
-func HostPlan(hostname, timezone, ntp string) ([]string, error) {
+// An empty locale leaves the current language alone.
+func HostPlan(hostname, timezone, ntp, locale string) ([]string, error) {
 	hostname = strings.TrimSpace(hostname)
 	timezone = strings.TrimSpace(timezone)
 	ntp = strings.TrimSpace(ntp)
+	locale = strings.TrimSpace(locale)
 	if !hostRe.MatchString(hostname) {
 		return nil, fmt.Errorf("host names use letters, numbers and hyphens")
 	}
 	if !tzRe.MatchString(timezone) || strings.Contains(timezone, "..") {
 		return nil, fmt.Errorf("choose a time zone like Europe/London")
 	}
+	if locale != "" && !localeRe.MatchString(locale) {
+		return nil, fmt.Errorf("choose a locale like en_US.UTF-8")
+	}
 	var lines []string
 	lines = append(lines, "hostnamectl set-hostname "+hostname)
 	lines = append(lines, "timedatectl set-timezone "+timezone)
+	if locale != "" {
+		lines = append(lines, "set the locale to "+locale)
+	}
 	switch ntp {
 	case "", "systemd-timesyncd":
 		lines = append(lines, "enable systemd-timesyncd and turn NTP on")

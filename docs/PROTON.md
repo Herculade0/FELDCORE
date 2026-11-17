@@ -69,6 +69,10 @@ on. Retention deletes older files in that folder whose names match
 If `rclone` is not installed, FELDCORE runs `rclone/rclone` through Docker
 instead. One of those two has to be available.
 
+Versioned backups, including a Proton Drive destination that reuses this
+account, are on the Backups page. See [BACKUPS.md](BACKUPS.md). This card
+still uploads one `tar.gz`.
+
 ## Proton Mail
 
 **Settings → Network**, Notifications. Mail is sent when:
@@ -78,8 +82,9 @@ instead. One of those two has to be available.
 - GitHub has a newer FELDCORE release, and update checks are turned on in
   Settings
 
-There was no notification system before this; these two events are the ones
-it knows.
+Those two events, and later ones such as `backup.failed`, are published on
+the in-process bus described in [EVENTS.md](EVENTS.md). Proton delivery is
+unchanged: the same SMTP, Bridge, and SMTP-token paths send the mail.
 
 Three ways to send:
 

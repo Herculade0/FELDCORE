@@ -8,6 +8,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/docker"
 	feldnames "github.com/Herculade0/feldcore/internal/names"
 	"github.com/Herculade0/feldcore/internal/publish"
+	"github.com/Herculade0/feldcore/internal/store"
 )
 
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
@@ -70,18 +71,19 @@ func (s *Server) handleContainerPublishSave(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var body struct {
-		Enabled   bool     `json:"enabled"`
-		Subdomain string   `json:"subdomain"`
-		Port      int      `json:"port"`
-		Access    string   `json:"access"`
-		Groups    []string `json:"groups"`
+		Enabled   bool              `json:"enabled"`
+		Subdomain string            `json:"subdomain"`
+		Port      int               `json:"port"`
+		Access    string            `json:"access"`
+		Groups    []string          `json:"groups"`
+		Brand     store.SignInBrand `json:"brand"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 	out, err := s.publish.Set(r.Context(), publish.SetInput{
 		Container: info.Spec.Name, Subdomain: body.Subdomain, Port: body.Port,
-		Access: body.Access, Groups: body.Groups, Enabled: body.Enabled,
+		Access: body.Access, Groups: body.Groups, Enabled: body.Enabled, Brand: body.Brand,
 	})
 	if err != nil {
 		s.fail(w, r, err)

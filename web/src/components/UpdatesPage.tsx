@@ -4,6 +4,7 @@ import { api, errorMessage } from "../lib/api";
 import { Card, CardTitle } from "./ui";
 import { Alert, Button, TextField } from "./form";
 import { InstallPanel, showInstall, useInstall } from "./install/InstallPanel";
+import { PageHelp } from "./help/PageHelp";
 
 interface Slot {
   id: string;
@@ -177,10 +178,13 @@ export default function UpdatesPage() {
             FELDCORE OS replaces a whole disk slot. Nothing is installed with apt onto the running system. A new image gets three boots, then the previous image is selected automatically.
           </p>
         </div>
-        <Button variant="secondary" size="sm" loading={loading} onClick={load}>
-          <RefreshCw size={14} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <PageHelp topic="updates-rollback" />
+          <Button variant="secondary" size="sm" loading={loading} onClick={load}>
+            <RefreshCw size={14} />
+            Refresh
+          </Button>
+        </div>
       </header>
 
       {error && <Alert>{error}</Alert>}
