@@ -17,6 +17,7 @@ import { HISTORY_SIZE, useStatsStream } from "../lib/useStream";
 import { bytes, bytesPerSec, duration, greeting, shortCpu } from "../lib/format";
 import { Bar, Card, CardTitle, IconBadge, StatusPill } from "./ui";
 import { TerminalButton, useTerminal } from "./Terminal";
+import { PageHelp } from "./help/PageHelp";
 import { Gauge } from "./Gauge";
 import { Sparkline } from "./Sparkline";
 import { HealthStrip, type HealthReport } from "./health/HealthPage";
@@ -73,9 +74,12 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink-3">{greeting()}</p>
-          <h1 className="mt-1 truncate text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
-            {info?.hostname ?? "FELDCORE"}
-          </h1>
+          <div className="mt-1 flex items-center gap-2">
+            <h1 className="truncate text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
+              {info?.hostname ?? "FELDCORE"}
+            </h1>
+            <PageHelp topic="dashboard" />
+          </div>
           <p className={`mt-2 text-sm font-semibold ${state.tone}`}>
             {state.text}
           </p>
@@ -249,7 +253,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (k: NavKey) => v
           Modules
         </h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {NAV.filter((n) => n.key !== "dashboard").map((item) => (
+          {NAV.filter((n) => n.key !== "dashboard" && n.key !== "help").map((item) => (
             <button
               key={item.key}
               onClick={() => onNavigate(item.key)}

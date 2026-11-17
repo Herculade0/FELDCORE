@@ -5,6 +5,8 @@ import { NAV, type NavKey } from "./nav";
 import { VERSION } from "./version";
 import { ThemeProvider, useTheme } from "./lib/theme";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { AppNavProvider, useAppNav } from "./lib/appnav";
+import HelpPage from "./components/help/HelpPage";
 import { LogoMark, Wordmark } from "./components/Logo";
 import { IconButton } from "./components/form";
 import { LoadingScreen, LoginScreen, SetupScreen } from "./components/AuthScreen";
@@ -52,14 +54,23 @@ function Gate() {
 }
 
 function Shell() {
+  return (
+    <AppNavProvider>
+      <TerminalProvider>
+        <ShellFrame />
+      </TerminalProvider>
+    </AppNavProvider>
+  );
+}
+
+function ShellFrame() {
   const { username, admin } = useAuth();
+  const { dest, go } = useAppNav();
   const items = admin ? NAV : NAV.filter((item) => item.key === "launcher");
-  const [active, setActive] = useState<NavKey>(admin ? "dashboard" : "launcher");
   const [stackFocus, setStackFocus] = useState<string | null>(null);
-  const page = items.some((item) => item.key === active) ? active : (items[0]?.key ?? "launcher");
+  const page: NavKey = items.some((item) => item.key === dest.page) ? dest.page : (items[0]?.key ?? "launcher");
 
   return (
-    <TerminalProvider>
     <div className="min-h-screen md:pl-[17.5rem]">
       {/* Desktop: floating glass rail */}
       <aside className="glass fixed inset-y-4 left-4 z-20 hidden w-60 flex-col rounded-3xl p-4 md:flex">
@@ -73,7 +84,7 @@ function Shell() {
             return (
               <button
                 key={key}
-                onClick={() => setActive(key)}
+                onClick={() => go(key)}
                 aria-current={on ? "page" : undefined}
                 className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm font-semibold transition-colors ${
                   on
@@ -123,7 +134,7 @@ function Shell() {
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-10 md:pt-8">
         <ErrorBoundary resetKey={page} area={items.find((n) => n.key === page)?.label}>
           {page === "dashboard" ? (
-            <Dashboard onNavigate={setActive} />
+            <Dashboard onNavigate={go} />
           ) : page === "launcher" ? (
             <Launcher />
           ) : page === "storage" ? (
@@ -132,10 +143,10 @@ function Shell() {
             <SharesPage />
           ) : page === "docker" ? (
             <DockerPage
-              onOpenApps={() => setActive("apps")}
+              onOpenApps={() => go("apps")}
               onOpenStack={(name) => {
                 setStackFocus(name);
-                setActive("stacks");
+                go("stacks");
               }}
             />
           ) : page === "stacks" ? (
@@ -143,7 +154,7 @@ function Shell() {
           ) : page === "apps" ? (
             <AppsPage />
           ) : page === "vms" ? (
-            <VMsPage />
+            <VMsPage focus={{ view: dest.view, nonce: dest.nonce }} />
           ) : page === "backups" ? (
             <BackupsPage />
           ) : page === "health" ? (
@@ -151,14 +162,19 @@ function Shell() {
           ) : page === "audit" ? (
             <AuditPage />
           ) : page === "settings" ? (
-            <SettingsPage onOpenAudit={() => setActive("audit")} />
+            <SettingsPage
+              onOpenAudit={() => go("audit")}
+              focus={{ tab: dest.tab, anchor: dest.anchor, nonce: dest.nonce }}
+            />
+          ) : page === "help" ? (
+            <HelpPage />
           ) : null}
         </ErrorBoundary>
       </main>
 
       {/* Mobile: bottom dock */}
       <nav
-        className="glass fixed inset-x-3 bottom-3 z-20 flex justify-around rounded-3xl p-1.5 md:hidden"
+        className="glass fixed inset-x-3 bottom-3 z-20 flex gap-0.5 overflow-x-auto rounded-3xl p-1.5 md:hidden"
         aria-label="Main"
       >
         {items.map(({ key, label, icon: Icon }) => {
@@ -166,9 +182,9 @@ function Shell() {
           return (
             <button
               key={key}
-              onClick={() => setActive(key)}
+              onClick={() => go(key)}
               aria-current={on ? "page" : undefined}
-              className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold transition-colors ${
+              className={`flex min-w-[3.4rem] flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold transition-colors ${
                 on ? "accent-gradient text-white" : "text-ink-3"
               }`}
             >
@@ -179,7 +195,6 @@ function Shell() {
         })}
       </nav>
     </div>
-    </TerminalProvider>
   );
 }
 

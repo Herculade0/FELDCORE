@@ -4,6 +4,8 @@ import { api, errorMessage } from "../../lib/api";
 import { Card, CardTitle } from "../ui";
 import { Alert, Button, TextField } from "../form";
 import { Sparkline } from "../Sparkline";
+import { PageHelp } from "../help/PageHelp";
+import { useHelpAnchor } from "../../lib/appnav";
 
 export type HealthLevel = "ok" | "warn" | "crit" | "unknown";
 
@@ -141,6 +143,7 @@ export function HealthStrip({
 }
 
 export default function HealthPage() {
+  useHelpAnchor("health");
   const [report, setReport] = useState<HealthReport | null>(null);
   const [points, setPoints] = useState<Point[]>([]);
   const [marks, setMarks] = useState<Thresholds | null>(null);
@@ -197,7 +200,10 @@ export default function HealthPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Health</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Health</h1>
+            <PageHelp topic="notifications-health" />
+          </div>
           <p className="mt-2 max-w-2xl text-sm font-semibold text-ink-2">
             Disks, heat, space, load, containers, virtual machines, services, certificates, and tunnels. A missing
             tool is unknown, not a failure.
@@ -280,6 +286,7 @@ export default function HealthPage() {
       ))}
 
       <Card>
+        <div id="health-thresholds">
         <CardTitle icon={HeartPulse} title="Thresholds" hint="Warning, then critical" />
         <p className="mt-3 text-sm font-medium text-ink-2">
           A warning mark has to sit below its critical mark. Certificate warning is a larger number of days than
@@ -322,6 +329,7 @@ export default function HealthPage() {
             </div>
           </>
         )}
+        </div>
       </Card>
     </div>
   );

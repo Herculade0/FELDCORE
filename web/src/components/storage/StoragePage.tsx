@@ -4,6 +4,8 @@ import { api, errorMessage } from "../../lib/api";
 import { bytes } from "../../lib/format";
 import { Bar, Card, CardTitle } from "../ui";
 import { Alert, Button, Modal, SelectField, TextField } from "../form";
+import { PageHelp } from "../help/PageHelp";
+import { useHelpAnchor } from "../../lib/appnav";
 
 interface Smart {
   available: boolean;
@@ -202,6 +204,7 @@ function confirmHint(d: Disk): string {
 }
 
 export default function StoragePage() {
+  useHelpAnchor("storage");
   const [view, setView] = useState<View | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -244,7 +247,10 @@ export default function StoragePage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Storage</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Storage</h1>
+            <PageHelp topic="disk-management" />
+          </div>
           <p className="mt-2 max-w-2xl text-sm font-semibold text-ink-2">
             Disks on this server, and the pools they belong to. Nothing is formatted until you type each disk's serial.
           </p>
@@ -326,7 +332,7 @@ export default function StoragePage() {
       </Card>
 
       <section className="space-y-4">
-        <h2 className="text-lg font-extrabold text-ink">Pools</h2>
+        <h2 id="storage-pools" className="text-lg font-extrabold text-ink">Pools</h2>
         {view && view.pools.length === 0 && (
           <Card>
             <p className="text-sm font-medium text-ink-2">

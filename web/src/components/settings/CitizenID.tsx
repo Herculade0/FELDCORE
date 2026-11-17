@@ -5,6 +5,7 @@ import { passkeysAvailable, registerPasskey } from "../../lib/webauthn";
 import { asBrand, BrandFields, type SignInBrand } from "../citizen/SignInBrand";
 import { Card, CardTitle } from "../ui";
 import { Alert, Button, SelectField, TextField } from "../form";
+import { PageHelp } from "../help/PageHelp";
 
 interface UserInfo {
   id: string;
@@ -276,7 +277,10 @@ export default function CitizenID() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardTitle icon={Shield} title="Citizen ID" />
+        <div id="settings-citizen" className="flex items-start justify-between gap-3">
+          <CardTitle icon={Shield} title="Citizen ID" />
+          <PageHelp topic="citizen-id" />
+        </div>
         <p className="mt-3 text-sm font-medium leading-relaxed text-ink-2">
           Users, groups, and who may open each published app. Once an authenticator is enrolled,
           the administrator sign-in asks for the code as well.

@@ -29,6 +29,7 @@ import SnapshotSettings from "./settings/SnapshotSettings";
 import CitizenID from "./settings/CitizenID";
 import { InstallPanel, useInstall } from "./install/InstallPanel";
 import PublishingSettings from "./publish/ProtectionSettings";
+import { PageHelp } from "./help/PageHelp";
 import { GuidedSetup } from "./setup/Wizard";
 
 const MODES: { key: Mode; label: string; icon: LucideIcon }[] = [
@@ -63,12 +64,40 @@ interface Settings {
   defaults: { removeImage: boolean };
 }
 
-export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void }) {
+export default function SettingsPage({
+  onOpenAudit,
+  focus,
+}: {
+  onOpenAudit?: () => void;
+  focus?: { tab?: "general" | "network" | "remote" | "publishing" | "citizen"; anchor?: string; nonce: number };
+}) {
   const { mode, accent, setMode, setAccent } = useTheme();
   const [info, setInfo] = useState<Info | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<"general" | "network" | "remote" | "publishing" | "citizen">("general");
+
+  useEffect(() => {
+    if (!focus?.nonce || !focus.tab) return;
+    setTab(focus.tab);
+  }, [focus?.nonce, focus?.tab]);
+
+  useEffect(() => {
+    if (!focus?.nonce || !focus.anchor) return;
+    let n = 0;
+    const timer = window.setInterval(() => {
+      n += 1;
+      const el = document.getElementById(focus.anchor!);
+      if (!el && n < 25) return;
+      window.clearInterval(timer);
+      if (!el) return;
+      el.style.scrollMarginTop = "1.5rem";
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("help-target");
+      window.setTimeout(() => el.classList.remove("help-target"), 1800);
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [focus?.nonce, focus?.anchor, tab]);
 
   const reload = () =>
     api<Settings>("/settings")
@@ -88,7 +117,10 @@ export default function SettingsPage({ onOpenAudit }: { onOpenAudit?: () => void
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Settings</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">Settings</h1>
+          <PageHelp topic="settings" />
+        </div>
         <p className="mt-2 text-sm font-semibold text-ink-2">
           Appearance, this server, names on the network, publishing, remote access, Citizen ID, and agent access.
         </p>
