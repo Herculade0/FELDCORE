@@ -3,7 +3,9 @@ package api
 import (
 	"net/http"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/apps"
+	"github.com/Herculade0/feldcore/internal/docker"
 )
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -35,10 +37,12 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"firewall": view.Firewall, "sshPorts": view.SSHPorts, "listenPort": view.ListenPort,
 			"rules": view.Rules, "sessionHours": hours, "username": user,
 		},
-		"updates":  map[string]any{"unattended": view.Unattended, "updateCheck": view.UpdateCheck},
-		"apps":     map[string]any{"feedURL": feed, "feedDefault": apps.FeedURL},
-		"defaults": map[string]any{"removeImage": view.RemoveImage},
-		"files":    map[string]any{"allowLANURLs": s.auth != nil && s.auth.AllowLANURLs()},
+		"updates":   map[string]any{"unattended": view.Unattended, "updateCheck": view.UpdateCheck},
+		"apps":      map[string]any{"feedURL": feed, "feedDefault": apps.FeedURL},
+		"defaults":  map[string]any{"removeImage": view.RemoveImage},
+		"files":     map[string]any{"allowLANURLs": s.auth != nil && s.auth.AllowLANURLs()},
+		"appliance": appliance.Is(),
+		"nvidia":    docker.HasNVIDIA() || appliance.Is(),
 	})
 }
 

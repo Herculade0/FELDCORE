@@ -1,0 +1,36 @@
+#!/bin/bash
+# Runs only when the kernel command line contains feldcore.smoke.
+# Confirms Docker can start a container and that the UI is answering.
+set -euo pipefail
+
+echo "feldcore-smoke: waiting for dockerd"
+ok=0
+for _ in $(seq 1 90); do
+	if docker info >/dev/null 2>&1; then
+		ok=1
+		break
+	fi
+	sleep 2
+done
+[[ ${ok} == 1 ]] || { echo "feldcore-smoke: dockerd did not start" >&2; exit 1; }
+
+docker pull nginx:alpine
+docker rm -f feldcore-smoke-nginx >/dev/null 2>&1 || true
+docker run -d --name feldcore-smoke-nginx -p 127.0.0.1:8088:80 nginx:alpine
+
+wait_http() {
+	local url=$1
+	local _
+	for _ in $(seq 1 45); do
+		if curl -fsS --max-time 2 "${url}" >/dev/null; then
+			return 0
+		fi
+		sleep 2
+	done
+	echo "feldcore-smoke: timed out waiting for ${url}" >&2
+	return 1
+}
+
+wait_http http://127.0.0.1:8088/
+wait_http http://127.0.0.1:8787/
+echo FELDCORE_SMOKE_OK

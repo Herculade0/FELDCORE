@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/install"
 )
 
@@ -24,6 +25,9 @@ func (e *OpError) Error() string { return e.Msg }
 // install dependable. Users who want Docker's official build can install it
 // themselves and FELDCORE will use it.
 func (m *Manager) Install(ctx context.Context) error {
+	if appliance.Is() {
+		return &OpError{"Docker is part of FELDCORE OS and is not installed from this page."}
+	}
 	if os.Geteuid() != 0 {
 		return &OpError{"FELDCORE must run as root to install Docker."}
 	}

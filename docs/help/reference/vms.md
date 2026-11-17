@@ -22,7 +22,7 @@ The task version is [[help:setup-vm|Set up a VM]]. GPU passthrough is [[help:pas
 
 ## Install
 
-**Install libvirt** on the VMs page, or the libvirt row under Services, installs `qemu-kvm`, `libvirt-daemon-system`, `libvirt-clients`, `qemu-utils`, `ovmf`, and `swtpm`, then starts libvirtd. It stays off when `/proc/cpuinfo` has no `vmx` or `svm` flag.
+**Install libvirt** on the VMs page, or the libvirt row under Services, installs QEMU, OVMF, and a software TPM, then starts libvirtd. On a Debian or Ubuntu host those are apt packages. On FELDCORE OS they are the libvirt extension. It stays off when `/proc/cpuinfo` has no `vmx` or `svm` flag. The browser console is noVNC, which is part of the web UI. There is no separate websockify program.
 
 The page also reads `/dev/kvm` so Start can fail with a clear reason:
 

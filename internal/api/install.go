@@ -7,15 +7,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/backup"
 	"github.com/Herculade0/feldcore/internal/compose"
+	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/install"
 	"github.com/Herculade0/feldcore/internal/store"
 )
 
 // wireInstalls registers every one-shot install behind the shared job runner.
-// The NVIDIA Container Toolkit has no install button in this build, so it is
-// not registered. The design for that button lives in docs/GPU-SELECTION.md.
+// On FELDCORE OS, Docker, Compose, Samba, and NFS are already in the image.
+// libvirt and the NVIDIA Container Toolkit are sysexts.
 func (s *Server) wireInstalls() {
 	s.installs = install.New(install.Deps{Log: s.log, Audit: s.auditInstall})
 	if s.wiz != nil {
@@ -24,6 +26,15 @@ func (s *Server) wireInstalls() {
 			Label: "libvirt / KVM",
 			Apt:   true,
 			Run: func(ctx context.Context, rep install.Reporter) error {
+				if appliance.Is() {
+					if s.os == nil {
+						return errors.New("the libvirt extension is not available from this server")
+					}
+					rep.Step("Installing the libvirt extension")
+					if err := s.os.InstallSysext(ctx, "libvirt", rep.Line); err != nil {
+						return err
+					}
+				}
 				rep.Step("Installing libvirt")
 				return wiz.SaveService(ctx, "libvirt", true)
 			},
@@ -68,6 +79,24 @@ func (s *Server) wireInstalls() {
 		})
 	}
 	s.registerOSJobs()
+	s.installs.Register("nvidia-toolkit", install.Spec{
+		Label: "NVIDIA Container Toolkit",
+		Run: func(ctx context.Context, rep install.Reporter) error {
+			if appliance.Is() {
+				if s.os == nil {
+					return errors.New("the NVIDIA Container Toolkit extension is not available from this server")
+				}
+				rep.Step("Installing the NVIDIA Container Toolkit")
+				if err := s.os.InstallSysext(ctx, "nvidia-container-toolkit", rep.Line); err != nil {
+					return err
+				}
+				rep.Line("Registering the NVIDIA runtime with Docker.")
+				return docker.ConfigureNVIDIARuntime(ctx)
+			}
+			rep.Step("Installing the NVIDIA Container Toolkit")
+			return docker.InstallNVIDIAToolkitDebian(ctx)
+		},
+	})
 	s.installs.Register("compose", install.Spec{
 		Label: "Docker Compose",
 		Apt:   true,

@@ -23,7 +23,7 @@ The Docker page lists every container the engine knows about, with state, a live
 
 ## Install
 
-If the engine is not answering, **Install Docker** runs `apt-get install docker.io` and `systemctl enable --now docker`. It needs root and apt. An engine you installed another way is used as-is once the socket answers.
+On FELDCORE OS the engine is part of the image, so there is no install button. On another host, **Install Docker** runs `apt-get install docker.io` and `systemctl enable --now docker`. It needs root and apt. An engine you installed another way is used as-is once the socket answers.
 
 ## Create and edit
 

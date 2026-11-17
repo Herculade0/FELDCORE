@@ -13,7 +13,7 @@ The appliance image is a GPT disk:
 | ESP (type EF00) | `FC-ESP` | 256 MiB, FAT32 | `/efi` |
 | Slot A (type 8300) | `feldcore-a` | root image plus 128 MiB | `/` when that slot is selected |
 | Slot B (type 8300) | `feldcore-b` | same size as slot A | `/` when that slot is selected |
-| State (type 8300) | `feldcore-state` | 1 GiB, ext4 | `/var/lib/feldcore` |
+| State (type 8300) | `feldcore-state` | 8 GiB, ext4 | `/var/lib/feldcore` |
 
 The type is the generic Linux type, not the discoverable root type. Two partitions of the discoverable root type make gpt-auto pick one of them at random. The kernel command line names the slot instead:
 
@@ -21,7 +21,7 @@ The type is the generic Linux type, not the discoverable root type. Two partitio
 root=LABEL=feldcore-SLOT ro console=tty0 console=ttyS0,115200 feldcore.slot=SLOT feldcore.version=VERSION
 ```
 
-`ro` mounts the root read-only. `/etc/fstab` has no root line, so systemd does not remount it read-write. `/tmp`, `/var/tmp`, `/var/log`, `/var/cache`, `/var/lib/systemd`, and `/home` are tmpfs. The ESP and the state partition are the writable disks.
+`ro` mounts the root read-only. `/etc/fstab` has no root line, so systemd does not remount it read-write. `/tmp`, `/var/tmp`, `/var/log`, `/var/cache`, `/var/lib/systemd`, and `/home` are tmpfs. The ESP and the state partition are the writable disks. After the state partition is mounted, `feldcore-state.service` overlays `/etc` with an upper directory on that partition, so host configuration (Samba, NFS, ufw, hostname, Docker's daemon.json) survives a reboot without making the OS image writable. `/var/lib/samba` and `/var/lib/nfs` are bind-mounted onto the state partition. Docker's data-root is `/var/lib/feldcore/docker` and containerd's root is `/var/lib/feldcore/containerd`.
 
 The first image ships a boot entry for slot A only. Slot B is an empty ext4 filesystem until an update is staged. The state partition is not inside the root image, so an update does not wipe it.
 
@@ -39,7 +39,9 @@ The Updates page rollback does not reboot by itself. It writes the stable entry 
 
 ## What is in the image
 
-The root is Debian 13 (trixie): systemd, the amd64 kernel, systemd-boot, dbus, ca-certificates, iproute2, kmod, e2fsprogs, dosfstools, gdisk, zstd, firmware-linux-free, and tzdata. Recommended packages are not installed. `feldcored` is `/usr/bin/feldcored` and is started by `feldcore.service` with `FELDCORE_DATA_DIR=/var/lib/feldcore`. The package unit in `deploy/feldcore.service` is unchanged and still uses `/usr/local/bin/feldcored`.
+The root is Debian 13 (trixie). The package list is `os/packages.txt` (and the same names in `os/mkosi/mkosi.conf`). It includes systemd, the amd64 kernel, systemd-boot, Docker Engine, containerd, the Compose v2 plugin (`docker-compose`), git, Samba, NFS, restic, rclone, cifs-utils, wireguard-tools, smartmontools, mdadm, btrfs-progs, xfsprogs, hdparm, parted, ufw, rtl-sdr, systemd-timesyncd, pciutils, curl, and GPU firmware from non-free-firmware. Recommended packages are not installed. ZFS is not included. libvirt, QEMU, OVMF, swtpm, virtiofsd, and the NVIDIA Container Toolkit are sysexts, not base packages. A pinned `cloudflared` binary is installed at `/usr/bin/cloudflared`. `feldcored` is `/usr/bin/feldcored` and is started by `feldcore.service` with `FELDCORE_DATA_DIR=/var/lib/feldcore`. The package unit in `deploy/feldcore.service` is unchanged and still uses `/usr/local/bin/feldcored`.
+
+Docker, containerd, and the image smoke unit are enabled. The smoke unit runs only when the kernel command line contains `feldcore.smoke`. `os/smoke.sh --root` checks the root filesystem after the image is applied, and `os/build.sh` runs it before the disk is packed.
 
 `/etc/os-release` and `/etc/feldcore-os-release` say `ID=feldcore` and `SYSEXT_LEVEL=1`. The daemon treats the machine as an appliance only when that id is set. A copy of the daemon installed on a normal Debian system can check a signed release, and it refuses to write a slot.
 
@@ -68,7 +70,9 @@ Useful environment variables:
 | `FELDCORE_OS_OUT` | Output directory. Default `dist/os`. |
 | `FELDCORE_IMAGE_BUILDER` | `debootstrap` (default) or `mkosi`. |
 | `FELDCORE_UPDATE_KEY` | Private key file. When unset, the script generates an ephemeral key under the work directory. |
-| `FELDCORE_ROOT_MIB` | Root filesystem size in MiB. Default `3072`. |
+| `FELDCORE_ROOT_MIB` | Root filesystem size in MiB. Default `6144`. An update refuses a root larger than 8 GiB. |
+| `FELDCORE_STATE_MIB` | State partition size in MiB. Default `8192`. The installer reads this from the payload file `state-mib`. |
+| `FELDCORE_BUILD_SYSEXTS` | Space-separated sysext ids to build into `dist/os/sysexts`. Default `libvirt nvidia-container-toolkit`. Empty skips them. |
 
 The default builder reuses a finished debootstrap tree in the work directory. `mkosi summary` accepts `os/mkosi/mkosi.conf` (Debian trixie, `Format=directory`, `Bootable=no`, the same package list). `FELDCORE_IMAGE_BUILDER=mkosi` builds the root that way and the script then applies the same image files and disk layout. The image booted in this repository's verification was built with debootstrap.
 
@@ -157,7 +161,7 @@ The Settings page still has its own check for a newer `feldcored` binary. That i
 
 A sysext is a squashfs (or another image systemd-sysext accepts) with `/usr/lib/extension-release.d/extension-release.<id>` containing `ID=feldcore` and `SYSEXT_LEVEL=1`. An empty kernel field means the extension is userspace-only. A non-empty kernel must equal the running kernel, because a module's vermagic has to match.
 
-`os/sysext/build-sysext.sh` can pack `libvirt` or `nvidia-container-toolkit` from packages, or a local NVIDIA tree when `FELDCORE_NVIDIA_SYSEXT=1` and `FELDCORE_NVIDIA_DIR` point at files you already have. It does not download the proprietary driver and it is not run by the image build or by CI. The default manifest does not advertise extensions that were not built.
+`os/sysext/build-sysext.sh` packs `libvirt` or `nvidia-container-toolkit` from packages, or a local NVIDIA tree when `FELDCORE_NVIDIA_SYSEXT=1` and `FELDCORE_NVIDIA_DIR` point at files you already have. It does not download the proprietary driver. The image build runs it for the ids in `FELDCORE_BUILD_SYSEXTS` and the manifest advertises the images that were produced. The toolkit packages come from NVIDIA's apt repository at build time. The driver sysext stays a local tree.
 
 NVIDIA, the container toolkit, and libvirt are the examples the manager is meant to show once a release includes them. The GPU notes in `docs/GPU-SELECTION.md` still apply: no DKMS on the running system, and the driver sysext has to match the image kernel.
 
@@ -191,25 +195,23 @@ Publishing requires the `FELDCORE_UPDATE_SIGNING_KEY` secret, which is the unenc
 
 - Secure Boot, shim, and kernel signing are not implemented.
 - The booted image in the verification below is the debootstrap root. The mkosi config is checked with `mkosi summary` and is not what that boot used, unless `FELDCORE_IMAGE_BUILDER=mkosi` was set.
-- No NVIDIA, container-toolkit, or libvirt sysext is built or listed in the default manifest.
+- The NVIDIA kernel driver is not downloaded. The container toolkit and libvirt are userspace sysexts in the default manifest. A driver tree is still a local `FELDCORE_NVIDIA_SYSEXT=1` build.
 - The installer command is in the image. A full install onto a second QEMU disk is not part of the boot check below unless the verification section says it was run.
 - Machine-ids are not unique per clone.
 - The daemon on a non-appliance install shows the Updates page and will not write a slot.
 
-## Verification of the 0.1.0 image
+## Verification
 
-`sudo ./os/qemu.sh` booted `feldcore-os.raw` with KVM and `OVMF_CODE_4M.fd`. systemd reported startup finished in 5.283 seconds (kernel 2.827s, userspace 2.456s). The serial log shows `feldcore-bless: slot a is the good image`, `feldcored listening addr=:8787 data=/var/lib/feldcore`, and the one-time setup code. `curl` of `http://127.0.0.1:8787/` returned the FELDCORE HTML. The setup screen is the first page the guest serves.
+`sudo ./os/boot-test.sh` boots a sparse copy of `feldcore-os.raw` with KVM and `OVMF_CODE_4M.fd`, and adds `feldcore.smoke=1` to the slot A loader entry. The guest smoke unit waits for dockerd, runs `nginx:alpine` on `127.0.0.1:8088`, and requests `:8787`. It prints `FELDCORE_SMOKE_OK` on the serial console. The host then requests `http://127.0.0.1:8787/`.
 
-After that process stopped, the ESP on the same disk had `loader/entries/feldcore-a.conf` and no counted `feldcore-a+3.conf`. `loader.conf` contained `default feldcore-a.conf`. The bless unit had copied the counted entry to the stable name and removed the counter.
+On the image built from this tree, that guest marker appeared and the host received the UI. `os/smoke.sh --root` had already passed during `os/build.sh`. The manifest lists the `libvirt` and `nvidia-container-toolkit` sysexts, with no kernel pin.
 
-The Updates page was exercised on the host with `FELDCORE_OS_ROOT` pointed at a fixture that uses the same daemon, a loopback manifest, and `FELDCORE_UPDATE_ALLOW_LOCAL=1`. Check, Update now, Roll back, and Install on a signed `libvirt` extension all completed, and the audit log recorded `os.update.check`, `os.update.stage`, `os.update.staged`, `os.update.rollback`, and `os.sysext.install`. That fixture is not the QEMU guest. The guest was left on the setup screen.
+These parts were not run end to end on that boot:
 
-The disk that was booted was packed before one later change: when `FELDCORE_OS_ROOT` is set, an extension install does not call the host `systemd-sysext`. The appliance leaves that variable unset, so the booted binary and the current source both run `systemd-sysext refresh` there. A tag build produces the image from the committed source.
-
-These parts were not run end to end:
-
+- The bless unit was not checked afterwards. The guest was stopped when the smoke marker appeared, so the ESP was not inspected for the stable `feldcore-a.conf` rename.
 - The installer disk was assembled and was not booted, and `feldcore-install` was not pointed at a second disk.
-- `mkosi summary` accepted `os/mkosi/mkosi.conf`. The booted root was built with debootstrap.
-- `os/sysext/build-sysext.sh` was not run. The published manifest has no extensions.
+- The booted root was built with debootstrap. `mkosi` was not used for that boot.
+- A libvirt guest was not started. The sysext was built and is in the manifest; it was not merged in the QEMU guest.
+- The NVIDIA toolkit sysext was built from NVIDIA's apt repository. The proprietary driver was not downloaded, and no GPU was present in the guest.
 - Secure Boot stayed off.
 - Every clone of this image shares the machine-id generated at build time.

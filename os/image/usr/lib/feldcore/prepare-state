@@ -1,8 +1,60 @@
 #!/bin/bash
-# Create the directories the state partition holds. The partition itself is
-# mounted from /etc/fstab before this runs.
+# The state partition is already mounted. Docker and containerd keep their
+# data here. /etc is overlaid so host configuration survives the read-only
+# root. /var/lib/samba and /var/lib/nfs are bind-mounted because they are
+# not under /etc.
 set -euo pipefail
-mkdir -p /var/lib/feldcore/sysexts /var/lib/feldcore/updates/incoming
+
+modprobe overlay 2>/dev/null || true
+
+base=/var/lib/feldcore
+mkdir -p \
+	"${base}/sysexts" \
+	"${base}/updates/incoming" \
+	"${base}/docker" \
+	"${base}/containerd" \
+	"${base}/libvirt" \
+	"${base}/cdi" \
+	"${base}/mounts" \
+	"${base}/etc-upper" \
+	"${base}/etc-work" \
+	"${base}/var/samba" \
+	"${base}/var/nfs"
+
 if [[ ! -e /var/lib/extensions ]]; then
-	ln -s /var/lib/feldcore/sysexts /var/lib/extensions
+	ln -s "${base}/sysexts" /var/lib/extensions
 fi
+mkdir -p /var/lib/libvirt
+
+if ! mountpoint -q /etc; then
+	find "${base}/etc-work" -mindepth 1 -delete 2>/dev/null || true
+	mount -t overlay overlay \
+		-o "lowerdir=/etc,upperdir=${base}/etc-upper,workdir=${base}/etc-work" \
+		/etc
+fi
+
+bind_state() {
+	local name=$1
+	local src=/var/lib/${name}
+	local dest=${base}/var/${name}
+	mkdir -p "${src}" "${dest}"
+	if [[ -z $(find "${dest}" -mindepth 1 -print -quit 2>/dev/null) ]]; then
+		cp -a "${src}/." "${dest}/" 2>/dev/null || true
+	fi
+	if ! mountpoint -q "${src}"; then
+		mount --bind "${dest}" "${src}"
+	fi
+}
+
+bind_state samba
+bind_state nfs
+
+if [[ -f /etc/hostname ]]; then
+	hostnamectl set-hostname --static "$(tr -d '[:space:]' </etc/hostname)" || true
+fi
+
+if command -v systemd-sysext >/dev/null 2>&1; then
+	systemd-sysext refresh || true
+fi
+systemctl daemon-reload || true
+systemctl try-reload-or-restart systemd-networkd.service || true

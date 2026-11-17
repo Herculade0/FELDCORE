@@ -23,7 +23,7 @@ Container snapshots are a different thing. They put one container back to an ear
 
 ## Install restic
 
-If restic is missing, the page says so and offers **Install restic**. A destination cannot run until that tool is on the machine. Proton Drive also needs rclone, the same unofficial backend as the Settings card.
+If restic is missing, the page says so and offers **Install restic**. FELDCORE OS already includes restic and rclone. On another host the button tries apt, then a pinned official binary. A destination cannot run until restic is on the machine. Proton Drive also needs rclone.
 
 ## What gets copied
 

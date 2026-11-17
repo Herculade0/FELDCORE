@@ -1,3 +1,8 @@
 libvirt-daemon-system
 libvirt-clients
 qemu-system-x86
+qemu-utils
+ovmf
+swtpm
+swtpm-tools
+virtiofsd

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/install"
 )
 
@@ -41,17 +42,15 @@ func InstallRestic(ctx context.Context, dataDir string) error {
 			return nil
 		}
 	}
-	if os.Geteuid() == 0 {
-		if _, err := exec.LookPath("apt-get"); err == nil {
-			install.Line(ctx, "Installing restic with apt.")
-			if _, err := install.Run(ctx, 8*time.Minute, "apt-get", "update"); err != nil {
-				install.Line(ctx, "apt-get update failed; trying the install anyway.")
-			}
-			if _, err := install.Run(ctx, 15*time.Minute, "apt-get", "install", "-y", "restic"); err == nil {
-				return nil
-			}
-			install.Line(ctx, "apt did not install restic. Downloading the official binary.")
+	if os.Geteuid() == 0 && appliance.RealApt() {
+		install.Line(ctx, "Installing restic with apt.")
+		if _, err := install.Run(ctx, 8*time.Minute, "apt-get", "update"); err != nil {
+			install.Line(ctx, "apt-get update failed; trying the install anyway.")
 		}
+		if _, err := install.Run(ctx, 15*time.Minute, "apt-get", "install", "-y", "restic"); err == nil {
+			return nil
+		}
+		install.Line(ctx, "apt did not install restic. Downloading the official binary.")
 	}
 	return downloadRestic(ctx, dataDir)
 }
