@@ -14,6 +14,7 @@ import (
 
 	"github.com/Herculade0/feldcore/internal/docker"
 	"github.com/Herculade0/feldcore/internal/health"
+	"github.com/Herculade0/feldcore/internal/version"
 	"github.com/Herculade0/feldcore/internal/vm"
 )
 
@@ -27,7 +28,7 @@ const mcpInstructions = "Read-only tools for this FELDCORE server. " +
 func (s *Server) initMCP() {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "feldcore",
-		Version: "0.1.0",
+		Version: version.Current,
 	}, &mcp.ServerOptions{
 		Instructions: mcpInstructions,
 		Logger:       s.log,

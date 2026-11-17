@@ -10,4 +10,4 @@ declare global {
   }
 }
 
-export const VERSION: string = import.meta.env.VITE_FELDCORE_VERSION || "0.1.0";
+export const VERSION: string = import.meta.env.VITE_FELDCORE_VERSION || "0.1.2";

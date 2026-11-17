@@ -60,6 +60,15 @@ func EntryName(slot string, tries int) string {
 	return fmt.Sprintf("feldcore-%s.conf", slot)
 }
 
+// consoleOptions keeps informational printk off the login screen.
+// quiet on its own is log level 4; loglevel=3 follows it on the command
+// line and wins, so KERN_INFO lines (bridge, XFRM, EVM) do not paint over
+// tty1. ttyS0 stays last, which makes /dev/console the serial port.
+// Debian 13's kernel has no per-console log level, so this applies to
+// both consoles. Journal messages still go to ttyS0 via journald.
+// The boot counter is the entry file name, not this line.
+const consoleOptions = "quiet loglevel=3 console=tty0 console=ttyS0,115200"
+
 // EntryBody is the type-1 entry systemd-boot reads.
 func EntryBody(slot, version string) string {
 	return fmt.Sprintf(`title FELDCORE %s
@@ -67,8 +76,8 @@ version %s
 sort-key feldcore
 linux /feldcore/%s/vmlinuz
 initrd /feldcore/%s/initrd.img
-options root=LABEL=feldcore-%s ro console=tty0 console=ttyS0,115200 feldcore.slot=%s feldcore.version=%s
-`, version, version, slot, slot, slot, slot, version)
+options root=LABEL=feldcore-%s ro %s feldcore.slot=%s feldcore.version=%s
+`, version, version, slot, slot, slot, consoleOptions, slot, version)
 }
 
 // ParseEntryBody fills Version and SortKey from the entry text.

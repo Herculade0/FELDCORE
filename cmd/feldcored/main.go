@@ -18,9 +18,11 @@ import (
 	"time"
 
 	"github.com/Herculade0/feldcore/internal/api"
+	"github.com/Herculade0/feldcore/internal/appliance"
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/banner"
 	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/config"
 	"github.com/Herculade0/feldcore/internal/docker"
@@ -309,6 +311,21 @@ func main() {
 	} else if code != "" {
 		fmt.Fprintf(os.Stdout, "FELDCORE setup code: %s\n", setup.FormatCode(code))
 		log.Info("enter the setup code above on the first-start screen; it works once")
+	}
+	// The stdout line scrolls off tty1, and noVNC has no scrollback. On the
+	// appliance, keep the code and the URL in /etc/issue, which agetty
+	// reprints on every login prompt. A non-appliance install leaves the
+	// host's issue file alone.
+	if appliance.Is() {
+		next, refresh := banner.NewRefresher()
+		go banner.Watch(ctx, banner.Options{
+			Port:       listenPort(cfg.ListenAddr),
+			ListenAddr: cfg.ListenAddr,
+			Code:       wiz.CurrentCode,
+			Log:        log,
+			Refresh:    refresh,
+			NextRedraw: next,
+		})
 	}
 
 	httpSrv := &http.Server{

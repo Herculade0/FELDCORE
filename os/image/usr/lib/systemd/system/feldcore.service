@@ -11,8 +11,10 @@ ExecStart=/usr/bin/feldcored
 Environment=FELDCORE_DATA_DIR=/var/lib/feldcore
 Restart=on-failure
 RestartSec=2
-StandardOutput=journal+console
-StandardError=journal+console
+# stdout stays in the journal. journald forwards that to ttyS0 only, so
+# the setup-code line does not paint over the tty1 login banner.
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
