@@ -107,7 +107,7 @@ A guest can still be defined. Start is refused with that same explanation.
 
 ## Paths
 
-Domains and ISOs default to the `domains` and `isos` shares (`/srv/feldcore/…`
+Domains and ISOs default to the `domains` and `isos` shares (`/mnt/feldcore/data/…`
 on a stock install). VM Manager settings can point them at another absolute
 folder. `/etc`, `/boot`, `/usr` and the other operating-system directories are
 refused. Disk files a guest already has are never shrunk. Deleting a VM

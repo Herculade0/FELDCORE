@@ -27,7 +27,7 @@ Filing a report is not a destructive action. It does not go through the phase 2 
 A locked share named `internal-affairs`, under the shares root. On a default install that is:
 
 ```text
-/srv/feldcore/internal-affairs
+/mnt/feldcore/data/internal-affairs
 ```
 
 The shares root is the wizard's folder, or `-shares-root` / `FELDCORE_SHARES_ROOT`. The cabinet follows that root the same way `appdata` does. It is not stored in `/var/lib/feldcore/state.json`. Reports would make that file huge, and the atomic JSON rewrite is the wrong tool for a folder of Markdown.
@@ -447,7 +447,7 @@ Same layout language as the Audit page: a title, one sentence, a card, rows.
 
 **Obsidian hint,** under the timeline, in ordinary language:
 
-> The files are in `/srv/feldcore/internal-affairs` (use the real path). You can open that folder as an Obsidian vault. Leave the vault read-only. An edit in Obsidian is not a filing, and Internal Affairs will mark the cabinet as tampered and pause new reports.
+> The files are in `/mnt/feldcore/data/internal-affairs` (use the real path). You can open that folder as an Obsidian vault. Leave the vault read-only. An edit in Obsidian is not a filing, and Internal Affairs will mark the cabinet as tampered and pause new reports.
 
 While sharing is off, the hint says the folder is on this server and is not shared on the network. It does not tell the owner to turn on guest access.
 

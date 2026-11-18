@@ -82,6 +82,11 @@ func (s *Service) create(ctx context.Context, in CreatePool) (Pool, error) {
 	if err := emptyDir(mount); err != nil {
 		return Pool{}, err
 	}
+	// Create the mount folder before mkfs. A read-only parent must fail
+	// while the disks are still intact.
+	if err := mkdirAll(mount, 0o755); err != nil {
+		return Pool{}, op("Could not create the mount folder.")
+	}
 	devs := make([]string, len(chosen))
 	for i, d := range chosen {
 		devs[i] = d.Path
@@ -102,9 +107,6 @@ func (s *Service) create(ctx context.Context, in CreatePool) (Pool, error) {
 	}
 	if err != nil {
 		return Pool{}, err
-	}
-	if err := os.MkdirAll(mount, 0o755); err != nil {
-		return Pool{}, op("Could not create the mount folder.")
 	}
 	if in.FS == FSBtrfs {
 		// Register every member with the kernel before the UUID mount.
@@ -438,7 +440,7 @@ func (s *Service) mountRecorded(ctx context.Context, rec poolRec) error {
 	if err != nil || !strings.EqualFold(got, rec.UUID) {
 		return input("The pool's UUID was not found on its disks. FELDCORE will not mount anything else.")
 	}
-	if err := os.MkdirAll(rec.Mount, 0o755); err != nil {
+	if err := mkdirAll(rec.Mount, 0o755); err != nil {
 		return op("Could not create the mount folder.")
 	}
 	bin, args, err := MountArgs(rec.FS, rec.UUID, rec.Mount)

@@ -57,7 +57,7 @@ On a 512 GiB disk the four partitions plus the 1 MiB primary GPT occupy 20993 Mi
 
 `docs/ROADMAP.md` treats that partition as the config copy. Data, appdata, and VM disks are supposed to stay off it. An update does not pack state into the slot image.
 
-`/srv` is on the read-only root. The default shares root is `/srv/feldcore` (`internal/config/config.go`, `-shares-root` / `FELDCORE_SHARES_ROOT`). On the appliance, creating share directories there fails with a read-only filesystem. `EnsureDefaults` logs and returns. The four default share names are `appdata`, `system`, `domains`, and `isos`.
+`/srv` is on the read-only root and is not a shares location. The default shares root is `/mnt/feldcore/data` (`internal/config/config.go`, `-shares-root` / `FELDCORE_SHARES_ROOT`). `/mnt/feldcore` is a bind of `/var/lib/feldcore/mnt`, so the mount point can be created while the root is read-only. The data disk is mounted at that folder, and the files live on the data disk, not on the 8 GiB state partition. The four default share names are `appdata`, `system`, `domains`, and `isos`.
 
 ### How slots and state are found
 
@@ -102,7 +102,7 @@ One existing detail the data partition must not make worse: `make_root_image` la
 
 There is no Imager and no answer file in this repository. GitHub code search on `Herculade0/FELDCORE` for an imager or an answer file returns nothing. The answer file below is the contract an Imager would write. The installer is the reader. The disk to wipe is still the `--yes` argument or `feldcore.install=`.
 
-`cmd/feldcored/main.go` starts `EnsureDefaults` in a goroutine before `storage.Open`. `Restore` runs later and only mounts pools already in `storage.json`. An adopt step has to finish, and the shares root has to move, before `EnsureDefaults` runs. Otherwise the headless path tries to create `appdata` on the read-only root and never retries.
+`cmd/feldcored/main.go` starts `EnsureDefaults` in a goroutine before `storage.Open`. `Restore` runs later and only mounts pools already in `storage.json`. An adopt step has to finish, and the shares root has to move, before `EnsureDefaults` runs. Otherwise the headless path creates `appdata` at the default `/mnt/feldcore/data/appdata` before the data disk is mounted. That directory is on the state bind, and the later mount hides it. `EnsureDefaults` does not retry.
 
 ## 1. Options
 
@@ -126,7 +126,7 @@ Create partition 4 at `state-mib` from the payload is replaced by "the rest of t
 Consequences:
 
 - fstab and `feldcore-state.service` keep working, because they key on the label and the mount point. An update still does not open the partition.
-- The Storage page does not gain a pool. `SetCache`, scrub, trim, and `AddDisk` do not apply. Shares stay on `/srv/feldcore` unless something else moves them, and that directory is on the read-only root.
+- The Storage page does not gain a pool. `SetCache`, scrub, trim, and `AddDisk` do not apply. The default shares folder is still `/mnt/feldcore/data`. Without a separate data disk, a folder kept there sits on the state partition, because `/mnt/feldcore` is a bind of `/var/lib/feldcore/mnt`.
 - Docker images, containerd content, sysexts, the `/etc` overlay, incoming update files, and the operator's bulk data share one filesystem. Filling the data area stops config writes, extension installs, and update staging. `docs/OS-IMAGE.md` already says the state partition is too small to cache a root image; making it large does not make it the right cache, because a full state partition takes the appliance down with it.
 - A copy of the config partition, which the roadmap describes as the thing you restore to get settings back, becomes a copy of the array.
 - `FELDCORE_STATE_MIB` stops meaning the partition size. Any tool that sizes state from `state-mib` (the installer does) has to grow a special case.
@@ -315,7 +315,7 @@ There is no Imager in this repo. An Imager that appears later drops `answers.jso
 
 Deleting `data-pool.json` and rebooting lets `claim-data --boot` create the partition. That is the undo for a decline, until a Storage-page action exists.
 
-The wizard, when pool `data` is already recorded and the storage step has no saved mode, opens on mode `pool` / name `data` instead of `keep`. Applying that path mounts the pool and sets the shares root, which adopt may already have done. An operator can still pick another pool or a folder. Picking `/srv/feldcore` on the appliance hits the existing "on the operating-system disk" warning, and the directory cannot be created because the root is read-only. The plan text for that case should say the root is read-only. The pool remains on the Storage page either way.
+The wizard, when pool `data` is already recorded and the storage step has no saved mode, opens on mode `pool` / name `data` instead of `keep`. Applying that path mounts the pool and sets the shares root, which adopt may already have done. An operator can still pick another pool or a folder. Picking `/srv/feldcore` is refused: that folder is on the read-only operating-system image, and the plan tells the operator to choose a folder under `/mnt/feldcore`. The pool remains on the Storage page either way.
 
 `-skip-wizard` never shows the step. Adopt's shares-root write is what the headless path uses, and only when the shares root was not forced and `state.json` does not already have one.
 

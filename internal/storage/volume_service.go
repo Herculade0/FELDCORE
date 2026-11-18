@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"math"
-	"os"
 	"strings"
 	"time"
 )
@@ -74,13 +73,14 @@ func (s *Service) Apply(ctx context.Context, in Choice) (string, error) {
 		s.note(ctx, "storage.setup.format", device, "error")
 		return "", err
 	}
+	// Create the mount folder before mkfs. A read-only parent must fail
+	// while the disk is still intact.
+	if err := s.ensureSetupDir(mount); err != nil {
+		return "", err
+	}
 	if _, err := s.run.Run(ctx, 10*time.Minute, "mkfs.ext4", "-F", "-L", "feldcore", device); err != nil {
 		s.note(ctx, "storage.setup.format", device, "error")
 		return "", op("Could not format " + device + ": " + err.Error())
-	}
-	if err := s.ensureSetupDir(mount); err != nil {
-		s.note(ctx, "storage.setup.format", device, "error")
-		return "", err
 	}
 	if _, err := s.run.Run(ctx, 30*time.Second, "mount", device, mount); err != nil {
 		s.note(ctx, "storage.setup.format", device, "error")
@@ -107,6 +107,9 @@ func (s *Service) planExistingPool(in Choice) (Plan, bool, error) {
 	if !ok {
 		return Plan{}, false, nil
 	}
+	if err := CheckMountCreatable(rec.Mount); err != nil {
+		return Plan{}, true, err
+	}
 	return Plan{
 		Mount: rec.Mount,
 		Lines: []string{
@@ -120,6 +123,9 @@ func (s *Service) applyExistingPool(ctx context.Context, in Choice) (string, boo
 	rec, ok := s.knownPool(in)
 	if !ok {
 		return "", false, nil
+	}
+	if err := CheckMountCreatable(rec.Mount); err != nil {
+		return "", true, err
 	}
 	if err := s.Mount(ctx, rec.Name); err != nil {
 		return "", true, err
@@ -160,7 +166,7 @@ func (s *Service) ensureSetupDir(mount string) error {
 	if !s.applySystem {
 		return nil
 	}
-	if err := os.MkdirAll(mount, 0o755); err != nil {
+	if err := mkdirAll(mount, 0o755); err != nil {
 		return op("Could not create " + mount + ": " + err.Error())
 	}
 	return nil

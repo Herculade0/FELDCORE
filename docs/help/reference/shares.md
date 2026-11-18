@@ -12,7 +12,7 @@ related:
 references: []
 ---
 
-A share is a directory FELDCORE created under the shares root, plus the Samba and NFS config it writes for that directory. The default root is `/srv/feldcore`. Config is written as a drop-in, next to anything you edited by hand, and the services are reloaded through systemd.
+A share is a directory FELDCORE created under the shares root, plus the Samba and NFS config it writes for that directory. The default root is `/mnt/feldcore/data`. Config is written as a drop-in, next to anything you edited by hand, and the services are reloaded through systemd.
 
 The task-shaped version of this is [[help:share-files|Share files]].
 

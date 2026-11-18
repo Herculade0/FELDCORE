@@ -226,7 +226,7 @@ func dnsServers() []string {
 func (s *Service) checkRoot(path string) error {
 	path = strings.TrimSpace(path)
 	if path == "" || !strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
-		return fmt.Errorf("choose an absolute folder, for example /srv/feldcore")
+		return fmt.Errorf("choose an absolute folder, for example /mnt/feldcore/data")
 	}
 	return nil
 }

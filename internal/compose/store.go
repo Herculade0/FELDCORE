@@ -66,7 +66,7 @@ func (s *Service) pathInfo() PathInfo {
 	}
 	root := s.shares
 	if strings.TrimSpace(root) == "" {
-		root = "/srv/feldcore"
+		root = "/mnt/feldcore/data"
 	}
 	return PathInfo{SharesRoot: root}
 }

@@ -88,7 +88,7 @@ func Load() *Config {
 		"address to listen on (host:port)")
 	flag.StringVar(&c.DataDir, "data-dir", envOr("FELDCORE_DATA_DIR", "/var/lib/feldcore"),
 		"directory for FELDCORE state")
-	flag.StringVar(&c.SharesRoot, "shares-root", envOr("FELDCORE_SHARES_ROOT", "/srv/feldcore"),
+	flag.StringVar(&c.SharesRoot, "shares-root", envOr("FELDCORE_SHARES_ROOT", "/mnt/feldcore/data"),
 		"directory under which share folders are created")
 	flag.BoolVar(&c.DefaultShares, "default-shares", envBool("FELDCORE_DEFAULT_SHARES", true),
 		"create Unraid's default shares (appdata, system, domains, isos) when missing")

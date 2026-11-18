@@ -230,7 +230,7 @@ func (s *Service) defaultAppdata() string {
 		return p
 	}
 	if s.sharesRoot == "" {
-		return "/srv/feldcore/appdata"
+		return "/mnt/feldcore/data/appdata"
 	}
 	return filepath.Join(s.sharesRoot, "appdata")
 }

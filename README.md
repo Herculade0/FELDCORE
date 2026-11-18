@@ -296,7 +296,7 @@ changes when an image is swapped. State is still
 `/var/lib/feldcore/state.json`.
 
 - State lives in `/var/lib/feldcore/state.json` (root-only).
-- Share folders are created under `/srv/feldcore` (`-shares-root` to change).
+- Share folders are created under `/mnt/feldcore/data` (`-shares-root` to change).
 - On a fresh install the setup wizard creates Unraid's four default shares
   when you finish: `appdata`, `system`, `domains` and `isos`. SMB and NFS
   are left off, so nothing is exported until you turn a protocol on.

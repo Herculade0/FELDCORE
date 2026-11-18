@@ -248,7 +248,7 @@ func (s *Service) localRoot(dest Destination) (string, error) {
 	if dest.Share != "" {
 		root := s.SharesRoot
 		if strings.TrimSpace(root) == "" {
-			root = "/srv/feldcore"
+			root = "/mnt/feldcore/data"
 		}
 		p := filepath.Join(root, dest.Share)
 		if dest.Path != "" {

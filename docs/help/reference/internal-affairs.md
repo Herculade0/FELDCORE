@@ -20,7 +20,7 @@ The audit log is the automatic list of API and MCP calls. Internal Affairs would
 
 ## What the design says
 
-Reports would be ordinary Markdown files in a locked share named `internal-affairs`, under the shares root. On a default install that is `/srv/feldcore/internal-affairs`. Agents could add a report and append to one they filed. They could not rewrite or delete what is already written. You would read them in the web UI, file a note of your own, and be the only one who can redact.
+Reports would be ordinary Markdown files in a locked share named `internal-affairs`, under the shares root. On a default install that is `/mnt/feldcore/data/internal-affairs`. Agents could add a report and append to one they filed. They could not rewrite or delete what is already written. You would read them in the web UI, file a note of your own, and be the only one who can redact.
 
 The scopes would be `ia:file` and `ia:read`. They are not included in `admin`, and they are not on the Agent access card today. An existing admin token would not gain them when this ships. `read` would not include `ia:read`.
 

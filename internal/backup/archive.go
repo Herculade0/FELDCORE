@@ -553,7 +553,7 @@ func (s *Service) insideData(p string) bool {
 func (s *Service) restoreRoots() []string {
 	root := strings.TrimSpace(s.SharesRoot)
 	if root == "" {
-		root = "/srv/feldcore"
+		root = "/mnt/feldcore/data"
 	}
 	roots := []string{root, s.appdataDir()}
 	roots = append(roots,
@@ -570,7 +570,7 @@ func (s *Service) restoreRoots() []string {
 func (s *Service) composePresent() bool {
 	root := s.SharesRoot
 	if strings.TrimSpace(root) == "" {
-		root = "/srv/feldcore"
+		root = "/mnt/feldcore/data"
 	}
 	return dirExists(filepathJoin(s.DataDir, "compose")) || dirExists(filepathJoin(root, "compose")) || dirExists(filepathJoin(root, "stacks"))
 }
