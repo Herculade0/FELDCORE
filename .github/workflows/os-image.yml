@@ -33,7 +33,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             debootstrap debian-archive-keyring \
             gdisk dosfstools e2fsprogs mtools zstd \
-            qemu-utils rsync squashfs-tools gnupg curl ca-certificates \
+            qemu-utils rsync squashfs-tools gnupg curl ca-certificates jq \
             xorriso grub-efi-amd64-bin grub-common
 
       - name: Write the signing key outside the repository
@@ -75,6 +75,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check every sysext the manifest lists was built
+        run: ./os/check-sysexts.sh dist/os
+
       - uses: actions/upload-artifact@v4
         with:
           name: feldcore-os
@@ -88,6 +91,7 @@ jobs:
             dist/os/feldcore-os.json
             dist/os/feldcore-os.json.minisig
             dist/os/update.pub
+            dist/os/sysexts/*.raw
           if-no-files-found: error
 
       - name: Require the signing key before publishing
@@ -112,3 +116,4 @@ jobs:
             dist/os/feldcore-os.json
             dist/os/feldcore-os.json.minisig
             dist/os/update.pub
+            dist/os/sysexts/*.raw
