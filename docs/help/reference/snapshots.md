@@ -26,7 +26,7 @@ FELDCORE also snapshots automatically before a container is updated, recreated, 
 
 ## Where the files go
 
-The default folder is the **system** share: `/srv/feldcore/system/snapshots/<container>/<id>/`, or under whatever shares root a wizard picked. Each snapshot is a directory with `snapshot.json` (mode `0600`, because the template can contain app passwords) and either archives or filesystem snapshots.
+The default folder is the **system** share: `/mnt/feldcore/data/system/snapshots/<container>/<id>/`, or under whatever shares root a wizard picked. Each snapshot is a directory with `snapshot.json` (mode `0600`, because the template can contain app passwords) and either archives or filesystem snapshots.
 
 [[route:settings.snapshots|Open snapshot settings]]
 

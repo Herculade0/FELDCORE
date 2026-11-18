@@ -20,7 +20,7 @@ FELDCORE also takes a snapshot automatically before a container is updated, recr
 
 ## Where the files go
 
-The default folder is the **system** share: `/srv/feldcore/system/snapshots/<container>/<id>/`. A wizard that picked a different shares root is honoured. Each snapshot is a directory with `snapshot.json` (mode `0600`, because the template can contain app passwords) and either archives or filesystem snapshots.
+The default folder is the **system** share: `/mnt/feldcore/data/system/snapshots/<container>/<id>/`. A wizard that picked a different shares root is honoured. Each snapshot is a directory with `snapshot.json` (mode `0600`, because the template can contain app passwords) and either archives or filesystem snapshots.
 
 The panel and **Settings → General → Snapshots** show how much space the copies use and how much is free on that disk.
 

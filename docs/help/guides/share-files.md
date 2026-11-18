@@ -13,7 +13,7 @@ references:
   - shares
 ---
 
-A share is a folder on this server that other computers can open. On a stock install the folders live under `/srv/feldcore`. A wizard that picked another shares root is honoured.
+A share is a folder on this server that other computers can open. On a stock install the folders live under `/mnt/feldcore/data`. A wizard that picked another shares root is honoured.
 
 ## Create one
 

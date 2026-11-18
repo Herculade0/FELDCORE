@@ -2,6 +2,10 @@
 # It is intentionally absent here so systemd-remount-fs does not make it writable.
 LABEL=FC-ESP          /efi                 vfat  umask=0077,nofail                    0 2
 LABEL=feldcore-state  /var/lib/feldcore    ext4  defaults,nofail,x-systemd.mkdir     0 2
+# Writable parent for data-disk mount points. The bind covers only this
+# directory, not all of /mnt. Share files live on the filesystem mounted
+# underneath it, not on the 8 GiB state partition.
+/var/lib/feldcore/mnt  /mnt/feldcore  none  bind,nofail,x-systemd.requires=var-lib-feldcore.mount  0 0
 tmpfs                 /tmp                 tmpfs nosuid,nodev,mode=1777             0 0
 tmpfs                 /var/tmp             tmpfs nosuid,nodev,mode=1777             0 0
 tmpfs                 /var/log             tmpfs nosuid,nodev                       0 0

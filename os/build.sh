@@ -402,6 +402,9 @@ EOF
 		"${rootfs}/etc/systemd/system/multi-user.target.wants/feldcore-wifi.service"
 	remove_rootfs_paths "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/run" "${rootfs}/tmp"
 	sudo mkdir -p "${rootfs}/proc" "${rootfs}/sys" "${rootfs}/dev" "${rootfs}/run" "${rootfs}/tmp" "${rootfs}/root" "${rootfs}/home"
+	# Mount point for the state bind. It has to exist on the read-only root
+	# before systemd can mount /var/lib/feldcore/mnt over it.
+	sudo mkdir -p "${rootfs}/mnt/feldcore"
 	sudo chmod 1777 "${rootfs}/tmp"
 }
 

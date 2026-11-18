@@ -8,6 +8,8 @@ set -euo pipefail
 modprobe overlay 2>/dev/null || true
 
 base=/var/lib/feldcore
+# mnt is the source of the early /mnt/feldcore bind. The mount unit creates
+# it before local-fs; this only recreates it if that directory was removed.
 mkdir -p \
 	"${base}/sysexts" \
 	"${base}/updates/incoming" \
@@ -16,6 +18,7 @@ mkdir -p \
 	"${base}/libvirt" \
 	"${base}/cdi" \
 	"${base}/mounts" \
+	"${base}/mnt" \
 	"${base}/etc-upper" \
 	"${base}/etc-work" \
 	"${base}/var/samba" \

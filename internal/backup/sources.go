@@ -213,7 +213,7 @@ func (s *Service) domainsDir() string {
 	}
 	root := s.SharesRoot
 	if strings.TrimSpace(root) == "" {
-		root = "/srv/feldcore"
+		root = "/mnt/feldcore/data"
 	}
 	return filepath.Join(root, "domains")
 }
@@ -221,7 +221,7 @@ func (s *Service) domainsDir() string {
 func (s *Service) iaDir() string {
 	root := s.SharesRoot
 	if strings.TrimSpace(root) == "" {
-		root = "/srv/feldcore"
+		root = "/mnt/feldcore/data"
 	}
 	return filepath.Join(root, "internal-affairs")
 }
@@ -251,7 +251,7 @@ func (s *Service) composeDirs(ctx context.Context) []string {
 	}
 	root := s.SharesRoot
 	if strings.TrimSpace(root) == "" {
-		root = "/srv/feldcore"
+		root = "/mnt/feldcore/data"
 	}
 	cands := []string{
 		filepath.Join(s.DataDir, "compose"),

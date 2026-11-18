@@ -94,6 +94,52 @@ func TestImageKeepsSlotLayoutAndLocksSSH(t *testing.T) {
 	}
 }
 
+func TestDataMountParentIsWritableEarly(t *testing.T) {
+	root := repoRoot(t)
+	fstab, err := os.ReadFile(filepath.Join(root, "os", "image", "etc", "fstab"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const bind = "/var/lib/feldcore/mnt  /mnt/feldcore  none  bind,nofail,x-systemd.requires=var-lib-feldcore.mount  0 0"
+	if !strings.Contains(string(fstab), bind) {
+		t.Fatalf("fstab missing data-mount bind:\n%s", fstab)
+	}
+	for _, line := range strings.Split(string(fstab), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && !strings.HasPrefix(strings.TrimSpace(line), "#") && fields[1] == "/" {
+			t.Fatalf("fstab mounts the root filesystem: %s", line)
+		}
+	}
+	tmpfiles, err := os.ReadFile(filepath.Join(root, "os", "image", "usr", "lib", "tmpfiles.d", "feldcore-mnt.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(tmpfiles), "d /var/lib/feldcore/mnt 0755 root root -") {
+		t.Fatalf("tmpfiles: %s", tmpfiles)
+	}
+	drop, err := os.ReadFile(filepath.Join(root, "os", "image", "usr", "lib", "systemd", "system", "mnt-feldcore.mount.d", "create-source.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(drop), "ExecStartPre=/bin/mkdir -p -m 0755 /var/lib/feldcore/mnt") {
+		t.Fatalf("mount drop-in: %s", drop)
+	}
+	build, err := os.ReadFile(filepath.Join(root, "os", "build.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(build), `sudo mkdir -p "${rootfs}/mnt/feldcore"`) {
+		t.Fatal("build.sh does not create /mnt/feldcore")
+	}
+	prep, err := os.ReadFile(filepath.Join(root, "os", "image", "usr", "lib", "feldcore", "prepare-state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prep), `"${base}/mnt"`) {
+		t.Fatal("prepare-state does not create the bind source")
+	}
+}
+
 func assembleBody(t *testing.T, script, name string) string {
 	t.Helper()
 	start := strings.Index(script, name+"() {")

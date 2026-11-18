@@ -74,14 +74,14 @@ export default function VMSettings({ onBack }: { onBack: () => void }) {
             label="Domains"
             value={domains}
             onChange={(e) => setDomains(e.target.value)}
-            placeholder={paths?.domainsDefault || "/srv/feldcore/domains"}
+            placeholder={paths?.domainsDefault || "/mnt/feldcore/data/domains"}
             hint="Virtual disks are created here, one folder per VM."
           />
           <TextField
             label="ISOs"
             value={isos}
             onChange={(e) => setIsos(e.target.value)}
-            placeholder={paths?.isosDefault || "/srv/feldcore/isos"}
+            placeholder={paths?.isosDefault || "/mnt/feldcore/data/isos"}
             hint="Install media and VirtIO driver ISOs are picked from here."
           />
         </div>

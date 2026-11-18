@@ -519,6 +519,9 @@ func (s *Service) planStorage(ctx context.Context, req Request) (lines []string,
 		if err = s.checkRoot(mount); err != nil {
 			return
 		}
+		if err = storage.CheckMountCreatable(mount); err != nil {
+			return
+		}
 		lines = []string{"Store shares under " + mount + ". Nothing will be formatted."}
 		if OnOSDisk(mount, s.mounts(ctx)) {
 			warn = "That folder is on the operating-system disk. Filling it up can stop the server booting. A separate disk is safer."
@@ -552,6 +555,9 @@ func (s *Service) applyStorage(ctx context.Context, req Request) (string, error)
 			return "", &OpError{"Disk management is not available."}
 		}
 		if err := s.checkRoot(mount); err != nil {
+			return "", &InputError{err.Error()}
+		}
+		if err := storage.CheckMountCreatable(mount); err != nil {
 			return "", &InputError{err.Error()}
 		}
 		if err := s.setSharesRoot(mount); err != nil {

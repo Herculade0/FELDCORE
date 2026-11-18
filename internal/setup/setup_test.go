@@ -213,7 +213,7 @@ func TestVirtAndOSDisk(t *testing.T) {
 		t.Fatal("virt detection")
 	}
 	mounts := []Mount{{Path: "/", Device: "/dev/sda1", OS: true}, {Path: "/mnt/data", Device: "/dev/sdb1"}}
-	if !OnOSDisk("/srv/feldcore", mounts) || OnOSDisk("/mnt/data/shares", mounts) {
+	if !OnOSDisk("/etc/feldcore", mounts) || OnOSDisk("/mnt/data/shares", mounts) {
 		t.Fatal("os disk warning")
 	}
 }

@@ -68,7 +68,7 @@ func rewriteUnraidPath(p string, m PathInfo) (string, bool) {
 	}
 	root := strings.TrimSpace(m.SharesRoot)
 	if root == "" {
-		root = "/srv/feldcore"
+		root = "/mnt/feldcore/data"
 	}
 	rest := sub[2]
 	if rest == "" {

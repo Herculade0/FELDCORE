@@ -78,7 +78,8 @@ type Volume interface {
 }
 
 // Describe builds a plan from an already-loaded inventory. It does not
-// touch the machine.
+// format or mount. It does probe whether the folder can be created, and
+// refuses a parent on the read-only operating-system image.
 func Describe(disks []SetupDisk, in Choice) (Plan, error) {
 	mode := strings.TrimSpace(in.Mode)
 	if mode == "" {
@@ -88,6 +89,9 @@ func Describe(disks []SetupDisk, in Choice) (Plan, error) {
 	case "keep":
 		mount, err := cleanMount(in.Mount)
 		if err != nil {
+			return Plan{}, err
+		}
+		if err := CheckMountCreatable(mount); err != nil {
 			return Plan{}, err
 		}
 		p := Plan{
@@ -132,6 +136,9 @@ func describePool(disks []SetupDisk, in Choice) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
+	if err := CheckMountCreatable(mount); err != nil {
+		return Plan{}, err
+	}
 	p := Plan{
 		Mount: mount,
 		Lines: []string{
@@ -174,8 +181,11 @@ func describeDisk(disks []SetupDisk, in Choice) (Plan, error) {
 		if fsName != "ext4" {
 			return Plan{}, input("Setup can format a single disk as ext4. Other layouts belong to disk management.")
 		}
-		mount, err := cleanMount(firstNonEmpty(in.Mount, "/mnt/feldcore"))
+		mount, err := cleanMount(firstNonEmpty(in.Mount, "/mnt/feldcore/data"))
 		if err != nil {
+			return Plan{}, err
+		}
+		if err := CheckMountCreatable(mount); err != nil {
 			return Plan{}, err
 		}
 		phrase := "ERASE " + name
@@ -195,6 +205,9 @@ func describeDisk(disks []SetupDisk, in Choice) (Plan, error) {
 	}
 	if mountPoint == "" {
 		return Plan{}, input(selected + " has no filesystem mounted. Format it, or choose a folder that is already mounted.")
+	}
+	if err := CheckMountCreatable(mountPoint); err != nil {
+		return Plan{}, err
 	}
 	return Plan{
 		Mount: mountPoint,
@@ -268,7 +281,7 @@ func onOS(mount string, disks []SetupDisk) bool {
 func cleanMount(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" || !strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
-		return "", input("Choose an absolute folder, for example /mnt/feldcore.")
+		return "", input("Choose an absolute folder, for example /mnt/feldcore/data.")
 	}
 	if strings.ContainsAny(path, " \t\n\r") {
 		return "", input("The folder path cannot contain spaces.")

@@ -54,7 +54,7 @@ Installing the CLI is a separate apt job named `compose`. It tries `docker-compo
 
 ## Unraid and Portainer
 
-The editor can rewrite `/mnt/user`, `/mnt/user0`, `/mnt/cache` and `/mnt/diskN` onto this server's shares (default `/srv/feldcore/<share>`). A share FELDCORE already has uses that share's real folder. The obsolete `version:` key is accepted and ignored. JSON that is also valid YAML is accepted. Unraid labels are kept.
+The editor can rewrite `/mnt/user`, `/mnt/user0`, `/mnt/cache` and `/mnt/diskN` onto this server's shares (default `/mnt/feldcore/data/<share>`). A share FELDCORE already has uses that share's real folder. The obsolete `version:` key is accepted and ignored. JSON that is also valid YAML is accepted. Unraid labels are kept.
 
 ## Convert a container
 

@@ -150,7 +150,7 @@ export default function Wizard({
   const [address, setAddress] = useState("");
   const [gateway, setGateway] = useState("");
   const [dns, setDns] = useState("");
-  const [root, setRoot] = useState("/srv/feldcore");
+  const [root, setRoot] = useState("/mnt/feldcore/data");
   const [storageMode, setStorageMode] = useState("keep");
   const [device, setDevice] = useState("");
   const [pool, setPool] = useState("");
@@ -207,7 +207,7 @@ export default function Wizard({
     setNetMode(view.netMode || "dhcp");
     setGateway(view.gateway || "");
     setDns((view.dns ?? []).join(" "));
-    setRoot(view.sharesRoot || "/srv/feldcore");
+    setRoot(view.sharesRoot || "/mnt/feldcore/data");
     setStorageMode(view.storageMode || "keep");
     setDevice(view.storageDevice || "");
     setPool(view.storagePool || "");

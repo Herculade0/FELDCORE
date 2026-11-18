@@ -71,11 +71,13 @@ func (l *Linux) Apply(ctx context.Context, in Choice) (string, error) {
 	if !strings.HasPrefix(device, "/dev/") {
 		device = "/dev/" + device
 	}
-	if _, err := l.cmd.Run(ctx, "mkfs.ext4", "-F", "-L", "feldcore", device); err != nil {
-		return "", op("Could not format " + device + ": " + err.Error())
-	}
+	// Create the mount folder before mkfs. A read-only parent must fail
+	// while the disk is still intact.
 	if err := l.ensureDir(ctx, mount); err != nil {
 		return "", err
+	}
+	if _, err := l.cmd.Run(ctx, "mkfs.ext4", "-F", "-L", "feldcore", device); err != nil {
+		return "", op("Could not format " + device + ": " + err.Error())
 	}
 	if _, err := l.cmd.Run(ctx, "mount", device, mount); err != nil {
 		return "", op("Could not mount " + device + " at " + mount + ": " + err.Error())
@@ -103,7 +105,7 @@ func (l *Linux) ensureDir(ctx context.Context, mount string) error {
 		}
 		return nil
 	}
-	if err := os.MkdirAll(mount, 0o755); err != nil {
+	if err := mkdirAll(mount, 0o755); err != nil {
 		return op("Could not create " + mount + ": " + err.Error())
 	}
 	return nil

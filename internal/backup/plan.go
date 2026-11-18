@@ -67,7 +67,7 @@ func AppdataPath(explicit, sharesRoot string) string {
 		return explicit
 	}
 	if strings.TrimSpace(sharesRoot) == "" {
-		sharesRoot = "/srv/feldcore"
+		sharesRoot = "/mnt/feldcore/data"
 	}
 	return filepath.Join(sharesRoot, "appdata")
 }

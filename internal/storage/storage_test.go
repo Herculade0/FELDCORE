@@ -13,8 +13,8 @@ func TestDescribeKeepAndRefuseOSFormat(t *testing.T) {
 		{Name: "sda", Path: "/dev/sda", OS: true, Mount: "/", Size: 64 << 30, Children: []SetupPart{{Name: "sda1", Path: "/dev/sda1", Mount: "/", OS: true}}},
 		{Name: "sdb", Path: "/dev/sdb", Size: 1 << 40},
 	}
-	p, err := Describe(disks, Choice{Mode: "keep", Mount: "/srv/feldcore"})
-	if err != nil || p.Destructive || p.Mount != "/srv/feldcore" {
+	p, err := Describe(disks, Choice{Mode: "keep", Mount: "/mnt/feldcore/data"})
+	if err != nil || p.Destructive || p.Mount != "/mnt/feldcore/data" {
 		t.Fatalf("keep %+v %v", p, err)
 	}
 	if _, err := Describe(disks, Choice{Mode: "disk", Device: "/dev/sda", Format: true, Mount: "/mnt/feldcore"}); err == nil {
@@ -78,6 +78,11 @@ func TestLinuxApplyFormatsOnlyAfterPhrase(t *testing.T) {
 	if !strings.Contains(joined, "mkfs.ext4 -F -L feldcore /dev/sdb") || !strings.Contains(joined, "mount /dev/sdb /mnt/feldcore") {
 		t.Fatal(joined)
 	}
+	mkdirAt := strings.Index(joined, "mkdir -p /mnt/feldcore\n")
+	mkfsAt := strings.Index(joined, "mkfs.ext4 -F -L feldcore /dev/sdb")
+	if mkdirAt < 0 || mkfsAt < 0 || mkdirAt > mkfsAt {
+		t.Fatalf("mkdir must run before mkfs:\n%s", joined)
+	}
 	fstab, err := os.ReadFile(filepath.Join(root, "etc", "fstab"))
 	if err != nil || !strings.Contains(string(fstab), "/mnt/feldcore") {
 		t.Fatalf("fstab %s %v", fstab, err)
@@ -104,10 +109,18 @@ func writeFakeSys(t *testing.T, root string) {
 	must(filepath.Join(root, "sys", "block", "loop0", "size"), "100\n")
 }
 
-type fakeExec struct{ calls []string }
+type fakeExec struct {
+	calls []string
+	fail  func(name string) error
+}
 
 func (f *fakeExec) Run(_ context.Context, name string, args ...string) (string, error) {
 	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
+	if f.fail != nil {
+		if err := f.fail(name); err != nil {
+			return "", err
+		}
+	}
 	if name == "blkid" {
 		return "01234567-89ab-cdef-0123-456789abcdef", nil
 	}
