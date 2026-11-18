@@ -364,6 +364,14 @@ EOF
 	done
 	sudo ln -sfn /usr/lib/systemd/system/systemd-networkd.service \
 		"${rootfs}/etc/systemd/system/network-online.target.wants/systemd-networkd.service"
+	# FELDCORE marks a good boot with feldcore-bless.service, which renames the
+	# counted loader entry (feldcore-<slot>+N.conf) to the stable name. The
+	# stock systemd-bless-boot.service, pulled into boot-complete.target by the
+	# generator whenever the loader passes a boot counter, then runs against a
+	# counted entry feldcore-bless already renamed away and fails every first
+	# boot. Mask it; the boot counter itself is firmware-side in systemd-boot,
+	# so A/B fallback is unaffected.
+	sudo ln -sfn /dev/null "${rootfs}/etc/systemd/system/systemd-bless-boot.service"
 	sudo ln -sfn /usr/lib/systemd/system/serial-getty@.service \
 		"${rootfs}/etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service"
 	# The root account cannot log in. The installer image adds a serial autologin of its own.
