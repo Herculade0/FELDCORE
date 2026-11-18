@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   Cpu,
@@ -268,6 +268,10 @@ function SystemCard({ settings, onSaved }: { settings: Settings; onSaved: () => 
   const [tz, setTz] = useState(settings.system.timezone || "UTC");
   const [ntp, setNtp] = useState(settings.system.ntpServers);
   const zones = settings.system.zones?.length ? settings.system.zones : ["UTC"];
+  // The host name the server reports now. A successful save that changed it
+  // recommends a restart so every service picks the new name up.
+  const savedHost = useRef(settings.system.hostname);
+  const [restart, setRestart] = useState(false);
   return (
     <Card>
       <div id="settings-system">
@@ -292,8 +296,20 @@ function SystemCard({ settings, onSaved }: { settings: Settings; onSaved: () => 
         </div>
         <Save
           onClick={() => api("/settings/system", { method: "PUT", body: { hostname: host, timezone: tz, ntpServers: ntp } })}
-          onSaved={onSaved}
+          onSaved={() => {
+            const changed = host.trim() !== savedHost.current;
+            savedHost.current = host.trim();
+            setRestart(changed);
+            onSaved();
+          }}
         />
+        {restart && (
+          <div className="mt-4">
+            <Alert tone="warn">
+              The host name was changed. Restart this server so every service uses the new name on the network.
+            </Alert>
+          </div>
+        )}
       </div>
     </Card>
   );
