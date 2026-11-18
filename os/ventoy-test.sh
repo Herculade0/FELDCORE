@@ -141,15 +141,21 @@ boot_disk() {
 	# ("cannot load image") and Ventoy falls through to the same configfile
 	# path. GRUB2 mode skips the chain. The two logs have to show that split,
 	# or the timeout menu was still on "Boot in normal mode" for both boots.
+	# quiet loglevel=3 drops the kernel command line on every console, so
+	# rdinit= is not in this capture even when Ventoy injected it. The
+	# installer initrd writes "feldcore: live root mounted" to /dev/console
+	# after the squashfs mounts. ttyS0 is the last console=, so that line
+	# is in the serial file, and it is absent when boot never reaches the
+	# live root.
 	if [[ ${label} == normal ]]; then
 		grep -q 'cannot load image' "${work}/ventoy-${label}.log" \
 			|| iso_die "normal mode did not attempt the Ventoy EFI chain"
 	elif grep -q 'cannot load image' "${work}/ventoy-${label}.log"; then
 		iso_die "grub2 mode took the normal-mode chain path"
 	fi
-	grep -q 'rdinit=/vtoy/vtoy' "${work}/ventoy-${label}.log" \
-		|| iso_die "${label} mode did not reach the installer kernel"
-	echo "ventoy-test: ${label} reached the motd"
+	grep -q 'feldcore: live root mounted' "${work}/ventoy-${label}.log" \
+		|| iso_die "${label} mode did not reach the installer. serial log:"$'\n'"$(tail -n 80 "${work}/ventoy-${label}.log" 2>/dev/null || true)"
+	echo "ventoy-test: ${label} reached the installer"
 	loop=$(sudo losetup -fP --show "${disk}")
 	sudo partx -u "${loop}" 2>/dev/null || true
 	sleep 0.5
