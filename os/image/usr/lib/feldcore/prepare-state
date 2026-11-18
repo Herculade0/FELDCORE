@@ -53,8 +53,23 @@ bind_state samba
 bind_state nfs
 
 if [[ -f /etc/hostname ]]; then
-	hostnamectl set-hostname --static "$(tr -d '[:space:]' </etc/hostname)" || true
+	name=$(tr -d '[:space:]' </etc/hostname)
+	if [[ -n ${name} ]]; then
+		# /etc/hostname lives in the overlay mounted just above. PID1 already
+		# set the running (transient) hostname from the image's lower /etc at
+		# early boot, before this overlay existed, so set-hostname --static on
+		# its own leaves gethostname()/uname — and /api/v1/system/info — stuck
+		# on the image default. Set the running name too.
+		hostname "${name}" || true
+		hostnamectl set-hostname --static "${name}" || true
+	fi
 fi
+
+# The overlay can also carry fstab lines the wizard added for a data disk.
+# systemd-fstab-generator read the image's lower /etc/fstab at early boot,
+# before this overlay existed, so those mounts were never set up. Honour them
+# now. Every FELDCORE fstab line is nofail, so a missing disk is not fatal.
+mount -a || true
 
 if command -v systemd-sysext >/dev/null 2>&1; then
 	systemd-sysext refresh || true
