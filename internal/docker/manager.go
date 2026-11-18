@@ -241,7 +241,7 @@ func configuredPorts(in *inspectContainer) []Port {
 		for _, b := range list {
 			hport, _ := strconv.Atoi(strOf(mapOf(b)["HostPort"]))
 			if hport > 0 {
-				ports = append(ports, Port{Host: hport, Container: cport, Proto: proto})
+				ports = append(ports, Port{Host: hport, Container: cport, Proto: proto, HostIP: publishedIP(strOf(mapOf(b)["HostIp"]))})
 			}
 		}
 	}
@@ -268,6 +268,8 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		Role:       rc.Labels[RoleLabel],
 		VPN:        rc.Labels[vpn.LabelTunnel],
 		VPNGateway: rc.Labels[vpn.LabelGateway] == "true",
+		App:        rc.Labels[appLabel],
+		Purpose:    rc.Labels[purposeLabel],
 		Icon:       containerIcon(rc.Labels),
 		IPs:        []string{},
 	}
@@ -320,7 +322,7 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 			continue
 		}
 		seen[key] = true
-		c.Ports = append(c.Ports, Port{Host: p.PublicPort, Container: p.PrivatePort, Proto: p.Type})
+		c.Ports = append(c.Ports, Port{Host: p.PublicPort, Container: p.PrivatePort, Proto: p.Type, HostIP: publishedIP(p.IP)})
 	}
 	sort.Slice(c.Ports, func(i, j int) bool { return c.Ports[i].Host < c.Ports[j].Host })
 	if web := resolveWebUI(rc.Labels[webUILabel], c.Ports); web != "" {
@@ -334,6 +336,15 @@ func toContainer(rc apiContainer, hostAddr string) Container {
 		c.Ports = []Port{}
 	}
 	return c
+}
+
+// publishedIP keeps a specific bind address. Blank, 0.0.0.0 and :: mean every interface.
+func publishedIP(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if ip == "0.0.0.0" || ip == "::" {
+		return ""
+	}
+	return ip
 }
 
 // RuntimeInfo is the process id and bridge address of a container.

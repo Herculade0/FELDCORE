@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Herculade0/feldcore/internal/bridge"
 	"github.com/Herculade0/feldcore/internal/docker"
 )
 
@@ -172,6 +173,17 @@ func (s *Service) Refresh(ctx context.Context) Catalogue {
 // Spec returns the container setup for one app, with Unraid paths rewritten
 // for this server. The caller shows it; nothing is installed.
 func (s *Service) Spec(id string) (App, docker.Spec, []string, error) {
+	if rec, notes, ok := protonRecord(); ok && id == rec.app.ID {
+		spec, rewritten := docker.TemplateToSpec(rec.tmpl, docker.PathMap{
+			Appdata:    s.effectiveAppdata(),
+			SharesRoot: s.sharesRoot,
+			Shares:     s.sharePaths(),
+		})
+		spec.App = bridge.AppID
+		spec.Purpose = bridge.Purpose
+		out := append(append([]string{}, notes...), rewritten...)
+		return rec.app, spec, out, nil
+	}
 	s.ensureLoaded()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -275,6 +287,8 @@ func (s *Service) view(offline bool, message string) Catalogue {
 	defer s.mu.Unlock()
 	if s.parsed == nil || len(s.parsed.apps) == 0 {
 		cat.Missing = true
+		cat.Apps, cat.Categories = mergeBuiltins(nil, nil)
+		cat.Message = builtinNote(cat.Message, true, offline, len(cat.Apps) > 0)
 		if cat.Message == "" && !offline {
 			cat.Message = "The catalogue hasn't been downloaded yet."
 		}
@@ -284,11 +298,11 @@ func (s *Service) view(offline bool, message string) Catalogue {
 		cat.UpdatedAt = s.fetchedAt.UTC().Format(time.RFC3339)
 		cat.Stale = s.now().Sub(s.fetchedAt) > staleAfter
 	}
-	cat.Categories = s.parsed.categories
-	cat.Apps = make([]App, len(s.parsed.apps))
+	feedApps := make([]App, len(s.parsed.apps))
 	for i := range s.parsed.apps {
-		cat.Apps[i] = s.parsed.apps[i].app
+		feedApps[i] = s.parsed.apps[i].app
 	}
+	cat.Apps, cat.Categories = mergeBuiltins(feedApps, append([]Category(nil), s.parsed.categories...))
 	return cat
 }
 

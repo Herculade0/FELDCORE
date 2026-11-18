@@ -181,15 +181,15 @@ func TestCatalogueCacheAndOffline(t *testing.T) {
 
 	// Opening the page must not download.
 	cat := svc.Catalogue()
-	if hits != 0 || !cat.Missing || len(cat.Apps) != 0 {
-		t.Fatalf("catalogue fetched or was not missing: hits %d %+v", hits, cat.Message)
+	if hits != 0 || !cat.Missing || len(cat.Apps) != 1 || cat.Apps[0].ID != "proton-bridge" {
+		t.Fatalf("catalogue fetched or was not missing: hits %d apps %d %+v", hits, len(cat.Apps), cat.Message)
 	}
 	if cat.Appdata != "/srv/feldcore/appdata" || cat.AppdataCustom {
 		t.Fatalf("default appdata should follow the appdata share: %+v", cat)
 	}
 
 	cat = svc.Refresh(context.Background())
-	if hits != 1 || cat.Offline || cat.Missing || len(cat.Apps) != 3 {
+	if hits != 1 || cat.Offline || cat.Missing || len(cat.Apps) != 4 || cat.Apps[0].ID != "proton-bridge" {
 		t.Fatalf("refresh: hits %d offline %v missing %v apps %d msg %q", hits, cat.Offline, cat.Missing, len(cat.Apps), cat.Message)
 	}
 	if cat.UpdatedAt == "" {
@@ -204,19 +204,19 @@ func TestCatalogueCacheAndOffline(t *testing.T) {
 	svc2 := New(Deps{DataDir: dir, SharesRoot: "/srv/feldcore", FeedURL: srv.URL})
 	svc2.now = func() time.Time { return fixed.Add(48 * time.Hour) }
 	cat = svc2.Catalogue()
-	if hits != 1 || len(cat.Apps) != 3 || !cat.Stale {
+	if hits != 1 || len(cat.Apps) != 4 || cat.Apps[0].ID != "proton-bridge" || !cat.Stale {
 		t.Fatalf("reloaded cache: hits %d apps %d stale %v", hits, len(cat.Apps), cat.Stale)
 	}
 
 	srv.Close()
 	cat = svc2.Refresh(context.Background())
-	if !cat.Offline || len(cat.Apps) != 3 || cat.Message == "" {
+	if !cat.Offline || len(cat.Apps) != 4 || cat.Message == "" {
 		t.Fatalf("offline refresh should keep the saved catalogue: %+v", cat.Message)
 	}
 
 	empty := New(Deps{DataDir: t.TempDir(), SharesRoot: "/srv/feldcore", FeedURL: srv.URL})
 	cat = empty.Refresh(context.Background())
-	if !cat.Offline || !cat.Missing || len(cat.Apps) != 0 {
+	if !cat.Offline || !cat.Missing || len(cat.Apps) != 1 || !strings.Contains(cat.Message, "FELDCORE apps") {
 		t.Fatalf("offline with no cache: %+v apps %d", cat.Message, len(cat.Apps))
 	}
 

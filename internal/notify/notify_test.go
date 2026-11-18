@@ -9,13 +9,14 @@ import (
 )
 
 func TestUnexpectedStops(t *testing.T) {
-	prev := map[string]bool{"plex": true, "vpn": true, "feldcore-vpn-nl": true}
+	prev := map[string]bool{"plex": true, "vpn": true, "feldcore-vpn-nl": true, "feldcore-bridge-info-abc": true}
 	now := time.Date(2026, 1, 2, 3, 4, 0, 0, time.UTC)
 	events, running := UnexpectedStops(prev, []Container{
 		{Name: "plex", Running: false},
 		{Name: "vpn", Running: false},
 		{Name: "feldcore-vpn-nl", Running: false},
 		{Name: "web", Running: true},
+		{Name: "feldcore-bridge-info-abc", Running: false},
 	}, map[string]time.Time{"vpn": now.Add(time.Minute)}, now)
 	if len(events) != 1 || events[0].Kind != KindContainer || !strings.Contains(events[0].Title, "plex") {
 		t.Fatalf("events %+v", events)

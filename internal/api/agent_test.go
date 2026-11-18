@@ -109,6 +109,9 @@ func TestScopeFor(t *testing.T) {
 		{http.MethodPost, "/api/v1/storage/pools/data/destroy", auth.ScopeStorage},
 		{http.MethodPut, "/api/v1/storage/shares/media", auth.ScopeStorage},
 		{http.MethodPut, "/api/v1/storage/spindown", auth.ScopeStorage},
+		{http.MethodGet, "/api/v1/integrations/proton-bridge", auth.ScopeMail},
+		{http.MethodPut, "/api/v1/integrations/proton-bridge", auth.ScopeMail},
+		{http.MethodPost, "/api/v1/integrations/proton-bridge/read", auth.ScopeMail},
 	}
 	for _, c := range cases {
 		if got := scopeFor(c.method, c.path); got != c.want {

@@ -44,6 +44,7 @@ An agent is a program you trust with a token: Claude Code, Cursor, or anything e
 | `storage` | Create and change pools, mount them, and run scrub, balance, and trim. Looking at disks is `read`. |
 | `backups:read` | See destinations, jobs, copies, and the files inside a copy. |
 | `backups:write` | Run backups, checks, and restores, and change destinations. Includes `backups:read`. |
+| `mail` | Read the saved Proton Bridge username, app password, and IMAP and SMTP endpoints. Grant `read` as well so the agent can call MCP. |
 | `admin` | Settings, shares, tokens, publishing, and every other API call. Includes the scopes above. |
 
 `admin` does not include a shell. The host terminal, a container console, and a VM's VNC console check the signed-in browser. A token that calls them is refused, and the refusal is written to the audit log.
@@ -93,8 +94,9 @@ The tools in this phase are all read-only. There is no shell, exec, or terminal 
 | `container_logs` | The last lines of one container's logs (`id`, optional `tail`, capped at 500) |
 | `list_apps` | App Store apps, or a search (`query`, optional `limit`) |
 | `list_vms` | Virtual machines when virsh is installed. Otherwise it says the VM layer is not installed. |
+| `proton_bridge` | Saved Proton Bridge username, app password, and IMAP and SMTP endpoints. Needs `mail` as well as `read`. It does not sign in or stop the container. |
 
-`list_apps` reads the catalogue already cached on the server. It does not download or install anything. `list_vms` uses `virsh -r`, which cannot start or stop a domain.
+`list_apps` reads the catalogue already cached on the server. It does not download or install anything. `list_vms` uses `virsh -r`, which cannot start or stop a domain. A bot that should read a Proton mailbox needs both `read` and `mail`. Sign-in stays in the container console. See [[help:proton|Proton]].
 
 ## Connect with the HTTP API
 

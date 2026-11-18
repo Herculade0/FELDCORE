@@ -30,6 +30,7 @@ address.
 | `storage` | Create and change pools, mount them by UUID, add or replace a disk, and run scrub, balance and trim. Looking at disks is `read`. |
 | `backups:read` | See backup destinations, jobs, copies, and the files inside a copy. |
 | `backups:write` | Change destinations and run backups, checks and restores. Includes `backups:read`. |
+| `mail` | Read the saved Proton Bridge username, app password, and IMAP and SMTP endpoints. Grant `read` as well for the `proton_bridge` MCP tool. |
 | `admin` | Settings, shares, tokens, health thresholds, notification channels, and every other API call. Includes the scopes above. |
 
 `admin` does not include a shell. The host terminal, container consoles and a VM's VNC console stay on the signed-in browser session. An agent token that calls them is refused and the refusal is written to the audit log.
@@ -95,8 +96,9 @@ All of them are read-only. There is no shell, exec, or terminal tool.
 | `list_apps` | App Store apps, or a search (`query`, optional `limit`) |
 | `list_vms` | Virtual machines when virsh is installed. Otherwise it says the VM layer is not installed. Listing uses `virsh -r`, which cannot start or stop a domain. |
 | `health_report` | Latest health checks: SMART, temperatures, disk space, load, containers, VMs, failed units, certificates, and tunnels. |
+| `proton_bridge` | Saved Proton Bridge username, app password, and IMAP and SMTP endpoints. The token needs `mail` as well as `read`. The tool does not sign in and does not stop the container. |
 
-`list_apps` reads the catalogue already cached on the server. It does not download or install anything.
+`list_apps` reads the catalogue already cached on the server. It does not download or install anything. Sign-in for Proton Bridge stays in the container console. See [PROTON.md](PROTON.md).
 
 ## Audit
 

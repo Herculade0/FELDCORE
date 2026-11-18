@@ -4,6 +4,8 @@ export interface Port {
   host: number;
   container: number;
   proto: string;
+  /** Set when the port is published on one address. Empty means every interface. */
+  hostIp?: string;
 }
 
 export interface Container {
@@ -37,6 +39,10 @@ export interface Container {
   role?: string;
   hostname?: string;
   publicHost?: string;
+  /** Store template id, when this container came from one. */
+  app?: string;
+  /** Why the template exists, for example "AI integration". */
+  purpose?: string;
 }
 
 export interface Image {
@@ -102,6 +108,10 @@ export interface Spec {
   deployAnyway: boolean;
   /** Tunnel id, or empty to stay on the selected network. */
   vpn: string;
+  /** Store template id. Sent back so an edit keeps the label. */
+  app?: string;
+  /** Stated purpose from the template, for example "AI integration". */
+  purpose?: string;
 }
 
 export interface Finding {
@@ -185,7 +195,7 @@ export function configSummary(c: ConfigItem): { left: string; right: string } {
       return { left: c.host, right: c.container };
     case "port":
       return {
-        left: c.hostPort ? String(c.hostPort) : "auto",
+        left: `${c.hostIp ? `${c.hostIp}:` : ""}${c.hostPort ? String(c.hostPort) : "auto"}`,
         right: `${c.containerPort}/${c.proto}`,
       };
     default:

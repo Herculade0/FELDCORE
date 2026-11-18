@@ -22,7 +22,7 @@ The App Store is a cache of the public Unraid Community Applications feed. Each 
 
 Search matches the name, author, image, overview, and categories. Deprecated apps are hidden until you show them. **Refresh** downloads the feed again. The first visit refreshes on its own when the cache is empty and the server is online.
 
-Icons and categories come from the feed. A private FELDCORE catalogue merged on top of this feed is not in the app.
+Icons and categories come from the feed. FELDCORE also lists its own templates on this page. Proton Bridge is the first, with the purpose AI integration. A separate private catalogue feed, with its own signing and toggles, is not in the app.
 
 ## Install
 

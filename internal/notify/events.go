@@ -57,7 +57,7 @@ func UnexpectedStops(prev map[string]bool, next []Container, quiet map[string]ti
 }
 
 func ignoredContainer(name string) bool {
-	return strings.HasPrefix(name, "feldcore-vpn-") || name == "feldcore-proton-bridge"
+	return strings.HasPrefix(name, "feldcore-vpn-") || strings.HasPrefix(name, "feldcore-bridge-info-") || name == "feldcore-proton-bridge"
 }
 
 // UpdateAvailable reports a newer release once. already is the version that

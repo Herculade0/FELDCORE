@@ -293,6 +293,9 @@ func scopeFor(method, path string) string {
 		}
 		return auth.ScopeStorage
 	}
+	if p == "/integrations/proton-bridge" || strings.HasPrefix(p, "/integrations/proton-bridge/") {
+		return auth.ScopeMail
+	}
 	if method == http.MethodGet || method == http.MethodHead {
 		if isReadPath(p) {
 			return auth.ScopeRead

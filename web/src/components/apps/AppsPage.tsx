@@ -213,9 +213,9 @@ export default function AppsPage() {
           heading={setup.title}
           requires={setup.requires}
           onClose={() => setSetup(null)}
-          onSaved={(name) => {
+          onSaved={(name, _edited, followUp) => {
             setSetup(null);
-            setNotice(`${name} was created. Open Docker to see it.`);
+            setNotice(followUp ? `${name} was created. ${followUp}` : `${name} was created. Open Docker to see it.`);
           }}
         />
       )}
@@ -253,11 +253,17 @@ function AppCard({
       </p>
       {app.requires && <RequiresNotice text={app.requires} />}
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {app.origin === "feldcore" && (
+          <span className="rounded-full bg-accent/12 px-2 py-0.5 text-[10px] font-bold text-accent">FELDCORE</span>
+        )}
         {(app.categories ?? []).slice(0, 2).map((c) => (
           <span key={c} className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
             {label(c)}
           </span>
         ))}
+        {app.purpose && !app.categories?.some((c) => label(c) === app.purpose) && (
+          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">{app.purpose}</span>
+        )}
         {app.beta && (
           <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-bold text-warn">Beta</span>
         )}

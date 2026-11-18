@@ -32,7 +32,8 @@ A token is a random secret shown once, stored as a SHA-256 hash. You send it as 
 | `storage` | Create and change pools, mount them, and run scrub, balance, and trim. |
 | `backups:read` | See destinations, jobs, copies, and the files inside a copy. |
 | `backups:write` | Run backups, checks, and restores, and change destinations. Includes `backups:read`. The older Proton Drive tar.gz card stays on `admin`. |
-| `admin` | Everything else, including settings, shares, tokens, publish, VPN, and mail. Includes the scopes above. |
+| `mail` | Read the Proton Bridge username, app password, and IMAP and SMTP endpoints (`GET` and `PUT /api/v1/integrations/proton-bridge`, and `POST .../read`). It does not open a console. |
+| `admin` | Everything else, including settings, shares, tokens, publish, VPN, and notification mail. Includes the scopes above. |
 
 `admin` does not include a shell. `/terminal`, a container's `/terminal`, and a VM's `/console` are classified as `shell`, which no token can be granted. The handlers also require the administrator's session cookie.
 

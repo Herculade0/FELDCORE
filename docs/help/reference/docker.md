@@ -41,6 +41,8 @@ Editing reads the container back into the same form and recreates it. If the new
 
 **Console** is a shell inside a running container. It needs your browser session. A token cannot open it.
 
+**Mailbox access** appears on a Proton Bridge row. It shows the IMAP and SMTP addresses, the Bridge username, and the Bridge app password other apps use, and it walks through the console sign-in. See [[help:proton|Proton]].
+
 **Web address** is the LAN name and the public hostname. **Publish**, on the edit form, is the single switch that turns the HTTPS name, certificate, and tunnel hostname on together. Both are described in [[help:expose-site|How to expose your site]].
 
 **Snapshots** lists copies for that container.

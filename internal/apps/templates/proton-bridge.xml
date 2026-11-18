@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<Container>
+  <Name>proton-bridge</Name>
+  <Repository>shenxn/protonmail-bridge:latest</Repository>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Config Name="Bridge data" Target="/root" Default="/mnt/user/appdata/proton-bridge" Mode="rw" Description="Keychain, GPG key, and login state. This folder is what keeps Bridge signed in across restarts." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="IMAP" Target="143" Default="1143" Mode="tcp" Description="IMAP for other apps and bots. The image forwards this port to Bridge on 1143. Leave the bind address blank to publish on the LAN, or set 127.0.0.1 to keep it on this server." Type="Port" Display="always" Required="true" Mask="false" Bind=""/>
+  <Config Name="SMTP" Target="25" Default="1025" Mode="tcp" Description="SMTP submission for other apps and bots. The image forwards this port to Bridge on 1025. The same bind address rules as IMAP." Type="Port" Display="always" Required="true" Mask="false" Bind=""/>
+</Container>

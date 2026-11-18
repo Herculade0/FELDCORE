@@ -20,6 +20,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/apps"
 	"github.com/Herculade0/feldcore/internal/auth"
 	"github.com/Herculade0/feldcore/internal/backup"
+	"github.com/Herculade0/feldcore/internal/bridge"
 	"github.com/Herculade0/feldcore/internal/citizenid"
 	"github.com/Herculade0/feldcore/internal/compose"
 	"github.com/Herculade0/feldcore/internal/docker"
@@ -31,6 +32,7 @@ import (
 	"github.com/Herculade0/feldcore/internal/proxy"
 	"github.com/Herculade0/feldcore/internal/publish"
 	"github.com/Herculade0/feldcore/internal/remote"
+	"github.com/Herculade0/feldcore/internal/secrets"
 	"github.com/Herculade0/feldcore/internal/setup"
 	"github.com/Herculade0/feldcore/internal/shares"
 	"github.com/Herculade0/feldcore/internal/snapshots"
@@ -70,6 +72,7 @@ type Deps struct {
 	Storage    *storage.Service
 	Health     *health.Service
 	Alerts     *notify.Dispatcher
+	Secrets    *secrets.Box
 }
 
 // Server holds the dependencies shared by HTTP handlers.
@@ -103,6 +106,7 @@ type Server struct {
 	os         *osupdate.Service
 	stacks     *compose.Service
 	storage    *storage.Service
+	secrets    *secrets.Box
 }
 
 // New returns a Server.
@@ -116,6 +120,7 @@ func New(d Deps) *Server {
 		os:      d.OS,
 		storage: d.Storage,
 		health:  d.Health, alerts: d.Alerts,
+		secrets: d.Secrets,
 	}
 	if d.Backups != nil && d.Auth != nil {
 		b, a := d.Backups, d.Auth
@@ -304,6 +309,8 @@ func (s *Server) Router() http.Handler {
 			r.Patch("/shares/{name}/uploads/{id}", s.handleUploadPatch)
 			// Cloning a repository can take longer than the short timeout.
 			r.Post("/stacks/import", s.handleStackImport)
+			// Reading Bridge stops the container, runs info, and starts it again.
+			r.Post("/integrations/proton-bridge/read", s.handleBridgeRead)
 
 			r.Group(func(r chi.Router) {
 				r.Use(short)
@@ -337,6 +344,8 @@ func (s *Server) Router() http.Handler {
 
 				r.Get("/apps", s.handleApps)
 				r.Get("/apps/{id}", s.handleAppSpec)
+				r.Get("/integrations/proton-bridge", s.handleBridge)
+				r.Put("/integrations/proton-bridge", s.handleBridgeSave)
 
 				r.Get("/settings", s.handleSettings)
 				r.Put("/settings/system", s.handleSettingsSystem)
@@ -559,6 +568,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		shareOp      *shares.OpError
 		dockerInput  *docker.InputError
 		dockerOp     *docker.OpError
+		bridgeInput  *bridge.InputError
 		appsInput    *apps.InputError
 		appsOp       *apps.OpError
 		vmInput      *vm.InputError
@@ -603,6 +613,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, shareInput.Msg)
 	case errors.As(err, &dockerInput):
 		writeError(w, http.StatusBadRequest, dockerInput.Msg)
+	case errors.As(err, &bridgeInput):
+		writeError(w, http.StatusBadRequest, bridgeInput.Msg)
 	case errors.As(err, &appsInput):
 		writeError(w, http.StatusBadRequest, appsInput.Msg)
 	case errors.As(err, &vmInput):

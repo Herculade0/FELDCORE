@@ -116,7 +116,7 @@ export default function ContainerDialog({
   /** Open an existing container with a private network already selected. */
   preferIsolate?: boolean;
   onClose: () => void;
-  onSaved: (name: string, edited: boolean) => void;
+  onSaved: (name: string, edited: boolean, followUp?: string) => void;
 }) {
   const editing = !!container;
   const fromApp = preset !== undefined;
@@ -278,7 +278,14 @@ export default function ContainerDialog({
       } else {
         await api("/docker/containers", { method: "POST", body });
       }
-      onSaved(spec.name || spec.image, editing);
+      const mailbox = !editing && spec.app === "proton-bridge";
+      onSaved(
+        spec.name || spec.image,
+        editing,
+        mailbox
+          ? "Open Docker and choose Mailbox access on this container. Proton asks for the account password and a 2FA code in the console."
+          : undefined,
+      );
     } catch (e) {
       const found = findingsOf(e);
       if (found) setFindings(found);

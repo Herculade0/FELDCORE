@@ -131,6 +131,16 @@ export default function ConfigDialog({
                 placeholder="8080"
               />
             </div>
+            <TextField
+              label="Bind address"
+              value={item.hostIp}
+              onChange={(e) => set({ hostIp: e.target.value })}
+              placeholder="Blank publishes on every interface"
+              hint="Leave blank to publish on the LAN. 127.0.0.1 keeps the port on this server."
+              autoCapitalize="none"
+              spellCheck={false}
+              className="[&_input]:font-mono [&_input]:!text-xs"
+            />
             <SelectField
               label="Connection type"
               value={item.proto}

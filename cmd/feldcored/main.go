@@ -281,6 +281,7 @@ func main() {
 		Storage:    diskSvc,
 		Health:     healthSvc,
 		Alerts:     alerts,
+		Secrets:    box,
 	})
 	go srv.OSLoop(ctx)
 	go func() {

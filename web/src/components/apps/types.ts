@@ -17,6 +17,10 @@ export interface AppSummary {
   project?: string;
   support?: string;
   requires?: string;
+  /** Set on a FELDCORE template, for example "AI integration". */
+  purpose?: string;
+  /** "feldcore" for a template shipped with FELDCORE. */
+  origin?: string;
 }
 
 export interface Category {

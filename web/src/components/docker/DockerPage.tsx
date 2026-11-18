@@ -8,6 +8,7 @@ import {
   FileText,
   Globe,
   Layers,
+  Mail,
   Pencil,
   Play,
   Plus,
@@ -29,6 +30,7 @@ import LogsDialog from "./LogsDialog";
 import { TerminalButton, useTerminal } from "../Terminal";
 import { stateStyle, type Container, type DockerStatus } from "./types";
 import AddressDialog from "./AddressDialog";
+import BridgeDialog, { isProtonBridge } from "./BridgeDialog";
 import SnapshotsDialog from "./SnapshotsDialog";
 import { InstallPanel, showInstall, useInstall } from "../install/InstallPanel";
 import PublishedApps from "../publish/PublishedApps";
@@ -65,6 +67,7 @@ export default function DockerPage({
   const [removing, setRemoving] = useState<Container | null>(null);
   const [addressFor, setAddressFor] = useState<Container | null>(null);
   const [snapsFor, setSnapsFor] = useState<Container | null>(null);
+  const [mailboxFor, setMailboxFor] = useState<Container | null>(null);
   const { openContainer } = useTerminal();
 
   const load = useCallback(async () => {
@@ -167,6 +170,7 @@ export default function DockerPage({
               onIsolate={(c) => openEdit(c, true)}
               onAddress={setAddressFor}
               onSnapshots={setSnapsFor}
+              onMailbox={setMailboxFor}
               onRemove={setRemoving}
               onMakeStack={
                 onOpenStack
@@ -208,9 +212,10 @@ export default function DockerPage({
           container={editing === "new" ? undefined : editing}
           preferIsolate={isolateOnOpen && editing !== "new"}
           onClose={closeEdit}
-          onSaved={(name, edited) => {
+          onSaved={(name, edited, followUp) => {
             closeEdit();
-            changed(edited ? `${name} was updated.` : `${name} was created.`);
+            const base = edited ? `${name} was updated.` : `${name} was created.`;
+            changed(followUp ? `${base} ${followUp}` : base);
           }}
         />
       )}
@@ -227,6 +232,13 @@ export default function DockerPage({
       )}
       {addressFor && <AddressDialog container={addressFor} onClose={() => { setAddressFor(null); void load(); }} />}
       {snapsFor && <SnapshotsDialog container={snapsFor} onClose={() => setSnapsFor(null)} />}
+      {mailboxFor && (
+        <BridgeDialog
+          container={mailboxFor}
+          onClose={() => setMailboxFor(null)}
+          onConsole={() => openContainer({ id: mailboxFor.id, name: mailboxFor.name, icon: mailboxFor.icon })}
+        />
+      )}
     </div>
   );
 }
@@ -242,6 +254,7 @@ function ContainerGroups({
   onIsolate,
   onAddress,
   onSnapshots,
+  onMailbox,
   onRemove,
   onMakeStack,
 }: {
@@ -255,6 +268,7 @@ function ContainerGroups({
   onIsolate: (c: Container) => void;
   onAddress: (c: Container) => void;
   onSnapshots: (c: Container) => void;
+  onMailbox: (c: Container) => void;
   onRemove: (c: Container) => void;
   onMakeStack?: (c: Container) => void;
 }) {
@@ -272,6 +286,7 @@ function ContainerGroups({
       onIsolate={() => onIsolate(c)}
       onAddress={() => onAddress(c)}
       onSnapshots={() => onSnapshots(c)}
+      onMailbox={() => onMailbox(c)}
       onRemove={() => onRemove(c)}
       onMakeStack={onMakeStack && !c.compose && !c.role && !c.vpnGateway ? () => onMakeStack(c) : undefined}
     />
@@ -334,6 +349,7 @@ function ContainerRow({
   onIsolate,
   onAddress,
   onSnapshots,
+  onMailbox,
   onRemove,
   onMakeStack,
 }: {
@@ -347,6 +363,7 @@ function ContainerRow({
   onIsolate: () => void;
   onAddress: () => void;
   onSnapshots: () => void;
+  onMailbox: () => void;
   onRemove: () => void;
   onMakeStack?: () => void;
 }) {
@@ -406,6 +423,11 @@ function ContainerRow({
                 via VPN
               </span>
             )}
+            {c.purpose && (
+              <span className="rounded-full bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
+                {c.purpose}
+              </span>
+            )}
             {c.vpnGateway && (
               <span className="rounded-full bg-accent/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent">
                 VPN gateway
@@ -439,6 +461,7 @@ function ContainerRow({
                   key={`${p.host}/${p.proto}`}
                   className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-2"
                 >
+                  {p.hostIp ? `${p.hostIp}:` : ""}
                   {p.host}→{p.container}/{p.proto}
                 </span>
               ))}
@@ -451,6 +474,11 @@ function ContainerRow({
         {running && webUrl && (
           <IconButton label="Open in browser" onClick={() => window.open(webUrl, "_blank")}>
             <ExternalLink size={16} />
+          </IconButton>
+        )}
+        {isProtonBridge(c) && (
+          <IconButton label="Mailbox access" onClick={onMailbox}>
+            <Mail size={16} />
           </IconButton>
         )}
         <TerminalButton label="Console" disabled={!running} onClick={onConsole} />

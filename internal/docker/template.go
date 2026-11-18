@@ -36,6 +36,9 @@ type TemplateConfig struct {
 	Display     string
 	Required    bool
 	Mask        bool
+	// Bind is the host address a port is published on. Empty means every
+	// interface. Unraid templates omit it; FELDCORE templates may set it.
+	Bind string
 }
 
 // PathMap tells the converter where Unraid's /mnt/user paths live on this
@@ -85,6 +88,7 @@ func ParseTemplateXML(data []byte) (Template, error) {
 			Display:     strings.TrimSpace(c.Display),
 			Required:    truthy(c.Required),
 			Mask:        truthy(c.Mask),
+			Bind:        strings.TrimSpace(c.Bind),
 		})
 	}
 	return t, nil
@@ -112,6 +116,7 @@ type xmlConfig struct {
 	Display     string `xml:"Display,attr"`
 	Required    string `xml:"Required,attr"`
 	Mask        string `xml:"Mask,attr"`
+	Bind        string `xml:"Bind,attr"`
 	Value       string `xml:",chardata"`
 }
 
@@ -295,6 +300,7 @@ func expandConfig(raw TemplateConfig, paths PathMap, rewrote *bool) []Config {
 			c.ContainerPort = ctr
 			c.HostPort = host
 			c.Proto = proto
+			c.HostIP = strings.TrimSpace(raw.Bind)
 			out = append(out, c)
 		}
 		return out
