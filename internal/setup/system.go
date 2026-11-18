@@ -154,6 +154,7 @@ func (s *Service) fillNet(v *View) {
 	gw, gwIf := defaultGateway()
 	v.Gateway = gw
 	v.DNS = dnsServers()
+	mode := s.netMode()
 	for _, ifc := range ifaces {
 		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
 			continue
@@ -169,13 +170,42 @@ func (s *Service) fillNet(v *View) {
 			}
 			v.Iface = ifc.Name
 			v.IP = ipn.IP.String()
-			v.NetMode = "dhcp"
+			v.NetMode = mode
 			v.Backend = s.backend()
 			return
 		}
 	}
-	v.NetMode = "dhcp"
+	v.NetMode = mode
 	v.Backend = s.backend()
+}
+
+// netMode reports whether FELDCORE's own network config pins a static
+// address. It reads only the file FELDCORE writes (netFile), so a hand-rolled
+// config, or none at all, reads as DHCP. This is what the live interface runs,
+// not a remembered choice, so the Settings page matches reality after a static
+// address was applied at first-time setup.
+func (s *Service) netMode() string {
+	var path string
+	switch s.backend() {
+	case "networkd":
+		path = s.etcPath("systemd", "network", "10-feldcore.network")
+	case "ifupdown":
+		path = s.etcPath("network", "interfaces.d", "feldcore")
+	default:
+		return "dhcp"
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "dhcp"
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		// networkd pins an address with "Address="; ifupdown with "inet static".
+		if strings.HasPrefix(line, "Address=") || strings.Contains(line, "inet static") {
+			return "static"
+		}
+	}
+	return "dhcp"
 }
 
 func (s *Service) backend() string {
