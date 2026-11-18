@@ -537,7 +537,48 @@ func ReadUnits(ctx context.Context) ([]Unit, error) {
 	if err != nil && strings.TrimSpace(out) == "" {
 		return nil, Unavailable("Failed units could not be listed.")
 	}
-	return ParseUnits(out), nil
+	units := ParseUnits(out)
+	active, _ := runCmd(ctx, 4*time.Second, "systemctl", "is-active", "nfs-server.service")
+	return DropInactiveNFSHelpers(units, strings.TrimSpace(active) == "active"), nil
+}
+
+// nfsHelperUnits are NFS support daemons that fail harmlessly at boot when no
+// export is configured. FELDCORE starts nfs-server on demand (see
+// internal/shares), which pulls these in when it needs them, so their failure
+// while nfs-server is not active is noise rather than a fault.
+var nfsHelperUnits = map[string]bool{
+	"nfsdcld.service":          true,
+	"rpc-statd.service":        true,
+	"rpc-statd-notify.service": true,
+	"rpc-gssd.service":         true,
+	"nfs-idmapd.service":       true,
+	"nfs-mountd.service":       true,
+	"fsidd.service":            true,
+}
+
+func nfsHelperUnit(name string) bool {
+	name = strings.TrimSpace(name)
+	if !strings.Contains(name, ".") {
+		name += ".service"
+	}
+	return nfsHelperUnits[name]
+}
+
+// DropInactiveNFSHelpers removes NFS support units from a failed-unit list when
+// nfs-server is not active. When NFS is in use, every failure is kept so a real
+// fault still surfaces. nfs-server.service itself is never dropped.
+func DropInactiveNFSHelpers(units []Unit, nfsActive bool) []Unit {
+	if nfsActive {
+		return units
+	}
+	out := make([]Unit, 0, len(units))
+	for _, u := range units {
+		if nfsHelperUnit(u.Name) {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // ParseUnits reads `systemctl list-units --failed --plain --no-legend`.
