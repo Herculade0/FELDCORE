@@ -95,5 +95,31 @@ fi
 }
 
 mkdir -p "$(dirname "${out}")"
-mksquashfs "${work}/tree" "${out}" -noappend -comp zstd
-echo "wrote ${out}"
+
+# dpkg-deb -x (and cp -a from a root-owned driver dir) populate the tree as
+# root, so it is root-owned. mksquashfs must run with the same privilege;
+# otherwise it cannot stat tree/usr, tree/lib and tree/etc, prints
+# "Permission denied, ignoring" for each, and silently writes an empty ~4 KiB
+# image. First assert the payload actually landed, so an empty tree fails the
+# build loudly instead of shipping a hollow extension.
+payload=$(sudo find "${work}/tree" -mindepth 1 \
+	-path "${work}/tree/usr/lib/extension-release.d" -prune -o \
+	-type f -print -quit 2>/dev/null || true)
+[[ -n ${payload} ]] || {
+	echo "sysext ${id}: no payload files under ${work}/tree; refusing to pack an empty image." >&2
+	exit 1
+}
+
+sudo mksquashfs "${work}/tree" "${out}" -noappend -comp zstd
+sudo chown "$(id -u):$(id -g)" "${out}"
+
+# Guard against a silently empty image whatever the cause. A real extension is
+# tens of KiB or larger; an empty squashfs is about 4 KiB. This floor matches
+# os/check-sysexts.sh.
+bytes=$(stat -c %s "${out}")
+((bytes >= 65536)) || {
+	echo "sysext ${id}: ${out} is ${bytes} bytes, too small to be a real extension (empty squashfs?)." >&2
+	exit 1
+}
+
+echo "wrote ${out} (${bytes} bytes)"
